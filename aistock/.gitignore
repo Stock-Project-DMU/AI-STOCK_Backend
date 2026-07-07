@@ -38,3 +38,11 @@ out/
 
 .idea/
 *.iml
+
+### Env / Secrets ###
+.env
+.env.*
+*.env
+
+### Logs ###
+*.log

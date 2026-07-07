@@ -1,0 +1,27 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: aistock-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: aistock
+      MYSQL_USER: aistock
+      MYSQL_PASSWORD: aistock
+      MYSQL_ROOT_PASSWORD: aistock
+    ports:
+      - "3306:3306"
+    volumes:
+      - aistock-mysql-data:/var/lib/mysql
+
+  redis:
+    image: redis:7
+    container_name: aistock-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - aistock-redis-data:/data
+
+volumes:
+  aistock-mysql-data:
+  aistock-redis-data:
