@@ -16,7 +16,7 @@
 
 ## 2. 기술 스택
 
-- **백엔드**: Spring Boot 3.x (Java 17), JPA, Spring Security, WebSocket/STOMP
+- **백엔드**: Spring Boot 3.x (Java 21), JPA, Spring Security, WebSocket/STOMP
 - **DB**: MySQL (AWS RDS), Redis (AWS ElastiCache)
 - **외부 API**: LS증권 OpenAPI(WebSocket 시세), Gemini API, Open DART, Tavily, OAuth(카카오/네이버/구글)
 - **인프라**: AWS EC2, AWS Parameter Store, Docker Compose(로컬)
@@ -42,7 +42,7 @@ gradlew.bat build        # Windows
 ./gradlew test
 ```
 
-- Java 버전은 **17로 통일** (build.gradle toolchain과 CI 워크플로우 모두 17)
+- Java 버전은 **21로 통일** (build.gradle toolchain과 CI 워크플로우 모두 21)
 - CI: `.github/workflows/backend-ci.yml` — working-directory는 `aistock`
 - 민감한 값(JWT_SECRET, API 키)은 `.env` 또는 IDE 환경변수로 주입. 코드·yml에 하드코딩 금지.
 
