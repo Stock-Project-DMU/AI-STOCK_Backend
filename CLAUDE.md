@@ -62,12 +62,12 @@ com.teamfp.aistock
 │   └── notification  → controller, service, repository, entity, dto
 ├── global
 │   ├── config        → SecurityConfig, RedisConfig, WebSocketConfig, AsyncConfig, JpaConfig, AwsParameterStoreConfig
-│   ├── security      → JwtProvider, JwtAuthenticationFilter, CustomUserDetailsService
-│   ├── stomp         → StompAuthInterceptor
-│   ├── exception     → CustomException, ErrorCode, GlobalExceptionHandler
-│   ├── response      → ApiResponse
-│   ├── redis         → RedisTokenService, RedisAuthCodeService, RedisStockCacheService, RedisPendingOrderService, RedisRateLimiterService
-│   └── util          → DateUtil, SecurityUtil
+│   ├── security       → JwtProvider, JwtAuthenticationFilter, CustomUserDetailsService
+│   ├── stomp          → StompAuthInterceptor
+│   ├── exception      → CustomException, ErrorCode, GlobalExceptionHandler
+│   ├── response       → ApiResponse
+│   ├── redis          → RedisTokenService, RedisAuthCodeService, RedisStockCacheService, RedisPendingOrderService, RedisRateLimiterService
+│   └── util           → DateUtil, SecurityUtil
 ├── infra
 │   ├── ls            → LsWebSocketClient, LsWebSocketHandler, LsReconnectService, dto
 │   ├── gemini        → GeminiApiClient, dto
@@ -166,6 +166,11 @@ GET    /api/stocks/{stockCode}
 - `orders.status` — `PENDING` / `EXECUTED` / `CANCELLED`
 - Entity에는 JPA Auditing으로 `created_at`, `updated_at` 자동 처리 (`JpaConfig`)
 - 삭제는 soft delete(`deleted_at`) 원칙 (users)
+- **주의**: users의 soft delete는 FK `ON DELETE CASCADE`를 발동시키지 않는다. 탈퇴 처리 시
+  자식 테이블(social_accounts, investment_profile, accounts, watchlist,
+  ai_planning_sessions, simulations, recent_viewed, notifications)은
+  탈퇴 서비스 로직에서 명시적으로 삭제해야 한다. (자세한 순서는 schema.sql의
+  users 테이블 상단 주석 참고)
 
 ---
 
@@ -174,13 +179,14 @@ GET    /api/stocks/{stockCode}
 | 키 | TTL | 용도 |
 |---|---|---|
 | `auth:refresh:{userId}` | 14일 | Refresh Token |
-| `auth:blacklist:{accessToken}` | 30분 | 로그아웃 블랙리스트 |
+| `auth:blacklist:{accessToken}` | Access Token 남은 유효시간(동적) | 로그아웃 블랙리스트 |
 | `auth:email_code:{email}` | 5분 | 이메일 인증코드 |
 | `auth:login_fail:{loginId}` | 10분 | 로그인 실패 카운터 (5회 잠금) |
 | `stock:price:{stockCode}` | 5초 | 현재가 캐시 |
 | `stock:hoga:{stockCode}` | 2초 | 호가 캐시 |
 | `pending:orders:{stockCode}` | 없음 | 지정가 미체결 주문 |
-| `gemini:rate:{userId}` | 1분/1일 | Gemini Rate Limiter (분당 3회, 일일 10회) |
+| `gemini:rate:{userId}:minute` | 1분 | Gemini Rate Limiter (분당 3회) |
+| `gemini:rate:{userId}:daily` | 1일 | Gemini Rate Limiter (일일 10회) |
 
 - Redis 접근은 반드시 `global/redis`의 5개 서비스 클래스를 통해서만 한다.
 - 도메인 서비스에서 RedisTemplate 직접 주입 금지.
@@ -240,6 +246,7 @@ type: 작업 내용
 - [ ] 관련 페이지 이동 확인
 - [ ] API 연동 정상 동작 확인
 - [ ] 오류 또는 경고 메시지 확인
+- [ ] NAMING.md와 실제 코드(클래스/메서드/필드명) 일치 여부 확인
 
 ## 참고 사항
 -
@@ -262,3 +269,20 @@ type: 작업 내용
 - 도메인 서비스에서 RedisTemplate·외부 API를 직접 호출하지 않는다 (반드시 global/redis, infra 경유).
 - 부분 코드/생략 없이 완성된(바로 실행 가능한) 코드를 제공한다.
 - 모든 응답과 코드 주석은 **한국어**로 작성한다.
+
+---
+
+## 11. 네이밍 카탈로그
+
+- 전체 클래스명·메서드명·변수명·필드명·API 경로는 `NAMING.md`(이 문서와 같은 경로)를 따른다.
+- 새 클래스·메서드·필드·엔드포인트가 필요하면 코드를 작성하기 전에 먼저
+  `NAMING.md`에 추가한다. 문서에 없는 이름을 임의로 만들지 않는다.
+- 작업 중 계획이 바뀌어 `NAMING.md`에 등록해둔 이름을 실제로는 쓰지 않게 됐다면,
+  해당 PR 안에서 `NAMING.md`의 관련 항목도 함께 삭제한다. 코드와 `NAMING.md`가
+  어긋난 상태로 `dev`에 병합하지 않는다.
+- 리뷰어(PM)는 PR 리뷰 시 변경된 클래스·메서드·필드가 `NAMING.md`와 일치하는지
+  함께 확인한다. 새 이름이 추가됐는데 문서 반영이 빠졌거나, 반대로 문서에는
+  남아있는데 코드에서 삭제된 이름이 있으면 merge 전에 정정을 요청한다.
+- 즉, `NAMING.md`는 "코딩 전 사전 등록 → 코딩 중 사용 → PR 시점에 실제 코드와
+  동기화"의 흐름으로 항상 최신 상태를 유지한다. 정기적인 전수 스캔·일괄 정리는
+  하지 않는다.
