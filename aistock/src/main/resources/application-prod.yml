@@ -18,4 +18,4 @@ spring:
 
 logging:
   level:
-    com.TeamFP.aistock: info
+    com.teamfp.aistock: info

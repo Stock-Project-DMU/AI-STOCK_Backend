@@ -16,7 +16,7 @@
 
 ## 2. 기술 스택
 
-- **백엔드**: Spring Boot 3.x (Java 21), JPA, Spring Security, WebSocket/STOMP
+- **백엔드**: Spring Boot 4.0.6 (Java 21), JPA, Spring Security, WebSocket/STOMP
 - **DB**: MySQL (AWS RDS), Redis (AWS ElastiCache)
 - **외부 API**: LS증권 OpenAPI(WebSocket 시세), Gemini API, Open DART, Tavily, OAuth(카카오/네이버/구글)
 - **인프라**: AWS EC2, AWS Parameter Store, Docker Compose(로컬)

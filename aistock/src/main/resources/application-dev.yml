@@ -21,4 +21,4 @@ spring:
 
 logging:
   level:
-    com.TeamFP.aistock: debug
+    com.teamfp.aistock: debug
