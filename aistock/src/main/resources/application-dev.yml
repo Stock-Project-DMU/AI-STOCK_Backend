@@ -18,6 +18,13 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}   # 로컬은 인증 없음 → 기본값 빈 문자열
+      lettuce:
+        pool:                       # Lettuce 커넥션 풀 설정 (RedisConfig가 오토설정으로 읽음)
+          max-active: 10
+          max-idle: 5
+          min-idle: 1
+          max-wait: -1ms
 
 logging:
   level:

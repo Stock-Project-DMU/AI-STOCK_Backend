@@ -15,6 +15,13 @@ spring:
     redis:
       host: ${REDIS_HOST}
       port: ${REDIS_PORT}
+      password: ${REDIS_PASSWORD}    # AWS ElastiCache AUTH 비밀번호
+      lettuce:
+        pool:                       # Lettuce 커넥션 풀 설정 (RedisConfig가 오토설정으로 읽음)
+          max-active: 10
+          max-idle: 5
+          min-idle: 1
+          max-wait: -1ms
 
 logging:
   level:
