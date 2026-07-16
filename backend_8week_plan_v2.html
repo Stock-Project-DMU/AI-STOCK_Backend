@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI STOCK 백엔드 개발 계획 — 전원 동시 시작</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Apple SD Gothic Neo','Malgun Gothic',-apple-system,BlinkMacSystemFont,sans-serif;
+    background:#121212; color:#e4e4e6; padding:48px 32px 80px;
+  }
+  .wrap { max-width:1360px; margin:0 auto; }
+  header { margin-bottom:30px; }
+  .eyebrow {
+    display:inline-block; font-size:12px; font-weight:700; letter-spacing:2px;
+    color:#aaa; background:#1e1e20; border:1px solid #303032;
+    padding:5px 12px; border-radius:20px; margin-bottom:16px;
+  }
+  h1 { font-size:32px; font-weight:800; letter-spacing:-0.5px; margin-bottom:8px; color:#f2f2f3; }
+  .subtitle { font-size:14.5px; color:#8f8f93; line-height:1.75; max-width:800px; }
+
+  .fix-box {
+    margin:24px 0 32px; background:#1a1a1c; border:1px solid #333335; border-left:3px solid #c8c8cc;
+    border-radius:0 12px 12px 0; padding:18px 22px;
+  }
+  .fix-box .tag { font-size:11px; font-weight:800; letter-spacing:1px; color:#c8c8cc; margin-bottom:8px; }
+  .fix-box p { font-size:13px; color:#a0a0a4; line-height:1.7; }
+
+  .principles { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin:26px 0 36px; }
+  .principle { background:#1a1a1c; border:1px solid #2a2a2c; border-radius:12px; padding:18px 20px; }
+  .principle .num { font-size:11px; font-weight:800; color:#b8b8bc; letter-spacing:1px; margin-bottom:8px; }
+  .principle .txt { font-size:12.5px; line-height:1.6; color:#9a9a9e; }
+
+  .legend { display:flex; align-items:center; gap:14px; margin-bottom:22px; font-size:12px; color:#8f8f93; flex-wrap:wrap; }
+  .badge { display:inline-flex; align-items:center; padding:3px 10px; border-radius:5px; font-size:11px; font-weight:700; letter-spacing:0.3px; }
+  .b-easy { background:#242426; color:#a8a8ac; border:1px solid #333335; }
+  .b-mid  { background:#333335; color:#d4d4d6; border:1px solid #444446; }
+  .b-hard { background:#e4e4e6; color:#121212; border:1px solid #e4e4e6; }
+
+  .phase-label {
+    font-size:13px; font-weight:800; color:#c8c8cc; letter-spacing:0.5px;
+    margin:34px 0 12px; padding-bottom:8px; border-bottom:1px solid #2a2a2c;
+  }
+
+  .board { display:grid; grid-template-columns: 84px repeat(3,1fr); gap:9px; }
+  .person-head {
+    padding:15px 18px; border-radius:12px 12px 0 0; font-size:14px; font-weight:800;
+    text-align:center; letter-spacing:0.3px; background:#1e1e20; color:#f2f2f3; border-top:3px solid #555;
+  }
+  .ph-a { border-top-color:#8a8a8e; }
+  .ph-b { border-top-color:#6a6a6e; }
+  .ph-c { border-top-color:#c8c8cc; }
+  .person-head .role { display:block; font-size:10.5px; font-weight:600; color:#8f8f93; margin-top:3px; letter-spacing:0; }
+
+  .week-label { display:flex; align-items:center; justify-content:center; }
+  .week-label .wk-box {
+    background:#1a1a1c; border:1px solid #2a2a2c; border-radius:8px; width:52px; height:100%; min-height:100px;
+    display:flex; align-items:center; justify-content:center; flex-direction:column; gap:2px;
+  }
+  .week-label .wk-num { font-size:16px; font-weight:900; color:#e4e4e6; }
+  .week-label .wk-txt { font-size:9px; color:#6f6f73; }
+
+  .cell {
+    background:#1a1a1c; border:1px solid #2a2a2c; border-radius:10px; padding:12px 14px;
+    min-height:100px; display:flex; flex-direction:column; gap:5px;
+  }
+  .cell.split { gap:8px; }
+  .sub { border-top:1px dashed #2a2a2c; padding-top:7px; margin-top:1px; }
+  .sub:first-child { border-top:none; padding-top:0; margin-top:0; }
+  .row-top { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .branch-tag {
+    font-size:11px; font-weight:700; font-family:'SFMono-Regular',Consolas,monospace;
+    color:#e4e4e6; background:#242426; border:1px solid #333335; border-radius:6px; padding:3px 7px;
+  }
+  .diff-badge { font-size:9px; font-weight:800; padding:2px 6px; border-radius:4px; letter-spacing:0.3px; }
+  .diff-easy { background:#242426; color:#8f8f93; border:1px solid #333335; }
+  .diff-mid  { background:#333335; color:#c8c8cc; border:1px solid #444446; }
+  .diff-hard { background:#e4e4e6; color:#121212; }
+  .cell-desc { font-size:11px; color:#a0a0a4; line-height:1.5; }
+  .cell-note { font-size:10px; color:#6f6f73; line-height:1.5; }
+  .cell-note b { color:#b8b8bc; }
+
+  .summary { margin-top:38px; background:#1a1a1c; border:1px solid #2a2a2c; border-radius:14px; padding:26px 28px; }
+  .summary h2 { font-size:15px; margin-bottom:14px; color:#f2f2f3; }
+  .summary ul { list-style:none; display:grid; grid-template-columns:repeat(2,1fr); gap:10px 28px; }
+  .summary li { font-size:12.5px; color:#9a9a9e; line-height:1.6; padding-left:15px; position:relative; }
+  .summary li::before { content:'—'; position:absolute; left:0; color:#6f6f73; }
+
+  @media (max-width: 1100px) {
+    .board { grid-template-columns: 56px repeat(3,1fr); }
+    .principles { grid-template-columns:1fr; }
+    .summary ul { grid-template-columns:1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <span class="eyebrow">AI STOCK · TEAM FP BACKEND</span>
+    <h1>백엔드 개발 계획 — 전원 동시 시작</h1>
+    <p class="subtitle">
+      A·B·C 세 명 모두 1주차부터 실제 코드를 작성합니다. 대기 주차를 없애기 위해
+      "서로의 결과물이 필요 없는 독립 작업"을 각자에게 먼저 배분하고, 뒤로 갈수록
+      자연스럽게 서로의 결과물을 이어받는 순서로 재구성했어요.
+    </p>
+  </header>
+
+  <div class="fix-box">
+    <div class="tag">무엇이 바뀌었나</div>
+    <p>
+      이전 계획은 project-init 하나가 끝나야 다음 사람이 시작할 수 있다고 가정해서
+      B·C가 1~2주차를 통째로 대기했어요. 하지만 실제로는 project-init 이후
+      db-entity · jwt-common · redis-config · common-response · websocket-config 는
+      서로를 필요로 하지 않는 완전히 독립된 작업이에요. 이 5개를 1주차에 동시에
+      나눠 배정해서 대기 시간을 없앴습니다.
+    </p>
+  </div>
+
+  <div class="principles">
+    <div class="principle">
+      <div class="num">01 — 독립 작업부터 먼저</div>
+      <div class="txt">project-init만 끝나면 db-entity·jwt-common·redis-config·common-response·websocket-config는 서로 필요 없이 동시에 시작 가능합니다.</div>
+    </div>
+    <div class="principle">
+      <div class="num">02 — 이어받는 작업은 순서대로</div>
+      <div class="txt">auth-login처럼 여러 결과물이 필요한 기능은, 필요한 것들이 이미 앞주에 끝나 있도록 배치해 대기 없이 바로 시작합니다.</div>
+    </div>
+    <div class="principle">
+      <div class="num">03 — 6주 집중 개발 + 2주 통합</div>
+      <div class="txt">21개 브랜치를 6주 안에 나눠 끝내고, 남은 2주는 세 명 모두 통합 테스트·버그 수정에 집중합니다.</div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span class="badge b-easy">쉬움</span><span>무리 없이 진행 가능</span>
+    <span class="badge b-mid">보통</span><span>개념 이해 + 구현 병행</span>
+    <span class="badge b-hard">어려움</span><span>설계 경험이 필요한 구간</span>
+  </div>
+
+  <div class="phase-label">PHASE 1 — 집중 개발 (1~6주차, 전원 동시 진행)</div>
+
+  <div class="board">
+    <div></div>
+    <div class="person-head ph-a">팀원 A<span class="role">기반 구축 · 주문 트랙</span></div>
+    <div class="person-head ph-b">팀원 B<span class="role">인프라 · 실시간 트랙</span></div>
+    <div class="person-head ph-c">팀원 C<span class="role">인증 · 조회 트랙</span></div>
+
+    <!-- W1 -->
+    <div class="week-label"><div class="wk-box"><span class="wk-num">1</span><span class="wk-txt">주차</span></div></div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">chore/db-entity</span><span class="diff-badge diff-hard">어려움</span></div>
+      <div class="cell-desc">12개 테이블 Entity + Repository, JpaConfig</div>
+      <div class="cell-note">project-init(0일차, 3인 공동 3파일 분담)만 끝나면 바로 시작</div>
+    </div>
+    <div class="cell split">
+      <div class="sub">
+        <div class="row-top"><span class="branch-tag">feature/jwt-common</span><span class="diff-badge diff-hard">어려움</span></div>
+        <div class="cell-desc">JwtProvider, JwtAuthenticationFilter, CustomUserDetailsService</div>
+      </div>
+      <div class="sub">
+        <div class="row-top"><span class="branch-tag">chore/redis-config</span><span class="diff-badge diff-easy">쉬움</span></div>
+        <div class="cell-desc">RedisTemplate 빈 등록 (짧은 작업)</div>
+      </div>
+    </div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">feature/common-response</span><span class="diff-badge diff-mid">보통</span></div>
+      <div class="cell-desc">ApiResponse, ErrorCode, CustomException, GlobalExceptionHandler</div>
+      <div class="cell-note">A·B와 파일이 전혀 겹치지 않아 첫 주부터 바로 진행 — 대기 없음</div>
+    </div>
+
+    <!-- W2 -->
+    <div class="week-label"><div class="wk-box"><span class="wk-num">2</span><span class="wk-txt">주차</span></div></div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">feature/websocket-config</span><span class="diff-badge diff-mid">보통</span></div>
+      <div class="cell-desc">WebSocketConfig, StompAuthInterceptor, AsyncConfig</div>
+      <div class="cell-note">project-init만 있으면 되는 독립 작업 — B·C와 무관하게 진행</div>
+    </div>
+    <div class="cell split">
+      <div class="sub">
+        <div class="row-top"><span class="branch-tag">feature/security-config</span><span class="diff-badge diff-mid">보통</span></div>
+        <div class="cell-desc">SecurityConfig — 본인의 jwt-common 이어서 작성</div>
+      </div>
+      <div class="sub">
+        <div class="row-top"><span class="branch-tag">redis-service-market</span><span class="diff-badge diff-mid">보통</span></div>
+        <div class="cell-desc">StockCache·PendingOrder·RateLimiter 3종 (본인의 redis-config 이어서)</div>
+      </div>
+    </div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">redis-service-auth</span><span class="diff-badge diff-easy">쉬움</span></div>
+      <div class="cell-desc">RedisTokenService, RedisAuthCodeService 2개</div>
+      <div class="cell-note">B가 1주차에 만든 redis-config만 있으면 시작 가능</div>
+    </div>
+
+    <!-- W3 -->
+    <div class="week-label"><div class="wk-box"><span class="wk-num">3</span><span class="wk-txt">주차</span></div></div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">feature/order-market</span><span class="diff-badge diff-mid">보통</span></div>
+      <div class="cell-desc">현재가 주문 — 잔고 검증, 즉시 체결</div>
+      <div class="cell-note">본인의 db-entity(1주차) + C의 common-response(1주차) 완료로 바로 시작</div>
+    </div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">feature/ls-websocket</span><span class="diff-badge diff-hard">어려움</span></div>
+      <div class="cell-desc">LsWebSocketClient/Handler, LsReconnectService, tick DTO 2종</div>
+      <div class="cell-note">가장 난이도 높은 구간 — 온전히 한 주 집중 배정</div>
+    </div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">feature/auth-login</span><span class="diff-badge diff-mid">보통</span></div>
+      <div class="cell-desc">로그인, 소셜 로그인(카카오/네이버/구글), 토큰 재발급</div>
+      <div class="cell-note">필요한 4개(User엔티티·jwt-common·security-config·redis토큰) 전부 2주차까지 완료 — 대기 없이 시작</div>
+    </div>
+
+    <!-- W4 -->
+    <div class="week-label"><div class="wk-box"><span class="wk-num">4</span><span class="wk-txt">주차</span></div></div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">feature/order-limit</span><span class="diff-badge diff-hard">어려움</span></div>
+      <div class="cell-desc">지정가 주문, 체결 조건 확인, 낙관적 락</div>
+      <div class="cell-note">본인의 order-market + B의 PendingOrder(2주차)로 바로 진행</div>
+    </div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">feature/stock-price</span><span class="diff-badge diff-mid">보통</span></div>
+      <div class="cell-desc">StockController, StockService, StockBroadcastService</div>
+      <div class="cell-note">본인의 ls-websocket(3주차)·StockCache(2주차) + A의 websocket-config(2주차)</div>
+    </div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">feature/auth-signup</span><span class="diff-badge diff-easy">쉬움</span></div>
+      <div class="cell-desc">회원가입, 이메일 인증코드 발송·검증</div>
+      <div class="cell-note">본인의 auth-login 이어서 작성 — 같은 사람이라 충돌 없음</div>
+    </div>
+
+    <!-- W5 -->
+    <div class="week-label"><div class="wk-box"><span class="wk-num">5</span><span class="wk-txt">주차</span></div></div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">feature/mypage-account</span><span class="diff-badge diff-mid">보통</span></div>
+      <div class="cell-desc">계좌 조회, 가상캐시 리셋, 관심종목, 최근 본 종목</div>
+      <div class="cell-note">본인의 db-entity(1주차)만 있으면 시작 가능</div>
+    </div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">feature/ai-planning</span><span class="diff-badge diff-hard">어려움</span></div>
+      <div class="cell-desc">Gemini/DART/Tavily 클라이언트 신규 작성 + AI 상담 로직</div>
+      <div class="cell-note">본인의 RateLimiter(2주차) 완료로 진행 — 외부 API 연동은 독립적</div>
+    </div>
+    <div class="cell split">
+      <div class="sub">
+        <div class="row-top"><span class="branch-tag">feature/auth-logout</span><span class="diff-badge diff-easy">쉬움</span></div>
+        <div class="cell-desc">블랙리스트 등록, Refresh Token 삭제</div>
+      </div>
+      <div class="sub">
+        <div class="row-top"><span class="branch-tag">feature/notification</span><span class="diff-badge diff-easy">쉬움</span></div>
+        <div class="cell-desc">알림 조회·읽음 처리, STOMP 유니캐스팅</div>
+      </div>
+    </div>
+
+    <!-- W6 -->
+    <div class="week-label"><div class="wk-box"><span class="wk-num">6</span><span class="wk-txt">주차</span></div></div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">feature/mypage-profit</span><span class="diff-badge diff-mid">보통</span></div>
+      <div class="cell-desc">수익률 조회, 주문 내역, 내 정보 조회·수정</div>
+      <div class="cell-note">order 도메인(3~4주차) 완료 후 진행하면 테스트가 수월함</div>
+    </div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">feature/simulation</span><span class="diff-badge diff-hard">어려움</span></div>
+      <div class="cell-desc">목표 도달 시뮬레이션 — Best/Base/Worst 시나리오</div>
+      <div class="cell-note">본인의 ai-planning(5주차)에서 만든 클라이언트 재사용</div>
+    </div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">feature/ai-news</span><span class="diff-badge diff-easy">쉬움</span></div>
+      <div class="cell-desc">사용자 키워드로 Tavily 즉석 검색</div>
+      <div class="cell-note">B의 ai-planning(5주차)에서 만든 TavilyApiClient 그대로 사용</div>
+    </div>
+  </div>
+
+  <div class="phase-label">PHASE 2 — 통합 · 마무리 (7~8주차, 전원 동시 진행)</div>
+
+  <div class="board">
+    <div></div>
+    <div class="person-head ph-a">팀원 A</div>
+    <div class="person-head ph-b">팀원 B</div>
+    <div class="person-head ph-c">팀원 C</div>
+
+    <div class="week-label"><div class="wk-box"><span class="wk-num">7</span><span class="wk-txt">주차</span></div></div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">통합 테스트</span><span class="diff-badge diff-mid">보통</span></div>
+      <div class="cell-desc">주문·계좌 플로우 전체 점검 및 버그 수정</div>
+      <div class="cell-note">6주차까지 밀린 작업이 있다면 이번 주에 마무리</div>
+    </div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">통합 테스트</span><span class="diff-badge diff-mid">보통</span></div>
+      <div class="cell-desc">실시간 시세·AI 기능 전체 점검 및 버그 수정</div>
+      <div class="cell-note">가장 어려운 구간을 맡았으니 이번 주는 안정화 위주로</div>
+    </div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">통합 테스트</span><span class="diff-badge diff-mid">보통</span></div>
+      <div class="cell-desc">인증·알림·뉴스 플로우 전체 점검 및 버그 수정</div>
+      <div class="cell-note">Postman 컬렉션 정리해서 팀 공용 자산으로 공유</div>
+    </div>
+
+    <div class="week-label"><div class="wk-box"><span class="wk-num">8</span><span class="wk-txt">주차</span></div></div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">최종 점검</span><span class="diff-badge diff-easy">쉬움</span></div>
+      <div class="cell-desc">전체 API 문서화, 코드 리뷰 반영</div>
+    </div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">최종 점검</span><span class="diff-badge diff-easy">쉬움</span></div>
+      <div class="cell-desc">전체 API 문서화, 코드 리뷰 반영</div>
+    </div>
+    <div class="cell">
+      <div class="row-top"><span class="branch-tag">최종 점검</span><span class="diff-badge diff-easy">쉬움</span></div>
+      <div class="cell-desc">전체 API 문서화, 코드 리뷰 반영</div>
+    </div>
+  </div>
+
+  <div class="summary">
+    <h2>운영 원칙 정리</h2>
+    <ul>
+      <li>project-init은 build.gradle(A)·application.yml(B)·gitignore+CI(C) 3파일로 쪼개 첫날 동시에 끝냄</li>
+      <li>1주차부터 세 명 모두 실제 기능 코드 작성 — 이전 계획의 대기 주차를 전부 제거</li>
+      <li>redis-service는 auth용(2개)·market용(3개)으로 나눠 각자 필요한 시점에 스스로 준비</li>
+      <li>같은 사람이 순서대로 하는 작업(auth 3종, order 2종 등)은 파일이 겹쳐도 충돌 없음</li>
+      <li>다른 사람의 결과물이 필요한 작업은 필요한 것들이 이미 전주까지 끝나도록 배치해 대기 없이 시작</li>
+      <li>6주 안에 21개 브랜치 모두 완료, 남은 2주는 전원 통합 테스트·문서화에 집중</li>
+      <li>브랜치 시작 전 항상 dev pull 후 CLAUDE.md·NAMING.md·schema.sql 최신본 확인</li>
+      <li>새 클래스·메서드·필드는 코드 작성 전 NAMING.md에 먼저 등록</li>
+    </ul>
+  </div>
+
+</div>
+</body>
+</html>
