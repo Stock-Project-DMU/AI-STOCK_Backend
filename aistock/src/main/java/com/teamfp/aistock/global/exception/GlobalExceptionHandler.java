@@ -1,5 +1,7 @@
 package com.teamfp.aistock.global.exception;
 
+import java.util.List;
+
 import com.teamfp.aistock.global.response.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -26,8 +28,12 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Void>> handleValidationException(MethodArgumentNotValidException e) {
-        FieldError firstError = e.getBindingResult().getFieldErrors().get(0);
-        String message = firstError != null ? firstError.getDefaultMessage() : ErrorCode.INVALID_INPUT.getMessage();
+        // getFieldErrors()는 필드 단위 검증 실패만 담는다. 클래스 레벨 검증(@AssertTrue 등)만
+        // 실패한 경우 필드 에러가 하나도 없을 수 있으므로, get(0) 대신 안전하게 첫 번째 요소를 꺼낸다.
+        List<FieldError> fieldErrors = e.getBindingResult().getFieldErrors();
+        String message = fieldErrors.isEmpty()
+                ? ErrorCode.INVALID_INPUT.getMessage()
+                : fieldErrors.get(0).getDefaultMessage();
         log.warn("Validation Exception: {}", message);
 
         return ResponseEntity

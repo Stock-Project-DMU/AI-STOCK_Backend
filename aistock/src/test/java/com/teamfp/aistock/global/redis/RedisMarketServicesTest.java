@@ -26,12 +26,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
 /**
- * RedisPendingOrderService / RedisRateLimiterService / RedisStockCacheService 검증용 임시 테스트.
- * ObjectMapper를 tools.jackson(Jackson 3)으로 교체한 뒤 직렬화/역직렬화가 정상 동작하는지 확인하는 목적.
- * 검증 완료 후 삭제 예정 (임시 테스트 코드).
+ * RedisPendingOrderService / RedisRateLimiterService / RedisStockCacheService 검증 테스트.
+ * ObjectMapper를 tools.jackson(Jackson 3)으로 교체한 뒤 직렬화/역직렬화가 정상 동작하는지 확인한다.
  */
 @ExtendWith(MockitoExtension.class)
-class RedisMarketServiceTests {
+class RedisMarketServicesTest {
 
     @Mock
     private RedisTemplate<String, String> redisTemplate;

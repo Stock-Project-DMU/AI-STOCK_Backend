@@ -16,7 +16,9 @@ public class CustomUserDetailsService implements UserDetailsService {
 
     @Override
     public CustomUserDetails loadUserByUsername(String userId) {
-        User user = userRepository.findById(Long.valueOf(userId))
+        // 탈퇴(is_active=0)한 사용자는 매 요청마다 이 조회에서 걸러지므로,
+        // 이미 발급된 Access/Refresh Token이 만료 전이더라도 탈퇴 이후 인증이 통과되지 않는다.
+        User user = userRepository.findByUserIdAndIsActiveTrue(Long.valueOf(userId))
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
 
         return new CustomUserDetails(user.getUserId(), user.getRole());

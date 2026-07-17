@@ -42,7 +42,7 @@ import lombok.extern.slf4j.Slf4j;
  * </pre>
  *
  * <p>체결/취소 시점에는 DB 갱신과 Redis 리스트 제거를 같은 처리 흐름 안에서 함께 수행하므로
- * (OrderExcutionService 쪽에서 execute/cancel 후 removePendingOrder 호출),
+ * (OrderExecutionService 쪽에서 execute/cancel 후 removePendingOrder 호출),
  * 별도의 배치 동기화 작업 없이도 DB와 Redis 상태가 항상 일치하게 유지된다.</p>
  */
 @Slf4j
@@ -84,7 +84,11 @@ public class RedisPendingOrderService {
         }
 
         // 2) DB의 PENDING 주문을 전부 조회해서 종목코드별 리스트로 재적재
-        List<Order> pendingOrders = orderRepository.findAllByStatus(OrderStatus.PENDING);
+        // account, account.user를 fetch join으로 함께 로딩해야 한다.
+        // findAllByStatus()는 이 리포지토리 메서드 호출 동안만 트랜잭션이 열려있어서,
+        // 메서드가 리턴된 뒤 아래 for문에서 LAZY 프록시(order.getAccount().getUser())를
+        // 건드리면 세션이 이미 닫힌 상태라 LazyInitializationException이 발생한다.
+        List<Order> pendingOrders = orderRepository.findAllByStatusWithAccountAndUser(OrderStatus.PENDING);
         for (Order order : pendingOrders) {
             try {
                 PendingOrderDto dto = PendingOrderDto.builder()
