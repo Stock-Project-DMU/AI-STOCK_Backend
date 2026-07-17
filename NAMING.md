@@ -141,6 +141,16 @@
 빈 메서드: `securityFilterChain(HttpSecurity http)`, `corsConfigurationSource()`,
 `passwordEncoder()` (`BCryptPasswordEncoder`)
 
+### `JwtAuthenticationEntryPoint`
+필드: `objectMapper`
+메서드: `commence(HttpServletRequest request, HttpServletResponse response, AuthenticationException authException)`
+— 미인증(토큰 없음/무효) 시 401 + `ApiResponse.error(ErrorCode.INVALID_TOKEN)` 응답
+
+### `JwtAccessDeniedHandler`
+필드: `objectMapper`
+메서드: `handle(HttpServletRequest request, HttpServletResponse response, AccessDeniedException accessDeniedException)`
+— 인증은 됐으나 권한 부족 시 403 + `ApiResponse.error(ErrorCode.ACCESS_DENIED)` 응답
+
 ---
 
 ## 5. feature/websocket-config
