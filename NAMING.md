@@ -107,6 +107,7 @@
 | `INSUFFICIENT_HOLDING` | 400 |
 | `ORDER_NOT_FOUND` | 404 |
 | `STOCK_NOT_FOUND` | 404 |
+| `RESOURCE_NOT_FOUND` | 404 |
 | `OPTIMISTIC_LOCK_CONFLICT` | 409 |
 | `GEMINI_RATE_LIMIT_EXCEEDED` | 429 |
 | `REDIS_SERIALIZATION_ERROR` | 500 |
@@ -115,7 +116,7 @@
 
 ### 2-3. 예외/핸들러
 - `CustomException(ErrorCode errorCode)`, `CustomException(ErrorCode errorCode, Throwable cause)`
-- `GlobalExceptionHandler` 메서드: `handleCustomException(CustomException e)`, `handleValidationException(MethodArgumentNotValidException e)`, `handleException(Exception e)`
+- `GlobalExceptionHandler` 메서드: `handleCustomException(CustomException e)`, `handleValidationException(MethodArgumentNotValidException e)`, `handleNoResourceFoundException(NoResourceFoundException e)`, `handleException(Exception e)`
 
 ---
 

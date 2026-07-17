@@ -8,6 +8,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @Slf4j
 @RestControllerAdvice
@@ -32,6 +33,20 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .body(ApiResponse.error(message));
+    }
+
+    // 매핑된 컨트롤러가 없는 요청(예: 아직 구현되지 않은 API 경로 호출)은
+    // Spring MVC가 정적 리소스 처리기를 거치며 NoResourceFoundException을 던진다.
+    // 이걸 아래 handleException(Exception)이 그대로 잡으면 500으로 응답해버리므로
+    // 여기서 먼저 404로 처리한다.
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoResourceFoundException(NoResourceFoundException e) {
+        ErrorCode errorCode = ErrorCode.RESOURCE_NOT_FOUND;
+        log.warn("No Resource Found: {}", e.getMessage());
+
+        return ResponseEntity
+                .status(errorCode.getStatus())
+                .body(ApiResponse.error(errorCode.getMessage()));
     }
 
     @ExceptionHandler(Exception.class)
