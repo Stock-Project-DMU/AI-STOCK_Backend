@@ -68,7 +68,7 @@
 | `InvestmentProfileRepository` | `findByUserId(Long userId)`, `deleteByUserId(Long userId)` |
 | `AccountRepository` | `findByUserId(Long userId)`, `findByAccountNumber(String accountNumber)`, `deleteByUserId(Long userId)` |
 | `HoldingRepository` | `findAllByAccountId(Long accountId)`, `findByAccountIdAndStockCode(Long accountId, String stockCode)` |
-| `OrderRepository` | `findAllByStatus(OrderStatus status)`, `findAllByStockCodeAndStatus(String stockCode, OrderStatus status)`, `findAllByAccountIdOrderByOrderedAtDesc(Long accountId)`, `findByOrderIdAndAccountId(Long orderId, Long accountId)` |
+| `OrderRepository` | `findAllByStockCodeAndStatus(String stockCode, OrderStatus status)`, `findAllByAccountIdOrderByOrderedAtDesc(Long accountId)`, `findByOrderIdAndAccountId(Long orderId, Long accountId)`, `findAllByStatusWithAccountAndUser(OrderStatus status)` |
 | `WatchlistRepository` | `findAllByUserId(Long userId)`, `existsByUserIdAndStockCode(Long userId, String stockCode)`, `deleteByUserIdAndStockCode(Long userId, String stockCode)`, `deleteByUserId(Long userId)` |
 | `AiPlanningSessionRepository` | `findAllByUserIdOrderByUpdatedAtDesc(Long userId)`, `findByUserIdAndSessionId(Long userId, Long sessionId)`, `deleteByUserId(Long userId)` |
 | `AiPlanningMessageRepository` | `findAllBySessionIdOrderByCreatedAtAsc(Long sessionId)` |
@@ -125,14 +125,15 @@
 ### `JwtProvider`
 메서드: `createAccessToken(Long userId, Role role)`, `createRefreshToken(Long userId)`,
 `validateToken(String token)`, `getUserId(String token)`, `getRole(String token)`,
-`getRemainingMillis(String token)`, `resolveToken(HttpServletRequest request)`
+`getRemainingMillis(String token)`, `resolveToken(HttpServletRequest request)`,
+`extractBearerToken(String headerValue)` (HTTP/STOMP 공통 "Bearer " 접두어 제거 로직, StompAuthInterceptor에서도 사용)
 
 ### `JwtAuthenticationFilter`
 메서드: `doFilterInternal(...)` (Spring 표준 오버라이드)
 
 ### `CustomUserDetailsService`
-메서드: `loadUserByUsername(String userId)` → 내부적으로 `UserRepository.findById` 사용,
-반환 타입은 `CustomUserDetails`(userId, role 보유)
+메서드: `loadUserByUsername(String userId)` → 내부적으로 `UserRepository.findByUserIdAndIsActiveTrue` 사용
+(탈퇴 계정은 매 요청마다 인증 거부되도록 함), 반환 타입은 `CustomUserDetails`(userId, role 보유)
 
 ---
 
@@ -141,6 +142,16 @@
 ### `SecurityConfig`
 빈 메서드: `securityFilterChain(HttpSecurity http)`, `corsConfigurationSource()`,
 `passwordEncoder()` (`BCryptPasswordEncoder`)
+
+### `JwtAuthenticationEntryPoint`
+필드: `objectMapper`
+메서드: `commence(HttpServletRequest request, HttpServletResponse response, AuthenticationException authException)`
+— 미인증(토큰 없음/무효) 시 401 + `ApiResponse.error(ErrorCode.INVALID_TOKEN)` 응답
+
+### `JwtAccessDeniedHandler`
+필드: `objectMapper`
+메서드: `handle(HttpServletRequest request, HttpServletResponse response, AccessDeniedException accessDeniedException)`
+— 인증은 됐으나 권한 부족 시 403 + `ApiResponse.error(ErrorCode.ACCESS_DENIED)` 응답
 
 ---
 
@@ -155,6 +166,16 @@ STOMP 엔드포인트: `/ws-stomp`
 
 ### `AsyncConfig`
 빈: `tickTaskExecutor()` — 스레드풀 이름 prefix `tick-executor-`
+
+### `RedisConfig`
+빈: `redisTemplate(RedisConnectionFactory factory)` — Key/Value/Hash 전부 `StringRedisSerializer`.
+`RedisConnectionFactory`는 커스텀 빈으로 정의하지 않고 Spring Boot Data Redis 오토설정에 위임한다.
+
+### `JpaConfig`
+`@EnableJpaAuditing`만 선언 (Entity의 `@CreatedDate`/`@LastModifiedDate` 활성화 용도, 별도 빈 없음)
+
+### `AwsParameterStoreConfig`
+AWS Parameter Store에서 민감한 설정값(JWT_SECRET, DB 자격증명 등)을 읽어오는 설정 (구현 예정)
 
 ---
 
@@ -182,7 +203,7 @@ redis-logic.md(수정본) 기준 확정된 이름 그대로 사용:
 | `RedisPendingOrderService` | `initPendingOrders`, `addPendingOrder`, `getPendingOrders`, `removePendingOrder` |
 | `RedisRateLimiterService` | `isAllowed`, `increment`, `getRemainingDaily` |
 
-DTO: `StockPriceDto`(stockCode, currentPrice, changeRate, volume), `HogaDto`(stockCode, askPrices, askVolumes, bidPrices, bidVolumes), `PendingOrderDto`(redis-logic.md 확정본과 동일)
+DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRate, volume, updatedAt), `HogaDto`(stockCode, askPrices, askVolumes, bidPrices, bidVolumes, updatedAt), `PendingOrderDto`(redis-logic.md 확정본과 동일)
 
 ---
 

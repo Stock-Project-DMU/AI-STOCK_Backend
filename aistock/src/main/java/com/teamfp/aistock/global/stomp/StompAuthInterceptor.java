@@ -21,8 +21,6 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class StompAuthInterceptor implements ChannelInterceptor {
 
-    private static final String BEARER_PREFIX = "Bearer ";
-
     private final JwtProvider jwtProvider;
     private final CustomUserDetailsService customUserDetailsService;
 
@@ -49,10 +47,6 @@ public class StompAuthInterceptor implements ChannelInterceptor {
     }
 
     private String resolveToken(StompHeaderAccessor accessor) {
-        String bearerToken = accessor.getFirstNativeHeader(HttpHeaders.AUTHORIZATION);
-        if (StringUtils.hasText(bearerToken) && bearerToken.startsWith(BEARER_PREFIX)) {
-            return bearerToken.substring(BEARER_PREFIX.length());
-        }
-        return null;
+        return jwtProvider.extractBearerToken(accessor.getFirstNativeHeader(HttpHeaders.AUTHORIZATION));
     }
 }

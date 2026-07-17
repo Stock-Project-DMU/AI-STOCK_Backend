@@ -85,9 +85,20 @@ public class JwtProvider {
     }
 
     public String resolveToken(HttpServletRequest request) {
-        String bearerToken = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if (StringUtils.hasText(bearerToken) && bearerToken.startsWith(BEARER_PREFIX)) {
-            return bearerToken.substring(BEARER_PREFIX.length());
+        return extractBearerToken(request.getHeader(HttpHeaders.AUTHORIZATION));
+    }
+
+    /**
+     * "Bearer {token}" 형식의 헤더 값에서 순수 토큰만 뽑아낸다.
+     * HTTP({@link #resolveToken})와 STOMP(StompAuthInterceptor) 양쪽에서 같은 헤더 포맷을
+     * 쓰기 때문에 공통 로직으로 뽑아 중복을 없앴다.
+     *
+     * @param headerValue Authorization 헤더 값 (HTTP 헤더든 STOMP 네이티브 헤더든 동일한 문자열)
+     * @return "Bearer " 접두어를 뗀 순수 토큰, 형식이 안 맞으면 null
+     */
+    public String extractBearerToken(String headerValue) {
+        if (StringUtils.hasText(headerValue) && headerValue.startsWith(BEARER_PREFIX)) {
+            return headerValue.substring(BEARER_PREFIX.length());
         }
         return null;
     }

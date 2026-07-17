@@ -179,9 +179,9 @@ public class RedisAuthCodeService {
 
 ## 4. RedisStockCacheService — 실시간 주가/호가 캐시
 
-기존에는 `JsonProcessingException`(checked exception)을 그대로 `throws`로 노출하여, CLAUDE.md의 "예외는 던지고 GlobalExceptionHandler가 처리" 원칙(`CustomException` + `ErrorCode` 체계)과 어긋났다.
+Spring Boot 4/Jackson 3 기준 `tools.jackson.core.JacksonException`(unchecked)을 그대로 노출하면, CLAUDE.md의 "예외는 던지고 GlobalExceptionHandler가 처리" 원칙(`CustomException` + `ErrorCode` 체계)과 어긋난다.
 
-**수정**: 메서드 내부에서 `JsonProcessingException`을 catch한 뒤 `CustomException(ErrorCode.REDIS_SERIALIZATION_ERROR)`로 감싸서 unchecked 예외로 던지도록 변경한다.
+**수정**: 메서드 내부에서 `JacksonException`을 catch한 뒤 `CustomException(ErrorCode.REDIS_SERIALIZATION_ERROR)`로 감싸서 던지도록 변경한다.
 
 > `ErrorCode.REDIS_SERIALIZATION_ERROR` 항목은 아직 존재하지 않으며, `feature/common-response` 브랜치에서 `ErrorCode` enum을 만들 때 함께 추가되어야 한다. (해당 enum 파일 자체는 이 문서의 수정 범위가 아니라 설계 계약으로만 명시)
 
@@ -207,7 +207,7 @@ public class RedisStockCacheService {
                 objectMapper.writeValueAsString(dto),
                 Duration.ofSeconds(PRICE_TTL_SECONDS)
             );
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new CustomException(ErrorCode.REDIS_SERIALIZATION_ERROR, e);
         }
     }
@@ -218,7 +218,7 @@ public class RedisStockCacheService {
         if (json == null) return null;
         try {
             return objectMapper.readValue(json, StockPriceDto.class);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new CustomException(ErrorCode.REDIS_SERIALIZATION_ERROR, e);
         }
     }
@@ -231,7 +231,7 @@ public class RedisStockCacheService {
                 objectMapper.writeValueAsString(dto),
                 Duration.ofSeconds(HOGA_TTL_SECONDS)
             );
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new CustomException(ErrorCode.REDIS_SERIALIZATION_ERROR, e);
         }
     }
@@ -242,7 +242,7 @@ public class RedisStockCacheService {
         if (json == null) return null;
         try {
             return objectMapper.readValue(json, HogaDto.class);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new CustomException(ErrorCode.REDIS_SERIALIZATION_ERROR, e);
         }
     }
@@ -266,7 +266,7 @@ public class RedisStockCacheService {
 **수정 사항**
 1. `@Slf4j` 어노테이션 누락 — `log.error`/`log.info` 사용을 위해 추가
 2. `initPendingOrders()`의 `redisTemplate.keys(PENDING_KEY + "*")`는 Redis를 블로킹시키는 `KEYS` 명령 안티패턴이므로 `SCAN` 커서 기반으로 교체
-3. `JsonProcessingException`을 내부에서 `CustomException(ErrorCode.REDIS_SERIALIZATION_ERROR)`로 감싸서 unchecked로 던지도록 변경 (`ErrorCode.REDIS_SERIALIZATION_ERROR`는 `RedisStockCacheService`와 동일하게 추후 `ErrorCode` enum에 추가 필요)
+3. `JacksonException`을 내부에서 `CustomException(ErrorCode.REDIS_SERIALIZATION_ERROR)`로 감싸서 unchecked로 던지도록 변경 (`ErrorCode.REDIS_SERIALIZATION_ERROR`는 `RedisStockCacheService`와 동일하게 추후 `ErrorCode` enum에 추가 필요)
 
 ```java
 @Slf4j
@@ -296,7 +296,9 @@ public class RedisPendingOrderService {
         }
 
         // DB에서 PENDING 주문 전체 조회 후 재적재
-        List<Order> pendingOrders = orderRepository.findAllByStatus(OrderStatus.PENDING);
+        // account, account.user를 fetch join으로 함께 로딩한다 — 트랜잭션이 끝난 뒤(@PostConstruct)
+        // LAZY 프록시(order.getAccount().getUser())를 건드리면 LazyInitializationException이 나기 때문.
+        List<Order> pendingOrders = orderRepository.findAllByStatusWithAccountAndUser(OrderStatus.PENDING);
         for (Order order : pendingOrders) {
             try {
                 PendingOrderDto dto = PendingOrderDto.builder()
@@ -313,7 +315,7 @@ public class RedisPendingOrderService {
                     PENDING_KEY + order.getStockCode(),
                     objectMapper.writeValueAsString(dto)
                 );
-            } catch (JsonProcessingException e) {
+            } catch (JacksonException e) {
                 log.error("PENDING 주문 재적재 실패: orderId={}", order.getOrderId(), e);
             }
         }
@@ -328,7 +330,7 @@ public class RedisPendingOrderService {
                 objectMapper.writeValueAsString(order)
             );
             // TTL 없음 — 체결 또는 취소 시 직접 제거
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new CustomException(ErrorCode.REDIS_SERIALIZATION_ERROR, e);
         }
     }
@@ -343,7 +345,7 @@ public class RedisPendingOrderService {
             for (String json : jsonList) {
                 result.add(objectMapper.readValue(json, PendingOrderDto.class));
             }
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new CustomException(ErrorCode.REDIS_SERIALIZATION_ERROR, e);
         }
         return result;
@@ -362,7 +364,7 @@ public class RedisPendingOrderService {
                     break;
                 }
             }
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new CustomException(ErrorCode.REDIS_SERIALIZATION_ERROR, e);
         }
     }

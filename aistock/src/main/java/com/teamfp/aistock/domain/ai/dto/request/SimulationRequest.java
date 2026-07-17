@@ -1,4 +1,4 @@
 package com.teamfp.aistock.domain.ai.dto.request;
 
-public class SimulationResponse {
+public class SimulationRequest {
 }
