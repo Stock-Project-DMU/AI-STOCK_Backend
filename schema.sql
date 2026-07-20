@@ -1,5 +1,21 @@
 -- =====================================================
--- AI STOCK MySQL Schema (최종본 v6)
+-- AI STOCK MySQL Schema (최종본 v8)
+-- 변경사항 v7 → v8:
+--   1. inquiries 테이블 신규 추가 (13번째 테이블)
+--      사용자 문의 작성 + 관리자 확인/답변 기능
+--      (관리자 페이지 "문의 관리" 기능에 대응)
+-- =====================================================
+-- 변경사항 v6 → v7:
+--   1. users 테이블에 status 컬럼 추가
+--      (관리자에 의한 로그인 차단 — 기존 is_active/deleted_at의
+--       "본인 탈퇴"와는 별개 개념. 관리자 페이지 사용자 관리 기능)
+--   2. accounts 테이블에 status 컬럼 추가
+--      (관리자에 의한 계좌 기능 정지 — 거래만 차단, 로그인은 가능.
+--       관리자 페이지 계좌 관리 기능)
+--   3. users.role은 기존과 동일하게 유지 (ENUM('USER','ADMIN'))
+--      회원가입 시 role=ADMIN 선택 + 관리자 코드 검증 로직은
+--      서비스 계층(AuthService)에서 처리, 스키마 변경 없음
+-- =====================================================
 -- 변경사항 v5 → v6:
 --   1. market_briefings 테이블 제거
 --      (뉴스 서비스가 Tavily 즉석 검색으로 변경됨)
@@ -34,6 +50,7 @@ USE aistock;
        DELETE FROM simulations            WHERE user_id = ?;
        DELETE FROM recent_viewed          WHERE user_id = ?;
        DELETE FROM notifications          WHERE user_id = ?;
+       DELETE FROM inquiries              WHERE user_id = ?;  -- v8 추가 (answered_by로 참조된 다른 문의는 영향 없음)
        DELETE FROM accounts               WHERE user_id = ?;  -- holdings/orders는 FK CASCADE로 자동 삭제
 
   2) Redis 정리 (RedisTokenService.deleteRefreshToken(userId) 등 호출)
@@ -57,6 +74,13 @@ USE aistock;
   [이메일 NULL 허용 이유]
   카카오는 이메일 동의 거부 가능 → NULL 허용 필요
   UNIQUE 제약 유지 → NULL끼리는 중복 아님 (MySQL 기준)
+
+  [status vs is_active/deleted_at — 개념 구분 (v7 추가)]
+  is_active + deleted_at : 회원 "본인"이 탈퇴한 경우 (soft delete, PII 익명화 동반)
+  status                 : "관리자"가 로그인을 차단한 경우 (정지, PII는 그대로 유지)
+                           탈퇴와 달리 관리자가 다시 ACTIVE로 되돌릴 수 있다.
+  로그인 시 검증 순서: is_active=0(탈퇴) 또는 status='SUSPENDED'(정지) 둘 중
+  하나라도 해당하면 로그인 차단. 에러 메시지는 서비스 계층에서 구분해서 안내.
 */
 CREATE TABLE users (
     user_id     BIGINT          NOT NULL AUTO_INCREMENT,
@@ -67,14 +91,17 @@ CREATE TABLE users (
     email       VARCHAR(100)    UNIQUE,              -- NOT NULL 제거 (소셜 이메일 미제공 대응)
     role        ENUM('USER','ADMIN')
                                 NOT NULL DEFAULT 'USER',
-    is_active   TINYINT(1)      NOT NULL DEFAULT 1,  -- 1=활성, 0=탈퇴
+    status      ENUM('ACTIVE','SUSPENDED')
+                                NOT NULL DEFAULT 'ACTIVE',  -- v7 추가: 관리자에 의한 로그인 차단
+    is_active   TINYINT(1)      NOT NULL DEFAULT 1,  -- 1=활성, 0=탈퇴 (본인 탈퇴 여부)
     deleted_at  DATETIME        NULL,                -- 탈퇴 시각 (활성 회원은 NULL)
     created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP
                                          ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (user_id),
     INDEX idx_email  (email),
-    INDEX idx_active (is_active)
+    INDEX idx_active (is_active),
+    INDEX idx_status (status)                        -- v7 추가: 관리자 페이지 정지 회원 필터링용
 ) ENGINE=InnoDB;
 
 -- =====================================================
@@ -182,6 +209,15 @@ CREATE TABLE investment_profile (
   SET balance = ?, frozen_balance = ?, version = version + 1
   WHERE account_id = ? AND version = ?
   → 충돌 감지 시 재시도 (모의투자 특성상 충돌 빈도 낮음)
+
+  [status 컬럼 — 관리자 계좌 정지 (v7 추가)]
+  users.status(로그인 차단)와는 별개 개념.
+  accounts.status = 'SUSPENDED' 인 경우:
+    - 로그인은 가능 (users.status가 ACTIVE라면)
+    - 매수/매도 주문만 차단 (order-market, order-limit 서비스 계층에서
+      OrderService.createOrder() 진입 시 accounts.status 확인 후
+      SUSPENDED면 CustomException(ErrorCode.ACCOUNT_SUSPENDED) throw)
+    - 조회(마이페이지, 보유종목 등)는 계속 가능
 */
 CREATE TABLE accounts (
     account_id      BIGINT          NOT NULL AUTO_INCREMENT,
@@ -192,8 +228,11 @@ CREATE TABLE accounts (
     balance         BIGINT          NOT NULL DEFAULT 10000000, -- 즉시 사용 가능한 현금 잔고
     frozen_balance  BIGINT          NOT NULL DEFAULT 0,        -- 지정가 주문 예약 잠금 금액
     version         BIGINT          NOT NULL DEFAULT 0,        -- 낙관적 락용 버전 번호
+    status          ENUM('ACTIVE','SUSPENDED')
+                                    NOT NULL DEFAULT 'ACTIVE', -- v7 추가: 관리자에 의한 거래 정지
     created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (account_id),
+    INDEX idx_account_status (status),               -- v7 추가: 관리자 페이지 정지 계좌 필터링용
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
@@ -240,6 +279,11 @@ CREATE TABLE holdings (
   [idx_stock_pending 인덱스]
   tick 수신마다 WHERE stock_code = ? AND status = 'PENDING' 쿼리 실행
   → 빈번한 조회이므로 복합 인덱스 필수
+
+  [관리자 페이지 활용 (v7)]
+  GET /api/admin/trades       : 전체 사용자 주문 목록 (ordered_at DESC)
+  GET /api/admin/trades/{id}  : 주문 상세 (account → user JOIN)
+  GET /api/admin/dashboard    : 최근거래 N건, 총 거래량(SUM/COUNT, status='EXECUTED' 기준)
 */
 CREATE TABLE orders (
     order_id    BIGINT          NOT NULL AUTO_INCREMENT,
@@ -388,7 +432,58 @@ CREATE TABLE notifications (
 ) ENGINE=InnoDB;
 
 -- =====================================================
--- 테이블 관계 요약 (총 12개)
+-- 13. 사용자 문의 (inquiries) — v8 신규
+-- =====================================================
+/*
+  [설계 방향 — 단일 테이블로 문의+답변 통합]
+  문의:답변 = 1:1 관계이고 프로젝트 규모상 문의당 여러 답변(스레드형 댓글)이
+  필요하지 않으므로, 별도 inquiry_answers 테이블 없이 answer 관련 컬럼을
+  inquiries 테이블에 함께 둔다. 추후 다중 답변/재문의가 필요해지면 그때
+  별도 테이블로 분리한다.
+
+  [status 흐름]
+  PENDING  : 사용자가 문의 작성 직후 기본값
+  ANSWERED : 관리자가 답변 작성 시 전환 (answer, answered_by, answered_at 동시 기록)
+
+  [answered_by를 ON DELETE SET NULL로 둔 이유]
+  answered_by는 답변한 관리자의 user_id를 참조한다. 관리자 계정이
+  탈퇴/삭제되어도 문의-답변 기록 자체(질문·답변 내용)는 보존되어야 하므로,
+  참조 무결성 훼손 없이 answered_by만 NULL로 비운다(CASCADE 삭제 금지).
+  반면 user_id(문의 작성자)는 다른 테이블과 동일하게 ON DELETE CASCADE를
+  유지한다 — 탈퇴 시 명시적 삭제 순서는 1번 users 테이블 주석 참고
+  (자식 테이블 목록에 inquiries 추가 필요).
+
+  [관리자 페이지 활용]
+  GET  /api/admin/inquiries              : 전체 문의 목록 (status 필터 가능)
+  GET  /api/admin/inquiries/{inquiryId}  : 문의 상세
+  PATCH /api/admin/inquiries/{inquiryId}/answer : 답변 작성 (status → ANSWERED)
+
+  [사용자 페이지 활용]
+  POST /api/inquiries              : 문의 작성
+  GET  /api/inquiries               : 내 문의 목록 (idx_user_inquiry로 조회)
+  GET  /api/inquiries/{inquiryId}  : 내 문의 상세 (답변 포함)
+*/
+CREATE TABLE inquiries (
+    inquiry_id  BIGINT          NOT NULL AUTO_INCREMENT,
+    user_id     BIGINT          NOT NULL,             -- 문의 작성자
+    title       VARCHAR(200)    NOT NULL,
+    content     TEXT            NOT NULL,
+    status      ENUM('PENDING','ANSWERED') NOT NULL DEFAULT 'PENDING',
+    answer      TEXT            NULL,                 -- 관리자 답변 (미답변=NULL)
+    answered_by BIGINT          NULL,                 -- 답변한 관리자 user_id
+    answered_at DATETIME        NULL,                 -- 답변 시각 (미답변=NULL)
+    created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                         ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (inquiry_id),
+    INDEX idx_user_inquiry (user_id, created_at),      -- 사용자 본인 문의 목록 조회용
+    INDEX idx_inquiry_status (status),                 -- 관리자 페이지 미답변 필터링용
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (answered_by) REFERENCES users(user_id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- =====================================================
+-- 테이블 관계 요약 (총 13개 — v8: inquiries 추가)
 -- =====================================================
 /*
   users 1:1  → investment_profile
@@ -399,6 +494,8 @@ CREATE TABLE notifications (
   users 1:N  → simulations
   users 1:N  → recent_viewed
   users 1:N  → notifications
+  users 1:N  → inquiries (작성자 기준)
+  users 1:N  → inquiries (답변자 기준, answered_by — nullable)
   accounts 1:N → holdings
   accounts 1:N → orders
   ai_planning_sessions 1:N → ai_planning_messages
@@ -412,4 +509,55 @@ CREATE TABLE notifications (
   주식평가 = Σ (holdings.quantity × Redis stock:price:{stockCode})
   총 자산  = 총 현금 + 주식평가
   수익률   = (총 자산 - initial_balance) / initial_balance × 100
+*/
+
+-- =====================================================
+-- 관리자 페이지 참고 쿼리 (v7 추가 — 서버 코드 예시, DDL 아님)
+-- =====================================================
+/*
+  [대시보드 — 총 사용자 수]
+  SELECT COUNT(*) FROM users WHERE is_active = 1;
+
+  [대시보드 — 총 거래량 (실행된 주문 기준)]
+  SELECT COUNT(*) AS trade_count, SUM(exec_price * quantity) AS trade_amount
+  FROM orders WHERE status = 'EXECUTED';
+
+  [대시보드 — 최근 거래 N건]
+  SELECT o.*, u.name, u.login_id
+  FROM orders o
+  JOIN accounts a ON a.account_id = o.account_id
+  JOIN users u ON u.user_id = a.user_id
+  WHERE o.status = 'EXECUTED'
+  ORDER BY o.executed_at DESC
+  LIMIT 20;
+
+  ※ "온라인 사용자 수"는 DB가 아니라 Redis admin:online:users(Set)의
+    SCARD로 조회한다 (redis-logic.md 참고).
+
+  [사용자 관리 — 상세정보 조회 (기본정보+자산현황+보유종목+거래내역)]
+  기본정보 : SELECT * FROM users WHERE user_id = ?;
+  자산현황 : SELECT * FROM accounts WHERE user_id = ?;
+  보유종목 : SELECT h.* FROM holdings h
+             JOIN accounts a ON a.account_id = h.account_id
+             WHERE a.user_id = ?;
+  거래내역 : SELECT o.* FROM orders o
+             JOIN accounts a ON a.account_id = o.account_id
+             WHERE a.user_id = ? ORDER BY o.ordered_at DESC;
+
+  [사용자 관리 — 활성 상태 변경]
+  UPDATE users SET status = ? WHERE user_id = ?;   -- 'ACTIVE' or 'SUSPENDED'
+
+  [계좌 관리 — 기능 정지/해제]
+  UPDATE accounts SET status = ? WHERE account_id = ?;   -- 'ACTIVE' or 'SUSPENDED'
+
+  [문의 관리 — 전체 목록 조회 (v8 추가, 미답변 우선)]
+  SELECT i.*, u.name, u.login_id
+  FROM inquiries i
+  JOIN users u ON u.user_id = i.user_id
+  ORDER BY i.status ASC, i.created_at DESC;  -- PENDING이 ANSWERED보다 사전순 앞이라 미답변이 위로 옴
+
+  [문의 관리 — 답변 작성]
+  UPDATE inquiries
+  SET answer = ?, answered_by = ?, answered_at = NOW(), status = 'ANSWERED'
+  WHERE inquiry_id = ?;
 */

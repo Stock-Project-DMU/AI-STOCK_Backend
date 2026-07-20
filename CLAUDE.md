@@ -7,7 +7,7 @@
 
 ## 1. 프로젝트 개요
 
-- **서비스**: AI STOCK — 모의투자 + AI 재무설계 + AI 맞춤 시황 브리핑 + 목표 도달 시뮬레이션
+- **서비스**: AI STOCK — 모의투자 + AI 재무설계 + AI 맞춤 시황 브리핑 + 목표 도달 시뮬레이션 + 관리자 페이지
 - **팀**: Team FP (Finance Planner)
 - **베이스 패키지**: `com.teamfp.aistock` (전부 소문자)
 - **Gradle 프로젝트 루트**: `aistock/` (저장소 루트가 아님 — IntelliJ에서 열 때 aistock/ 폴더를 Gradle 프로젝트로 열 것)
@@ -59,14 +59,23 @@ com.teamfp.aistock
 │   ├── stock         → controller, service, repository, entity, dto
 │   ├── order         → controller, service, repository, entity, dto
 │   ├── ai            → controller, service, repository, entity, dto
-│   └── notification  → controller, service, repository, entity, dto
+│   ├── notification  → controller, service, repository, entity, dto
+│   ├── inquiry       → controller, service, repository, entity, dto
+│   │                    (사용자 문의 작성·조회 — InquiryController)
+│   └── admin         → controller, service, dto
+│                        (관리자 전용 API. 별도 entity/repository 없이
+│                         기존 도메인의 Repository를 주입받아 재사용:
+│                         AdminDashboardController, AdminTradeController,
+│                         AdminAccountController, AdminUserController,
+│                         AdminInquiryController)
 ├── global
 │   ├── config        → SecurityConfig, RedisConfig, WebSocketConfig, AsyncConfig, JpaConfig, AwsParameterStoreConfig
 │   ├── security       → JwtProvider, JwtAuthenticationFilter, CustomUserDetailsService
 │   ├── stomp          → StompAuthInterceptor
 │   ├── exception      → CustomException, ErrorCode, GlobalExceptionHandler
 │   ├── response       → ApiResponse
-│   ├── redis          → RedisTokenService, RedisAuthCodeService, RedisStockCacheService, RedisPendingOrderService, RedisRateLimiterService
+│   ├── redis          → RedisTokenService, RedisAuthCodeService, RedisStockCacheService,
+│   │                     RedisPendingOrderService, RedisRateLimiterService, RedisOnlineStatusService
 │   └── util           → DateUtil, SecurityUtil
 ├── infra
 │   ├── ls            → LsWebSocketClient, LsWebSocketHandler, LsReconnectService, dto
@@ -83,6 +92,7 @@ com.teamfp.aistock
 - 새 파일은 반드시 위 구조의 해당 위치에 생성한다.
 - 외부 API 호출 코드는 `infra`에만 작성하고, `domain` 서비스는 infra 클라이언트를 주입받아 사용한다.
 - 도메인 간 직접 참조 대신 서비스 계층을 통해 호출한다.
+- `admin` 도메인은 자체 Entity/Repository를 두지 않고, `user`/`account`/`order`/`inquiry` 등 기존 도메인의 Repository를 그대로 주입받아 조합한다 (관리자 조회는 여러 도메인을 가로지르는 집계·조합 성격이라 중복 Repository를 만들지 않는다).
 
 ---
 
@@ -138,10 +148,13 @@ PATCH  /api/users/me
 POST   /api/orders
 DELETE /api/orders/{orderId}
 GET    /api/stocks/{stockCode}
+GET    /api/inquiries
+PATCH  /api/admin/inquiries/{inquiryId}/answer
 ```
 
 - 예외: 인증 API는 행위 URL 허용 (`POST /api/auth/login`, `/logout`, `/refresh`)
 - `/api/getUser`, `/api/createOrder` 같은 동사형 URL 금지
+- 관리자 전용 API는 `/api/admin/**` 하위에 두고, `SecurityConfig`에서 `hasRole("ADMIN")`로 제한
 
 ### 공통 응답 및 예외 처리
 
@@ -152,11 +165,11 @@ GET    /api/stocks/{stockCode}
 
 ---
 
-## 6. DB 설계 준수 사항 (MySQL v6 기준 — 12개 테이블)
+## 6. DB 설계 준수 사항 (MySQL v8 기준 — 13개 테이블)
 
 `users`, `social_accounts`, `investment_profile`, `accounts`, `holdings`, `orders`,
 `watchlist`, `ai_planning_sessions`, `ai_planning_messages`, `simulations`,
-`recent_viewed`, `notifications`
+`recent_viewed`, `notifications`, `inquiries`
 
 - `users.email`은 **NULL 허용** (카카오 이메일 동의 거부 대응)
 - 소셜 로그인 정보는 `social_accounts` 별도 테이블 (users 1:N)
@@ -164,11 +177,18 @@ GET    /api/stocks/{stockCode}
 - `accounts.frozen_balance` — 지정가 주문 예약 금액
 - `accounts.base_balance` — 수익률 계산 기준값
 - `orders.status` — `PENDING` / `EXECUTED` / `CANCELLED`
+- `users.status` — `ACTIVE` / `SUSPENDED` — **관리자에 의한 로그인 차단**. 기존
+  `is_active`/`deleted_at`(본인 탈퇴)과는 별개 개념이니 혼동하지 않는다.
+- `accounts.status` — `ACTIVE` / `SUSPENDED` — **관리자에 의한 계좌 거래 정지**.
+  로그인은 가능하되 매수/매도 주문만 차단한다 (조회는 계속 가능).
+- `inquiries` — 사용자 문의 + 관리자 답변을 한 테이블에서 관리 (`status`: `PENDING`/`ANSWERED`).
+  `answered_by`는 답변한 관리자 `user_id`를 참조하며 `ON DELETE SET NULL`
+  (관리자 탈퇴 시에도 문의 기록은 보존).
 - Entity에는 JPA Auditing으로 `created_at`, `updated_at` 자동 처리 (`JpaConfig`)
 - 삭제는 soft delete(`deleted_at`) 원칙 (users)
 - **주의**: users의 soft delete는 FK `ON DELETE CASCADE`를 발동시키지 않는다. 탈퇴 처리 시
   자식 테이블(social_accounts, investment_profile, accounts, watchlist,
-  ai_planning_sessions, simulations, recent_viewed, notifications)은
+  ai_planning_sessions, simulations, recent_viewed, notifications, inquiries)은
   탈퇴 서비스 로직에서 명시적으로 삭제해야 한다. (자세한 순서는 schema.sql의
   users 테이블 상단 주석 참고)
 
@@ -187,8 +207,9 @@ GET    /api/stocks/{stockCode}
 | `pending:orders:{stockCode}` | 없음 | 지정가 미체결 주문 |
 | `gemini:rate:{userId}:minute` | 1분 | Gemini Rate Limiter (분당 3회) |
 | `gemini:rate:{userId}:daily` | 1일 | Gemini Rate Limiter (일일 10회) |
+| `admin:online:users` | 없음 (이벤트 기반) | 관리자 대시보드 — 온라인 사용자 집합 (WebSocket CONNECT/DISCONNECT 시 갱신) |
 
-- Redis 접근은 반드시 `global/redis`의 5개 서비스 클래스를 통해서만 한다.
+- Redis 접근은 반드시 `global/redis`의 **6개** 서비스 클래스를 통해서만 한다.
 - 도메인 서비스에서 RedisTemplate 직접 주입 금지.
 
 ---
@@ -202,7 +223,18 @@ GET    /api/stocks/{stockCode}
 - **서버 시작 순서**: `@PostConstruct`로 DB PENDING 주문 Redis 재적재 완료 후 LS WebSocket 연결
 - **LS 재연결**: 지수 백오프 (1→2→4→최대 30초)
 - **Gemini 호출 전** 반드시 `RedisRateLimiterService` 통과, 초과 시 429 즉시 반환
+- **온라인 추적**: `StompAuthInterceptor`의 CONNECT/DISCONNECT 시점에 `RedisOnlineStatusService`로
+  `admin:online:users` 갱신. 클라이언트가 비정상 종료해 DISCONNECT 프레임 없이 끊기는 경우를
+  대비해 `SessionDisconnectEvent` 리스너로 보완 처리한다. 서버 자체가 비정상 종료(크래시)된 경우
+  모든 WebSocket 연결이 함께 끊기므로, 서버 재시작 시 `@PostConstruct`로 `admin:online:users`를
+  전체 삭제한다 (재적재 대상 DB가 없는 순수 이벤트성 데이터이므로 `RedisPendingOrderService`처럼
+  DB 기준 재적재가 아니라 단순 초기화가 맞다).
+- **관리자 계좌/사용자 정지 검사**: 주문 생성(`OrderService.createOrder()`) 진입 시
+  `accounts.status`가 `SUSPENDED`면 `CustomException(ErrorCode.ACCOUNT_SUSPENDED)`를 던진다.
+  로그인(`AuthService.login()`) 시 `users.status`가 `SUSPENDED`면 로그인 자체를 차단한다.
 - **환경변수/시크릿**: AWS Parameter Store 사용, 코드에 API 키 하드코딩 절대 금지
+- **관리자 가입**: 회원가입 시 `role=ADMIN` 선택 시 `adminCode`를 서버 환경변수
+  `ADMIN_SIGNUP_CODE`와 대조 후 일치할 때만 `Role.ADMIN`으로 가입 허용.
 
 ---
 
@@ -269,6 +301,8 @@ type: 작업 내용
 - 도메인 서비스에서 RedisTemplate·외부 API를 직접 호출하지 않는다 (반드시 global/redis, infra 경유).
 - 부분 코드/생략 없이 완성된(바로 실행 가능한) 코드를 제공한다.
 - 모든 응답과 코드 주석은 **한국어**로 작성한다.
+- 테스트 코드는 로컬 검증용으로만 작성하고 지우지 않는다. 작성한 테스트는 `src/test`에 그대로 두고 커밋·PR에 포함한다.
+- 다른 브랜치에서 이미 병합된 테스트 파일을 삭제하는 커밋이 포함되어 있으면 PR 작성자가 의도적으로 삭제한 이유를 PR 본문에 명시해야 하며, 그렇지 않으면 리뷰어는 병합을 보류하고 원인 확인을 요청한다.
 
 ---
 

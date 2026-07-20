@@ -1,4 +1,13 @@
-# Redis 키 설계 및 로직 (최종본 v3)
+# Redis 키 설계 및 로직 (최종본 v5)
+
+**변경사항 v4 → v5**
+1. `RedisOnlineStatusService`에 서버 재시작 시 초기화 로직(`clearOnlineStatus`) 추가
+   (서버 크래시 시 모든 WebSocket 연결이 함께 끊기는데, 초기화 로직이 없으면
+   당시 접속 중이던 사용자가 `admin:online:users`에 영원히 "온라인"으로 남는 문제 발견)
+
+**변경사항 v3 → v4**
+1. `admin:online:users` 키 추가 (관리자 대시보드 — 온라인 사용자 수 집계)
+2. `RedisOnlineStatusService` 추가 (WebSocket CONNECT/DISCONNECT 시점에 온라인 상태 추적)
 
 **변경사항 v2 → v3**
 1. `briefing:{userId}:{date}` 키 제거 (시황 브리핑 → Tavily 즉석 검색으로 변경)
@@ -7,7 +16,7 @@
 
 **키 네이밍 규칙**: `{서비스}:{목적}:{식별자}`
 
-## TTL 정책 요약 v3 — 8개 키
+## TTL 정책 요약 v4 — 9개 키
 
 | 키 | TTL | 용도 |
 |---|---|---|
@@ -20,6 +29,7 @@
 | `pending:orders:{stockCode}` | 없음 | 지정가 미체결 주문 목록 |
 | `gemini:rate:{userId}:minute` | 1분 | Gemini API 호출 횟수 (분당 3회 제한) |
 | `gemini:rate:{userId}:daily` | 1일 | Gemini API 호출 횟수 (일일 10회 제한) |
+| `admin:online:users` | 없음 (이벤트 기반) | 현재 WebSocket 연결 중인 userId 집합 (관리자 대시보드) |
 
 **제거된 키**: `briefing:{userId}:{date}` → 시황 브리핑이 Tavily 즉석 검색으로 변경되어 캐싱 불필요
 
@@ -389,7 +399,7 @@ for (PendingOrderDto order : pending) {
 
 ---
 
-## 6. RedisRateLimiterService — Gemini API Rate Limit (v3 추가)
+## 6. RedisRateLimiterService — Gemini API Rate Limit
 
 **큐 방식 대신 Rate Limiter를 선택한 이유**
 - 큐: 요청을 쌓아두고 순서대로 처리 → 사용자가 수분씩 대기
@@ -472,7 +482,96 @@ public AiResponseDto requestAiPlanning(Long userId, String message) {
 
 ---
 
-## 7. PendingOrderDto
+## 7. RedisOnlineStatusService — 온라인 사용자 추적 (v4 신규)
+
+**설계 배경**
+
+관리자 대시보드의 "온라인 사용자 수"는 "로그인된 사용자 중 WebSocket이 실제로 연결되어 있는 사용자"를 의미한다. 로그인 여부(JWT 유효성)만으로는 판단할 수 없고, STOMP 연결 상태를 실시간으로 추적해야 한다.
+
+**Set 자료구조를 선택한 이유**
+
+- 온라인 인원 수 = `SCARD` (O(1))
+- 특정 사용자 온라인 여부 = `SISMEMBER` (O(1))
+- 중복 연결(같은 유저가 여러 탭에서 접속) 문제 없음 — Set은 자동으로 중복 제거
+
+**TTL을 두지 않고 이벤트 기반으로 관리하는 이유**
+
+접속 시간이 사용자마다 제각각이라 고정 TTL을 걸면 실제로는 연결이 끊겼는데도 온라인으로 남아있거나, 반대로 아직 연결 중인데 만료되는 문제가 생긴다. 대신 `StompAuthInterceptor`의 CONNECT/DISCONNECT 이벤트에 정확히 맞춰 추가·제거한다.
+
+```java
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class RedisOnlineStatusService {
+
+    private final RedisTemplate<String, String> redisTemplate;
+
+    private static final String ONLINE_KEY = "admin:online:users";
+
+    // 서버 시작(재시작) 시 온라인 목록 초기화
+    // 서버가 죽으면 그 서버가 들고 있던 모든 WebSocket 연결도 함께 끊기므로,
+    // 이전에 기록된 온라인 사용자는 전부 무효하다. RedisPendingOrderService처럼
+    // DB에서 재적재할 원본 데이터가 없는 순수 이벤트성 정보이므로 "재적재"가 아니라
+    // "전체 삭제"가 정답이다. 재시작 후에는 실제로 재접속하는 CONNECT 이벤트가
+    // addOnline()을 다시 호출하며 정상적으로 채워진다.
+    @PostConstruct
+    public void clearOnlineStatus() {
+        redisTemplate.delete(ONLINE_KEY);
+        log.info("온라인 사용자 목록 초기화 완료 (서버 재시작)");
+    }
+
+    // WebSocket CONNECT 성공 시 호출 (StompAuthInterceptor에서 JWT 검증 통과 후)
+    public void addOnline(Long userId) {
+        redisTemplate.opsForSet().add(ONLINE_KEY, String.valueOf(userId));
+    }
+
+    // WebSocket DISCONNECT 시 호출
+    public void removeOnline(Long userId) {
+        redisTemplate.opsForSet().remove(ONLINE_KEY, String.valueOf(userId));
+    }
+
+    // 현재 온라인 인원 수 (관리자 대시보드용)
+    public long countOnline() {
+        Long count = redisTemplate.opsForSet().size(ONLINE_KEY);
+        return count != null ? count : 0;
+    }
+
+    // 특정 사용자 온라인 여부
+    public boolean isOnline(Long userId) {
+        return Boolean.TRUE.equals(
+            redisTemplate.opsForSet().isMember(ONLINE_KEY, String.valueOf(userId))
+        );
+    }
+}
+```
+
+**StompAuthInterceptor 연동 지점 (feature/websocket-config, 팀원 B가 2주차에 만든 파일 확장)**
+
+```java
+@Override
+public Message<?> preSend(Message<?> message, MessageChannel channel) {
+    StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
+
+    if (StompCommand.CONNECT.equals(accessor.getCommand())) {
+        // 기존 JWT 검증 로직 통과 후
+        Long userId = extractUserId(accessor); // JWT에서 userId 추출
+        redisOnlineStatusService.addOnline(userId);
+    }
+
+    if (StompCommand.DISCONNECT.equals(accessor.getCommand())) {
+        Long userId = extractUserId(accessor);
+        redisOnlineStatusService.removeOnline(userId);
+    }
+
+    return message;
+}
+```
+
+> DISCONNECT는 클라이언트가 정상 종료하지 않고 네트워크가 끊기는 경우(브라우저 강제 종료 등) STOMP DISCONNECT 프레임 없이 연결만 끊어질 수 있다. 이 경우를 대비해 Spring이 발행하는 `SessionDisconnectEvent`를 `@EventListener`로 별도 처리해 `removeOnline()`을 호출하는 보완 로직이 필요하다. (구현 시 참고)
+
+---
+
+## 8. PendingOrderDto
 
 ```java
 @Getter
@@ -493,7 +592,7 @@ public class PendingOrderDto {
 
 ---
 
-## 8. application.yml — Redis 설정
+## 9. application.yml — Redis 설정
 
 ```yaml
 spring:
