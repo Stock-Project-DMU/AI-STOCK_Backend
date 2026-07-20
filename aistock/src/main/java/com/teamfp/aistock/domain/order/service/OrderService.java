@@ -1,5 +1,8 @@
 package com.teamfp.aistock.domain.order.service;
 
+import java.util.Optional;
+
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -10,6 +13,7 @@ import com.teamfp.aistock.domain.order.dto.response.CreateOrderResponse;
 import com.teamfp.aistock.domain.order.entity.Holding;
 import com.teamfp.aistock.domain.order.entity.Order;
 import com.teamfp.aistock.domain.order.entity.OrderType;
+import com.teamfp.aistock.domain.order.entity.PriceType;
 import com.teamfp.aistock.domain.order.repository.HoldingRepository;
 import com.teamfp.aistock.domain.order.repository.OrderRepository;
 import com.teamfp.aistock.domain.stock.dto.StockPriceDto;
@@ -38,6 +42,9 @@ public class OrderService {
      * 지정가 주문(feature/order-limit)과 달리 pending:orders에 쌓아두지 않고
      * 이 메서드 안에서 매수/매도를 바로 완결한다.
      *
+     * 이 메서드는 request.priceType()이 항상 MARKET이라고 전제한다 — LIMIT 요청을 막는 검증은
+     * priceType으로 시장가/지정가를 분기하는 책임을 가진 OrderController에서 이미 처리한다.
+     *
      * TODO(AccountStatus): NAMING.md 8-5 v8 항목에 따르면 진입 시 account.getStatus()가
      * SUSPENDED(관리자에 의한 계좌 거래 정지)면 CustomException(ErrorCode.ACCOUNT_SUSPENDED)를
      * 던져야 한다. 다만 Account.status 필드는 A의 admin-entity-update 브랜치가 아직
@@ -48,18 +55,18 @@ public class OrderService {
         Account account = accountRepository.findByUserId(userId)
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
 
-        // 캐시(TTL 5초)에 최근 tick이 없으면 null — 이 경우 "가격을 알 수 없어 체결 불가"이므로
-        // 종목을 찾을 수 없다는 의미의 기존 에러코드를 재사용한다(신규 코드는 NAMING.md 미등록 상태라 추가하지 않음).
+        // 캐시(TTL 5초)에 최근 tick이 없으면 null — 종목 자체가 없는 게 아니라 시세를 일시적으로
+        // 못 가져오는 상황이므로 STOCK_NOT_FOUND(종목 없음)와 구분되는 전용 코드를 쓴다.
         StockPriceDto priceDto = redisStockCacheService.getStockPrice(request.stockCode());
         if (priceDto == null) {
-            throw new CustomException(ErrorCode.STOCK_NOT_FOUND);
+            throw new CustomException(ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
         }
 
         long currentPrice = priceDto.getCurrentPrice();
         long totalAmount = currentPrice * request.quantity();
 
         if (request.orderType() == OrderType.BUY) {
-            executeBuy(account, request, priceDto, totalAmount);
+            executeBuy(account, request, priceDto.getStockName(), currentPrice, totalAmount);
         } else {
             executeSell(account, request, totalAmount);
         }
@@ -81,33 +88,38 @@ public class OrderService {
         return CreateOrderResponse.from(order);
     }
 
-    private void executeBuy(Account account, CreateOrderRequest request, StockPriceDto priceDto, long totalAmount) {
+    private void executeBuy(Account account, CreateOrderRequest request, String stockName, long currentPrice, long totalAmount) {
         if (account.getBalance() < totalAmount) {
             throw new CustomException(ErrorCode.INSUFFICIENT_BALANCE);
         }
         account.applyBuyOrder(totalAmount);
 
-        Holding holding = holdingRepository
-                .findByAccountIdAndStockCode(account.getAccountId(), request.stockCode())
-                .orElse(null);
-        if (holding == null) {
-            // 처음 매수하는 종목이면 신규 보유종목 행을 만든다.
-            holdingRepository.save(Holding.builder()
-                    .account(account)
-                    .stockCode(request.stockCode())
-                    .stockName(priceDto.getStockName())
-                    .quantity(request.quantity())
-                    .avgPrice(priceDto.getCurrentPrice())
-                    .build());
-        } else {
+        Optional<Holding> holding = findHolding(account, request.stockCode());
+        if (holding.isPresent()) {
             // 이미 들고 있던 종목이면 수량을 더하고 평단가를 가중평균으로 재계산한다.
-            holding.increase(request.quantity(), priceDto.getCurrentPrice());
+            holding.get().increase(request.quantity(), currentPrice);
+        } else {
+            // 처음 매수하는 종목이면 신규 보유종목 행을 만든다. 두 개의 최초 매수 요청이
+            // 동시에 들어와 uq_account_stock 유니크 제약에 걸릴 수 있는 이유는
+            // findByAccountIdAndStockCode()의 비관적 락 범위 설명(HoldingRepository 참고) —
+            // 여기서는 그 경합만 좁게 잡아 재시도 안내 에러로 변환한다(전역으로 잡지 않는
+            // 이유도 HoldingRepository 주석 참고).
+            try {
+                holdingRepository.save(Holding.builder()
+                        .account(account)
+                        .stockCode(request.stockCode())
+                        .stockName(stockName)
+                        .quantity(request.quantity())
+                        .avgPrice(currentPrice)
+                        .build());
+            } catch (DataIntegrityViolationException e) {
+                throw new CustomException(ErrorCode.OPTIMISTIC_LOCK_CONFLICT, e);
+            }
         }
     }
 
     private void executeSell(Account account, CreateOrderRequest request, long totalAmount) {
-        Holding holding = holdingRepository
-                .findByAccountIdAndStockCode(account.getAccountId(), request.stockCode())
+        Holding holding = findHolding(account, request.stockCode())
                 .orElseThrow(() -> new CustomException(ErrorCode.INSUFFICIENT_HOLDING));
         if (holding.getQuantity() < request.quantity()) {
             throw new CustomException(ErrorCode.INSUFFICIENT_HOLDING);
@@ -120,5 +132,9 @@ public class OrderService {
             // "안 갖고 있는 종목"이 섞여 나오는 것을 막기 위함.
             holdingRepository.delete(holding);
         }
+    }
+
+    private Optional<Holding> findHolding(Account account, String stockCode) {
+        return holdingRepository.findByAccountIdAndStockCode(account.getAccountId(), stockCode);
     }
 }

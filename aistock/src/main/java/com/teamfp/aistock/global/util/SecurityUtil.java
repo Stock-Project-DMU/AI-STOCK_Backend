@@ -1,7 +1,10 @@
 package com.teamfp.aistock.global.util;
 
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import com.teamfp.aistock.global.exception.CustomException;
+import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.security.CustomUserDetails;
 
 /**
@@ -20,12 +23,16 @@ public class SecurityUtil {
     /**
      * 현재 인증된 사용자의 userId를 반환한다.
      * SecurityConfig에서 인증이 필요 없는 PUBLIC_URLS 외 모든 요청은 JwtAuthenticationFilter를
-     * 통과해야만 컨트롤러까지 도달하므로, 이 메서드가 호출되는 시점에는 항상 인증 정보가
-     * 채워져 있다는 전제를 둔다.
+     * 통과해야만 컨트롤러까지 도달하므로, 정상 흐름에서는 항상 인증 정보가 채워져 있다.
+     * 다만 필터 체인 설정 변경이나 익명 인증(principal이 CustomUserDetails가 아닌 경우) 같은
+     * 예외적인 상황에서 무검증 캐스팅이 NullPointerException/ClassCastException으로 이어져
+     * 의미 없는 500을 내지 않도록, 여기서 명시적으로 검사해 CustomException으로 변환한다.
      */
     public static Long getCurrentUserId() {
-        CustomUserDetails userDetails =
-                (CustomUserDetails) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !(authentication.getPrincipal() instanceof CustomUserDetails userDetails)) {
+            throw new CustomException(ErrorCode.INVALID_TOKEN);
+        }
         return userDetails.getUserId();
     }
 }

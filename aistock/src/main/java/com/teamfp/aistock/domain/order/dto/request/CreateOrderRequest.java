@@ -6,6 +6,7 @@ import com.teamfp.aistock.domain.order.entity.PriceType;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 
 /**
  * 주문 생성 요청 DTO. 현재가(MARKET) 주문과 지정가(LIMIT) 주문이 POST /api/orders를
@@ -29,6 +30,10 @@ public record CreateOrderRequest(
         @NotNull(message = "가격 유형(MARKET/LIMIT)은 필수입니다.")
         PriceType priceType,
 
+        // MARKET 주문에서는 서버가 항상 실시간 현재가로 덮어써서 쓰지 않는 값이지만,
+        // LIMIT 주문(feature/order-limit)에서는 실제 주문가로 쓰이므로 음수 같은 말이 안 되는
+        // 값이 들어오는 걸 미리 막아둔다. MARKET 요청에서는 클라이언트가 0을 보내면 된다.
+        @PositiveOrZero(message = "주문 가격은 0 이상이어야 합니다.")
         long orderPrice
 ) {
 }

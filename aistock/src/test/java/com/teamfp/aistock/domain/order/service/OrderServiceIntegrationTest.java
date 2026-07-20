@@ -30,8 +30,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * AuthService/AccountService(계좌 생성 API)가 아직 스텁이라 로그인해서 JWT를 받거나
  * HTTP로 계좌를 만들 방법이 없다. 그래서 Controller/JWT 레이어는 우회하고, User/Account를
  * Repository로 직접 저장한 뒤 OrderService 빈을 직접 호출해서 "실제 DB에 실제로 잔고가
- * 차감되고 보유종목이 생기는지"를 검증한다. src/test/resources/application.yml의 테스트 전용
- * 설정으로 로컬 docker MySQL(3307)/Redis(6379)에 붙는다.
+ * 차감되고 보유종목이 생기는지"를 검증한다.
+ *
+ * 별도 테스트 전용 설정 파일 없이, application.yml의 기본 활성 프로필(dev)을 그대로 따라가
+ * application-dev.yml(로컬 docker MySQL 3306/Redis 6379) 설정으로 붙는다. 실행 전
+ * `docker compose up -d`로 로컬 MySQL/Redis가 떠 있어야 한다.
  */
 @SpringBootTest
 class OrderServiceIntegrationTest {

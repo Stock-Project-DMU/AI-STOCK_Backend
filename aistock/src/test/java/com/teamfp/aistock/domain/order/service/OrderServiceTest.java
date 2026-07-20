@@ -162,6 +162,24 @@ class OrderServiceTest {
             assertThat(account.getBalance()).isEqualTo(1_000_000L); // 잔고 그대로
             verify(orderRepository, never()).save(any());
         }
+
+        @Test
+        @DisplayName("같은 종목 최초 매수 요청이 동시에 들어와 유니크 제약을 위반하면 OPTIMISTIC_LOCK_CONFLICT 예외로 변환한다")
+        void buy_fail_concurrentFirstBuyRace() {
+            // findHolding()의 비관적 락은 이미 존재하는 행만 잠그므로, 두 요청이 동시에 빈 값을
+            // 본 뒤 각자 INSERT를 시도하는 경합은 holdings.uq_account_stock 유니크 제약으로만
+            // 걸러진다. 이 케이스를 재현하기 위해 save()가 DataIntegrityViolationException을
+            // 던지도록 모킹한다.
+            when(redisStockCacheService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(70_000L));
+            when(holdingRepository.findByAccountIdAndStockCode(any(), anyString())).thenReturn(Optional.empty());
+            when(holdingRepository.save(any(Holding.class)))
+                    .thenThrow(new org.springframework.dao.DataIntegrityViolationException("uq_account_stock"));
+
+            assertThatThrownBy(() -> orderService.createMarketOrder(USER_ID, requestOf(OrderType.BUY, 10)))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.OPTIMISTIC_LOCK_CONFLICT);
+        }
     }
 
     @Nested
@@ -257,14 +275,14 @@ class OrderServiceTest {
         }
 
         @Test
-        @DisplayName("현재가 캐시가 없으면(TTL 만료) STOCK_NOT_FOUND 예외를 던진다")
+        @DisplayName("현재가 캐시가 없으면(TTL 만료) STOCK_PRICE_NOT_AVAILABLE 예외를 던진다")
         void fail_priceCacheMissing() {
             when(redisStockCacheService.getStockPrice(STOCK_CODE)).thenReturn(null);
 
             assertThatThrownBy(() -> orderService.createMarketOrder(USER_ID, requestOf(OrderType.BUY, 1)))
                     .isInstanceOf(CustomException.class)
                     .extracting(e -> ((CustomException) e).getErrorCode())
-                    .isEqualTo(ErrorCode.STOCK_NOT_FOUND);
+                    .isEqualTo(ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
 
             verify(orderRepository, never()).save(any());
         }
