@@ -1,0 +1,30 @@
+# 테스트 전용 설정 (src/test/resources — 실제 서비스용 application.yml이 아직 없어서
+# @SpringBootTest로 실제 스프링 컨텍스트를 띄우는 통합 테스트를 돌리기 위해 임시로 추가했다.
+# 포트/계정은 docker-compose.yml 및 .github/workflows/backend-ci.yml의 mysql/redis 서비스
+# 설정과 동일하게 맞춘다(3306/6379, aistock/aistock) — CI에서 그대로 통과해야 하기 때문.
+# 로컬에서 3306을 다른 MySQL이 이미 쓰고 있다면 그 프로세스를 내리거나, 본인 로컬에서만
+# 이 파일을 임시로 다른 포트로 바꿔서 테스트하고 커밋은 하지 않도록 한다.
+# 실제 서비스 application.yml/application-dev.yml은 별도 브랜치(인프라/설정 담당)에서
+# AWS Parameter Store 연동과 함께 정식으로 만들어져야 한다 (CLAUDE.md 6/10번 참고).
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/aistock?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: aistock
+    password: aistock
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+jwt:
+  secret: local-test-only-dummy-secret-key-not-for-production-0123456789
+  access-token-expiration: 3600000
+  refresh-token-expiration: 1209600000
+
+cors:
+  allowed-origins: http://localhost:3000

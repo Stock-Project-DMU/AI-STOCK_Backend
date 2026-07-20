@@ -76,4 +76,13 @@ public class Account {
     public void applyBuyOrder(long amount) {
         this.balance -= amount;
     }
+
+    /**
+     * 매도 체결로 들어온 대금을 잔고에 더한다. applyBuyOrder와 대칭되는 메서드다.
+     * (매도는 frozen_balance를 쓰지 않는다 — 지정가 매수 예약 잠금과 달리, 보유 주식은
+     * 이미 보유 중이라 별도로 자금을 미리 묶어둘 필요가 없다.)
+     */
+    public void applySellOrder(long amount) {
+        this.balance += amount;
+    }
 }

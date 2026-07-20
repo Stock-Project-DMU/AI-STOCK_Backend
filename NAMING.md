@@ -70,6 +70,10 @@
   `Account.activate()` (status ACTIVE↔SUSPENDED 전환, 거래만 차단).
 - **문의 답변 메서드 (v8 추가)**: `Inquiry.answer(String answer, User admin)` —
   `answer`, `answeredBy`, `answeredAt`을 한 번에 설정하고 `status`를 `ANSWERED`로 전환.
+- **현재가 주문 체결 메서드 (feature/order-market 추가)**: `Account.applySellOrder(long amount)`
+  (`applyBuyOrder`의 대칭 — 매도 대금을 잔고에 더함), `Holding.increase(int quantity, long execPrice)`
+  (매수 체결 시 수량 증가 + 평단가 가중평균 재계산), `Holding.decrease(int quantity)`
+  (매도 체결 시 수량 감소, 0이 되면 호출 측에서 `HoldingRepository.delete()`로 행 삭제).
 
 ### 1-2. Repository 인터페이스 및 메서드
 
