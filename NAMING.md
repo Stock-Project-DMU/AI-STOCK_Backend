@@ -70,6 +70,10 @@
   `Account.activate()` (status ACTIVE↔SUSPENDED 전환, 거래만 차단).
 - **문의 답변 메서드 (v8 추가)**: `Inquiry.answer(String answer, User admin)` —
   `answer`, `answeredBy`, `answeredAt`을 한 번에 설정하고 `status`를 `ANSWERED`로 전환.
+- **현재가 주문 체결 메서드 (feature/order-market 추가)**: `Account.applySellOrder(long amount)`
+  (`applyBuyOrder`의 대칭 — 매도 대금을 잔고에 더함), `Holding.increase(int quantity, long execPrice)`
+  (매수 체결 시 수량 증가 + 평단가 가중평균 재계산), `Holding.decrease(int quantity)`
+  (매도 체결 시 수량 감소, 0이 되면 호출 측에서 `HoldingRepository.delete()`로 행 삭제).
 
 ### 1-2. Repository 인터페이스 및 메서드
 
@@ -130,10 +134,17 @@
 | `ACCOUNT_SUSPENDED` | 400 (v8 추가 — 정지된 계좌로 주문 시도) |
 | `INVALID_ADMIN_CODE` | 400 (v8 추가 — 관리자 회원가입 시 코드 불일치) |
 | `INQUIRY_NOT_FOUND` | 404 (v8 추가) |
+| `INVALID_PRICE_TYPE` | 400 (order-market 추가 — `POST /api/orders`에 order-limit 구현 전 priceType=LIMIT 요청이 들어온 경우) |
+| `STOCK_PRICE_NOT_AVAILABLE` | 503 (order-market 추가 — 종목은 존재하지만 `stock:price:{stockCode}` Redis 캐시가 TTL 만료 등으로 비어 있어 현재가 주문을 체결할 수 없는 경우. `STOCK_NOT_FOUND`(종목 자체가 없음)와 혼동하지 않도록 분리) |
 
 ### 2-3. 예외/핸들러
 - `CustomException(ErrorCode errorCode)`, `CustomException(ErrorCode errorCode, Throwable cause)`
 - `GlobalExceptionHandler` 메서드: `handleCustomException(CustomException e)`, `handleValidationException(MethodArgumentNotValidException e)`, `handleNoResourceFoundException(NoResourceFoundException e)`, `handleException(Exception e)`
+- (feature/order-market 추가) `handleOptimisticLockingFailureException(ObjectOptimisticLockingFailureException e)` —
+  Account.version 낙관적 락 충돌을 `ErrorCode.OPTIMISTIC_LOCK_CONFLICT`(409)로 변환해 응답한다.
+  `DataIntegrityViolationException`(holdings.uq_account_stock 유니크 제약 위반)은 전역 핸들러로 두지
+  않는다 — 앱 전체의 다른 제약 위반(예: 회원가입 중복 아이디)까지 같은 메시지로 뭉뚱그리게 되므로,
+  `OrderService.executeBuy()`에서 신규 보유종목 INSERT 지점만 좁게 잡아 동일한 에러코드로 변환한다.
 
 ---
 
@@ -299,6 +310,12 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 
 > v8 추가: `OrderService.createMarketOrder()` 진입 시 `account.getStatus() == AccountStatus.SUSPENDED`면
 > `CustomException(ErrorCode.ACCOUNT_SUSPENDED)` throw (order-limit도 동일 적용).
+
+> order-market 추가: `feature/order-limit`이 아직 병합되지 않아 `createLimitOrder()`가 없는 상태이므로,
+> `OrderController.createOrder()` 진입 시 `request.priceType() != PriceType.MARKET`이면
+> `CustomException(ErrorCode.INVALID_PRICE_TYPE)` throw. priceType으로 MARKET/LIMIT을 분기하는
+> 책임이 원래 컨트롤러에 있으므로(8-6 참고) 이 검증도 서비스가 아닌 컨트롤러에 둔다 — order-limit
+> 병합 후에는 이 if를 실제 `createMarketOrder`/`createLimitOrder` 분기 로직으로 교체한다.
 
 ### 8-6. feature/order-limit
 
