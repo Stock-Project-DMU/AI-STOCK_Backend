@@ -26,7 +26,8 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "users", indexes = {
         @Index(name = "idx_email", columnList = "email"),
-        @Index(name = "idx_active", columnList = "is_active")
+        @Index(name = "idx_active", columnList = "is_active"),
+        @Index(name = "idx_status", columnList = "status")
 })
 @Getter
 @Builder
@@ -60,6 +61,11 @@ public class User {
     @Builder.Default
     private Role role = Role.USER;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 10)
+    @Builder.Default
+    private UserStatus status = UserStatus.ACTIVE;
+
     @Column(name = "is_active", nullable = false)
     private boolean isActive;
 
@@ -88,5 +94,17 @@ public class User {
         this.email = null;
         this.isActive = false;
         this.deletedAt = LocalDateTime.now();
+    }
+
+    /**
+     * 관리자에 의한 로그인 차단(정지). 본인 탈퇴(deactivate)와 달리 PII를 그대로 유지하며,
+     * activate()로 다시 되돌릴 수 있다.
+     */
+    public void suspend() {
+        this.status = UserStatus.SUSPENDED;
+    }
+
+    public void activate() {
+        this.status = UserStatus.ACTIVE;
     }
 }

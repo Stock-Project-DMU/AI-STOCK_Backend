@@ -11,10 +11,13 @@ import com.teamfp.aistock.domain.user.entity.User;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EntityListeners;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
@@ -25,7 +28,9 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Entity
-@Table(name = "accounts")
+@Table(name = "accounts", indexes = {
+        @Index(name = "idx_account_status", columnList = "status")
+})
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @EntityListeners(AuditingEntityListener.class)
@@ -55,6 +60,10 @@ public class Account {
     @Column(name = "frozen_balance", nullable = false)
     private long frozenBalance;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 10)
+    private AccountStatus status;
+
     @Version
     @Column(name = "version", nullable = false)
     private long version;
@@ -71,6 +80,7 @@ public class Account {
         this.baseBalance = baseBalance;
         this.balance = balance;
         this.frozenBalance = 0L;
+        this.status = AccountStatus.ACTIVE;
     }
 
     public void applyBuyOrder(long amount) {
@@ -84,5 +94,17 @@ public class Account {
      */
     public void applySellOrder(long amount) {
         this.balance += amount;
+    }
+
+    /**
+     * 관리자에 의한 계좌 거래 정지. 로그인은 그대로 가능하고 매수·매도 주문만 막는다
+     * (차단 로직 자체는 OrderService 쪽에서 처리 — 이 메서드는 상태 전환만 담당).
+     */
+    public void suspend() {
+        this.status = AccountStatus.SUSPENDED;
+    }
+
+    public void activate() {
+        this.status = AccountStatus.ACTIVE;
     }
 }
