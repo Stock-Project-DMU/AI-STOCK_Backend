@@ -3,6 +3,7 @@ package com.teamfp.aistock.domain.account.entity;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
+import org.hibernate.annotations.ColumnDefault;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
@@ -62,6 +63,7 @@ public class Account {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 10)
+    @ColumnDefault("'ACTIVE'")
     private AccountStatus status;
 
     @Version

@@ -1,5 +1,6 @@
 package com.teamfp.aistock.domain.user.entity;
 
+import org.hibernate.annotations.ColumnDefault;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
@@ -63,6 +64,7 @@ public class User {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 10)
+    @ColumnDefault("'ACTIVE'")
     @Builder.Default
     private UserStatus status = UserStatus.ACTIVE;
 

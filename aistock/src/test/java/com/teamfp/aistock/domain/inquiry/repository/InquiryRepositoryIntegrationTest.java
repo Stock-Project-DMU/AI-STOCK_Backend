@@ -77,8 +77,8 @@ class InquiryRepositoryIntegrationTest {
     }
 
     @Test
-    @DisplayName("findAllByOrderByStatusAscCreatedAtDesc는 미답변(PENDING) 문의를 답변완료(ANSWERED)보다 먼저 반환한다")
-    void findAllByOrderByStatusAscCreatedAtDesc_prioritizesPending() {
+    @DisplayName("findAllByOrderByStatusDescCreatedAtDesc는 미답변(PENDING) 문의를 답변완료(ANSWERED)보다 먼저 반환한다")
+    void findAllByOrderByStatusDescCreatedAtDesc_prioritizesPending() {
         User owner = newUser(String.valueOf(System.nanoTime()), Role.USER);
         User admin = newUser(String.valueOf(System.nanoTime()), Role.ADMIN);
 
@@ -90,7 +90,7 @@ class InquiryRepositoryIntegrationTest {
         Inquiry pending = inquiryRepository.save(Inquiry.builder()
                 .user(owner).title("미답변 문의").content("내용").build());
 
-        List<Inquiry> all = inquiryRepository.findAllByOrderByStatusAscCreatedAtDesc();
+        List<Inquiry> all = inquiryRepository.findAllByOrderByStatusDescCreatedAtDesc();
 
         int pendingIndex = indexOf(all, pending.getInquiryId());
         int answeredIndex = indexOf(all, answered.getInquiryId());

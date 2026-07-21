@@ -18,9 +18,9 @@ public interface InquiryRepository extends JpaRepository<Inquiry, Long> {
     @Query("select i from Inquiry i where i.inquiryId = :inquiryId and i.user.userId = :userId")
     Optional<Inquiry> findByInquiryIdAndUserId(@Param("inquiryId") Long inquiryId, @Param("userId") Long userId);
 
-    // status를 알파벳순으로 정렬하면 PENDING이 ANSWERED보다 앞에 오므로,
-    // 관리자 전체 목록 조회 시 미답변 문의가 자연스럽게 먼저 노출된다.
-    List<Inquiry> findAllByOrderByStatusAscCreatedAtDesc();
+    // "PENDING"이 "ANSWERED"보다 알파벳순으로 뒤(P > A)이므로, status를 내림차순(Desc)으로
+    // 정렬해야 미답변(PENDING) 문의가 관리자 전체 목록에서 먼저 노출된다.
+    List<Inquiry> findAllByOrderByStatusDescCreatedAtDesc();
 
     @Modifying
     @Query("delete from Inquiry i where i.user.userId = :userId")
