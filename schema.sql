@@ -1,5 +1,12 @@
 -- =====================================================
--- AI STOCK MySQL Schema (최종본 v8)
+-- AI STOCK MySQL Schema (최종본 v9)
+-- 변경사항 v8 → v9:
+--   1. orders 테이블에 version 컬럼 추가
+--      (낙관적 락 — accounts.version과 동일한 목적. feature/order-limit에서
+--       Order 행 자체를 비관적 락(findByIdForUpdate 등)으로만 보호하고 있었는데,
+--       OrderRepository의 다른 잠금 없는 조회 메서드로 주문을 가져와 수정하는
+--       경로가 생기면 동시성 보호를 못 받는 구조적 위험이 있어 최후의 안전망으로 추가)
+-- =====================================================
 -- 변경사항 v7 → v8:
 --   1. inquiries 테이블 신규 추가 (13번째 테이블)
 --      사용자 문의 작성 + 관리자 확인/답변 기능
@@ -284,6 +291,18 @@ CREATE TABLE holdings (
   GET /api/admin/trades       : 전체 사용자 주문 목록 (ordered_at DESC)
   GET /api/admin/trades/{id}  : 주문 상세 (account → user JOIN)
   GET /api/admin/dashboard    : 최근거래 N건, 총 거래량(SUM/COUNT, status='EXECUTED' 기준)
+
+  [version 컬럼 - 낙관적 락 (v9 추가)]
+  feature/order-limit에서 같은 주문을 동시에 체결(OrderExecutionService.execute)/
+  취소(OrderService.cancelOrder)하려는 경합을 findByIdForUpdate/
+  findByOrderIdAndAccountIdForUpdate의 비관적 락(SELECT ... FOR UPDATE)으로만 막고
+  있었는데, OrderRepository에는 그 외에도 잠금 없는 조회 메서드(findByOrderIdAndAccountId,
+  findAllOrdersWithUser, findOrderWithUserById, 상속받은 findById 등 관리자 기능용)가
+  함께 존재해 향후 그 경로로 order.execute()/order.cancel()을 호출하면 동시성 보호를
+  못 받는 구조적 위험이 있었다. accounts.version과 동일한 패턴으로 낙관적 락을 추가해,
+  "어떤 조회 경로로 가져왔든" JPA가 자동으로 동시 수정 충돌을 막도록 한다. 비관적 락은
+  체결 파이프라인의 주된 경로에서 그대로 유지한다(두 트랜잭션이 겹치지 않고 순서대로
+  처리되게 하는 목적은 비관적 락이 담당하고, version은 최후의 안전망 역할).
 */
 CREATE TABLE orders (
     order_id    BIGINT          NOT NULL AUTO_INCREMENT,
@@ -296,6 +315,7 @@ CREATE TABLE orders (
     exec_price  BIGINT,                              -- 실제 체결가 (미체결=NULL)
     quantity    INT             NOT NULL,            -- 주문 수량 (전량 체결 방식)
     status      ENUM('PENDING','EXECUTED','CANCELLED') NOT NULL DEFAULT 'PENDING',
+    version     BIGINT          NOT NULL DEFAULT 0,  -- v9 추가: 낙관적 락용 버전 번호
     ordered_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     executed_at DATETIME,                            -- 체결 시각 (미체결=NULL)
     PRIMARY KEY (order_id),

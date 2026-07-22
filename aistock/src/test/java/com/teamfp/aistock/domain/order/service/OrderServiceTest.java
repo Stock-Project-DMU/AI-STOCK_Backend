@@ -12,6 +12,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.teamfp.aistock.domain.account.entity.Account;
 import com.teamfp.aistock.domain.account.repository.AccountRepository;
@@ -92,6 +93,12 @@ class OrderServiceTest {
         // ACCOUNT_NOT_FOUND 테스트처럼 이 stub을 쓰지 않는 케이스도 있어 lenient로 등록한다
         // (안 그러면 MockitoExtension의 strict stubbing 검사가 UnnecessaryStubbingException을 던진다).
         Mockito.lenient().when(accountRepository.findByUserId(USER_ID)).thenReturn(Optional.of(account));
+
+        // HoldingSettlementService는 @Mock이 아니라 실제 구현을 그대로 쓴다 — 이 테스트들이
+        // 검증하는 "보유종목 수량/평단가가 실제로 어떻게 바뀌는지"는 그 서비스 내부 로직이라,
+        // 모킹해버리면 여기서 검증할 대상이 사라진다. 대신 그 서비스가 의존하는
+        // holdingRepository는 이미 모킹돼 있는 것을 그대로 재사용한다.
+        ReflectionTestUtils.setField(orderService, "holdingSettlementService", new HoldingSettlementService(holdingRepository));
     }
 
     private StockPriceDto priceOf(long currentPrice) {
@@ -284,6 +291,20 @@ class OrderServiceTest {
                     .extracting(e -> ((CustomException) e).getErrorCode())
                     .isEqualTo(ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
 
+            verify(orderRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("계좌가 정지 상태면 ACCOUNT_SUSPENDED 예외를 던지고 시세 조회조차 하지 않는다")
+        void fail_accountSuspended() {
+            account.suspend();
+
+            assertThatThrownBy(() -> orderService.createMarketOrder(USER_ID, requestOf(OrderType.BUY, 1)))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.ACCOUNT_SUSPENDED);
+
+            verify(redisStockCacheService, never()).getStockPrice(anyString());
             verify(orderRepository, never()).save(any());
         }
     }
