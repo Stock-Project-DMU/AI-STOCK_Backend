@@ -63,9 +63,17 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     @Query("select o from Order o where o.orderId = :orderId")
     Optional<Order> findByIdForUpdate(@Param("orderId") Long orderId);
 
+    // feature/mypage-account 추가 — OrderService.cancelOrder()용. 유저가 계좌를 여러 개 가질 수
+    // 있게 되면서 한때 findByIdForUpdate(orderId)로 먼저 잠근 뒤 order.getAccount().getUser()로
+    // 소유권을 나중에 검증하는 방식을 썼는데, 그러면 다른 유저의 orderId를 넣어도 검증에 앞서
+    // 비관적 락부터 잡혀버려(OrderExecutionService.execute()가 같은 락을 기다려야 하는 락 경합,
+    // 그리고 "존재하지만 내 것이 아님"과 "존재하지 않음"을 응답 시간 차이로 구분당할 수 있는
+    // 타이밍 사이드채널) 문제였다. 소유권(user_id)은 주문 생성 이후 절대 바뀌지 않는 값이라
+    // WHERE 절에 넣어도 안전하므로, 과거 findByOrderIdAndAccountIdForUpdate와 동일한 방식으로
+    // 락 자체를 소유자 본인 소유의 행에만 걸리도록 되돌린다(대상만 accountId 대신 userId로 조인).
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select o from Order o where o.orderId = :orderId and o.account.accountId = :accountId")
-    Optional<Order> findByOrderIdAndAccountIdForUpdate(@Param("orderId") Long orderId, @Param("accountId") Long accountId);
+    @Query("select o from Order o where o.orderId = :orderId and o.account.user.userId = :userId")
+    Optional<Order> findByOrderIdAndUserIdForUpdate(@Param("orderId") Long orderId, @Param("userId") Long userId);
 
     // 같은 계좌·종목으로 이미 등록된 PENDING 지정가 매도 주문의 수량 합계.
     // createLimitOrder()가 매도 등록 시점에 "보유수량 - 이미 대기 중인 매도 수량"으로 검증해,

@@ -46,6 +46,10 @@ public class Account {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
+    // 유저 1명이 계좌를 최대 3개까지 가질 수 있어(성향별로 나눠 투자) 구분용 이름을 둔다.
+    @Column(name = "account_name", length = 50, nullable = false)
+    private String accountName;
+
     @Column(name = "account_number", length = 20, nullable = false, unique = true)
     private String accountNumber;
 
@@ -61,6 +65,10 @@ public class Account {
     @Column(name = "frozen_balance", nullable = false)
     private long frozenBalance;
 
+    // 가상캐시 충전 횟수(최대 3회 — 초과분은 관리자 승인 필요). 검증은 AccountService에서 한다.
+    @Column(name = "charge_count", nullable = false)
+    private int chargeCount;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 10)
     @ColumnDefault("'ACTIVE'")
@@ -75,13 +83,15 @@ public class Account {
     private LocalDateTime createdAt;
 
     @Builder
-    private Account(User user, String accountNumber, LocalDate openedAt, long baseBalance, long balance) {
+    private Account(User user, String accountName, String accountNumber, LocalDate openedAt, long baseBalance, long balance) {
         this.user = user;
+        this.accountName = accountName;
         this.accountNumber = accountNumber;
         this.openedAt = openedAt;
         this.baseBalance = baseBalance;
         this.balance = balance;
         this.frozenBalance = 0L;
+        this.chargeCount = 0;
         this.status = AccountStatus.ACTIVE;
     }
 
@@ -138,5 +148,18 @@ public class Account {
     public void settleFrozenOrder(long frozenAmount, long actualAmount) {
         this.frozenBalance -= frozenAmount;
         this.balance += (frozenAmount - actualAmount);
+    }
+
+    /**
+     * 가상캐시 충전. balance에 chargeAmount를 더하고(덮어쓰기 아님) baseBalance도 같은 금액만큼
+     * 함께 올린다. baseBalance를 같이 올리지 않으면 충전으로 늘어난 현금이 수익률 계산식
+     * (총자산-baseBalance)/baseBalance에 그대로 섞여 들어가 실제 투자 성과보다 수익률이
+     * 부풀어 보이는 문제가 생긴다. 최대 충전 횟수(3회) 검증은 이 메서드가 아니라
+     * AccountService.chargeBalance()에서 한다 — Entity는 잔고/횟수 필드를 바꾸는 책임만 갖는다.
+     */
+    public void chargeBalance(long chargeAmount) {
+        this.balance += chargeAmount;
+        this.baseBalance += chargeAmount;
+        this.chargeCount += 1;
     }
 }

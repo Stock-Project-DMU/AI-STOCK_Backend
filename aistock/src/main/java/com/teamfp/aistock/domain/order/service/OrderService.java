@@ -60,7 +60,7 @@ public class OrderService {
      */
     @Transactional
     public CreateOrderResponse createMarketOrder(Long userId, CreateOrderRequest request) {
-        Account account = accountRepository.findByUserId(userId)
+        Account account = accountRepository.findByAccountIdAndUserId(request.accountId(), userId)
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
         if (account.getStatus() == AccountStatus.SUSPENDED) {
             throw new CustomException(ErrorCode.ACCOUNT_SUSPENDED);
@@ -135,8 +135,8 @@ public class OrderService {
      *
      * 격리수준을 READ_COMMITTED로 지정하는 이유: MySQL 기본(REPEATABLE READ)에서는 한
      * 트랜잭션의 일반 조회(FOR UPDATE가 아닌 SELECT)가 그 트랜잭션의 "첫 조회 시점" 스냅샷을
-     * 계속 사용한다. 이 메서드 맨 위 accountRepository.findByUserId()가 그 첫 조회라 스냅샷이
-     * 거기서 고정되는데, 매도 분기의 findHolding()(FOR UPDATE)이 다른 트랜잭션의 커밋을
+     * 계속 사용한다. 이 메서드 맨 위 accountRepository.findByAccountIdAndUserId()가 그 첫
+     * 조회라 스냅샷이 거기서 고정되는데, 매도 분기의 findHolding()(FOR UPDATE)이 다른 트랜잭션의 커밋을
      * 기다렸다가 락을 얻어도 — FOR UPDATE는 최신 커밋 데이터를 보지만 스냅샷 자체를 갱신하진
      * 않는다 — 바로 다음의 sumPendingSellQuantity()(일반 조회)는 여전히 그 오래된 스냅샷을 볼
      * 수 있어서, 방금 다른 트랜잭션이 커밋한 매도 주문을 못 보고 넘어갈 수 있다. 이는 sell 예약
@@ -145,7 +145,7 @@ public class OrderService {
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public CreateOrderResponse createLimitOrder(Long userId, CreateOrderRequest request) {
-        Account account = accountRepository.findByUserId(userId)
+        Account account = accountRepository.findByAccountIdAndUserId(request.accountId(), userId)
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
         if (account.getStatus() == AccountStatus.SUSPENDED) {
             throw new CustomException(ErrorCode.ACCOUNT_SUSPENDED);
@@ -233,13 +233,22 @@ public class OrderService {
      * frozenBalance를 balance로 되돌리고, DB 상태를 CANCELLED로 바꾼 뒤 Redis
      * pending:orders 목록에서도 제거한다.
      *
-     * findByOrderIdAndAccountIdForUpdate로 조회해 소유권(내 계좌의 주문이 맞는지) 검증과 동시에
-     * 이 Order 행에 비관적 락(SELECT ... FOR UPDATE)을 건다 — Order.version(v9 추가)이라는
-     * 최소한의 안전망은 있지만, 매도 주문은 취소 시 Account를 전혀 건드리지 않아(아래 if문 참고)
-     * 낙관적 락만으로는 재시도 없이 그 자리에서 확정 응답을 주기 어렵다. 그래서 동시
-     * 체결(OrderExecutionService.execute)과의 경합을 이 비관적 락으로 순서를 맞춰 막는다 —
-     * 두 트랜잭션이 겹치면 나중에 락을 얻는 쪽이 먼저 커밋된 쪽의 최신 status를 보고 정확히
+     * findByOrderIdAndUserIdForUpdate로 조회해 소유권(내 주문이 맞는지) 검증과 동시에 이 Order
+     * 행에 비관적 락(SELECT ... FOR UPDATE)을 건다 — Order.version(v9 추가)이라는 최소한의
+     * 안전망은 있지만, 매도 주문은 취소 시 Account를 전혀 건드리지 않아(아래 if문 참고) 낙관적
+     * 락만으로는 재시도 없이 그 자리에서 확정 응답을 주기 어렵다. 그래서 동시 체결
+     * (OrderExecutionService.execute)과의 경합을 이 비관적 락으로 순서를 맞춰 막는다 — 두
+     * 트랜잭션이 겹치면 나중에 락을 얻는 쪽이 먼저 커밋된 쪽의 최신 status를 보고 정확히
      * 반응한다(이미 처리된 주문이면 ORDER_ALREADY_PROCESSED로 응답).
+     *
+     * WHERE 절에 소유권(user_id)을 넣어 조회와 동시에 걸러내는 이유: 소유권 검증을 락 획득 뒤로
+     * 미루면(주문을 먼저 findByIdForUpdate로 잠그고 나중에 소유자를 확인하면), 남의 orderId를
+     * 넣어도 검증에 앞서 비관적 락부터 걸려버려 OrderExecutionService.execute()가 그 락을
+     * 기다리게 되는 불필요한 경합이 생기고, "존재하지만 내 것이 아님"과 "존재하지 않음"을 응답
+     * 시간 차이로 구분당할 수 있는 타이밍 사이드채널도 생긴다. 소유권(user_id)은 주문 생성 이후
+     * 절대 바뀌지 않는 값이라 WHERE 절에 넣어도 안전하므로, 조회 자체를 소유자 본인 소유의
+     * 행에만 걸리게 한다 — 다른 유저의 주문이면 이 쿼리가 애초에 아무 행도 잠그지 않고 곧바로
+     * ORDER_NOT_FOUND로 응답한다.
      *
      * 계좌 정지(SUSPENDED) 시 로그인/조회는 가능하지만 거래 관련 행위는 전부 막는다는 정책이라,
      * 새 주문 생성뿐 아니라 기존 주문 취소도 거래 행위로 보고 createMarketOrder()/
@@ -247,14 +256,13 @@ public class OrderService {
      */
     @Transactional
     public void cancelOrder(Long userId, Long orderId) {
-        Account account = accountRepository.findByUserId(userId)
-                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+        Order order = orderRepository.findByOrderIdAndUserIdForUpdate(orderId, userId)
+                .orElseThrow(() -> new CustomException(ErrorCode.ORDER_NOT_FOUND));
+
+        Account account = order.getAccount();
         if (account.getStatus() == AccountStatus.SUSPENDED) {
             throw new CustomException(ErrorCode.ACCOUNT_SUSPENDED);
         }
-
-        Order order = orderRepository.findByOrderIdAndAccountIdForUpdate(orderId, account.getAccountId())
-                .orElseThrow(() -> new CustomException(ErrorCode.ORDER_NOT_FOUND));
 
         if (order.getStatus() != OrderStatus.PENDING) {
             throw new CustomException(ErrorCode.ORDER_ALREADY_PROCESSED);

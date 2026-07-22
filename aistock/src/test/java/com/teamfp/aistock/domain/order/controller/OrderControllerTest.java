@@ -45,6 +45,7 @@ class OrderControllerTest {
     private OrderController orderController;
 
     private static final Long USER_ID = 1L;
+    private static final Long ACCOUNT_ID = 100L;
     private static final String STOCK_CODE = "005930";
 
     @BeforeEach
@@ -62,7 +63,7 @@ class OrderControllerTest {
     @Test
     @DisplayName("priceType이 MARKET이면 OrderService.createMarketOrder()를 호출해 정상 체결한다")
     void createOrder_success_market() {
-        CreateOrderRequest request = new CreateOrderRequest(STOCK_CODE, OrderType.BUY, 10, PriceType.MARKET, 0L);
+        CreateOrderRequest request = new CreateOrderRequest(ACCOUNT_ID, STOCK_CODE, OrderType.BUY, 10, PriceType.MARKET, 0L);
         CreateOrderResponse response = new CreateOrderResponse(1L, STOCK_CODE, 70_000L, 10, OrderStatus.EXECUTED);
         when(orderService.createMarketOrder(USER_ID, request)).thenReturn(response);
 
@@ -76,7 +77,7 @@ class OrderControllerTest {
     @Test
     @DisplayName("priceType이 LIMIT이면 OrderService.createLimitOrder()를 호출해 PENDING으로 등록한다")
     void createOrder_success_limit() {
-        CreateOrderRequest request = new CreateOrderRequest(STOCK_CODE, OrderType.BUY, 1, PriceType.LIMIT, 70_000L);
+        CreateOrderRequest request = new CreateOrderRequest(ACCOUNT_ID, STOCK_CODE, OrderType.BUY, 1, PriceType.LIMIT, 70_000L);
         CreateOrderResponse response = new CreateOrderResponse(1L, STOCK_CODE, null, 1, OrderStatus.PENDING);
         when(orderService.createLimitOrder(USER_ID, request)).thenReturn(response);
 

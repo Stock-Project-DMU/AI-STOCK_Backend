@@ -70,6 +70,7 @@ class OrderServiceIntegrationTest {
 
         Account account = accountRepository.save(Account.builder()
                 .user(user)
+                .accountName("통합테스트계좌")
                 .accountNumber("ACC" + (uniqueSuffix % 100_000_000L)) // account_number는 varchar(20)이라 8자리로 축약
                 .openedAt(LocalDate.now())
                 .baseBalance(1_000_000L)
@@ -90,7 +91,7 @@ class OrderServiceIntegrationTest {
         System.out.println("[Redis] stock:price:005930 = 70,000원으로 시딩 완료");
 
         // 3) OrderService 빈을 직접 호출 (Controller/JWT 레이어는 이 테스트 범위 밖)
-        CreateOrderRequest request = new CreateOrderRequest("005930", OrderType.BUY, 10, PriceType.MARKET, 0L);
+        CreateOrderRequest request = new CreateOrderRequest(account.getAccountId(), "005930", OrderType.BUY, 10, PriceType.MARKET, 0L);
         CreateOrderResponse response = orderService.createMarketOrder(user.getUserId(), request);
 
         System.out.println("[체결 결과] orderId=" + response.orderId()
