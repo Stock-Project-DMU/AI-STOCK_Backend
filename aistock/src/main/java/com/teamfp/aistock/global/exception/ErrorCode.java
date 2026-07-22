@@ -14,7 +14,6 @@ public enum ErrorCode {
     EMAIL_CODE_EXPIRED(HttpStatus.BAD_REQUEST, "EMAIL_CODE_EXPIRED", "이메일 인증 코드가 만료되었습니다."),
     INSUFFICIENT_BALANCE(HttpStatus.BAD_REQUEST, "INSUFFICIENT_BALANCE", "계좌 잔액이 부족합니다."),
     INSUFFICIENT_HOLDING(HttpStatus.BAD_REQUEST, "INSUFFICIENT_HOLDING", "보유 주식이 부족합니다."),
-    INVALID_PRICE_TYPE(HttpStatus.BAD_REQUEST, "INVALID_PRICE_TYPE", "현재 지원하지 않는 주문 유형입니다."),
     ACCOUNT_SUSPENDED(HttpStatus.BAD_REQUEST, "ACCOUNT_SUSPENDED", "정지된 계좌는 주문할 수 없습니다."),
     INVALID_ADMIN_CODE(HttpStatus.BAD_REQUEST, "INVALID_ADMIN_CODE", "관리자 코드가 일치하지 않습니다."),
 
@@ -39,6 +38,7 @@ public enum ErrorCode {
     DUPLICATE_LOGIN_ID(HttpStatus.CONFLICT, "DUPLICATE_LOGIN_ID", "이미 존재하는 아이디입니다."),
     DUPLICATE_EMAIL(HttpStatus.CONFLICT, "DUPLICATE_EMAIL", "이미 존재하는 이메일입니다."),
     OPTIMISTIC_LOCK_CONFLICT(HttpStatus.CONFLICT, "OPTIMISTIC_LOCK_CONFLICT", "동시 요청으로 처리에 실패했습니다. 다시 시도해 주세요."),
+    ORDER_ALREADY_PROCESSED(HttpStatus.CONFLICT, "ORDER_ALREADY_PROCESSED", "이미 체결되었거나 취소된 주문입니다."),
 
     // 423 Locked
     LOGIN_LOCKED(HttpStatus.LOCKED, "LOGIN_LOCKED", "로그인 시도 횟수 초과로 계정이 잠겼습니다."),

@@ -18,24 +18,22 @@ import com.teamfp.aistock.domain.order.entity.OrderType;
 import com.teamfp.aistock.domain.order.entity.PriceType;
 import com.teamfp.aistock.domain.order.service.OrderService;
 import com.teamfp.aistock.domain.user.entity.Role;
-import com.teamfp.aistock.global.exception.CustomException;
-import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.security.CustomUserDetails;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * feature/order-market — OrderController.createOrder() 단위 테스트.
+ * feature/order-market, feature/order-limit — OrderController.createOrder()/cancelOrder() 단위 테스트.
  *
- * priceType=MARKET/LIMIT 분기 책임이 OrderService.createMarketOrder()가 아니라 이 컨트롤러에
- * 있으므로(order-limit 병합 전까지는 LIMIT을 여기서 막는다), 그 분기 로직만 OrderService를
- * Mockito로 모킹해서 독립적으로 검증한다.
+ * priceType=MARKET/LIMIT 분기 책임이 OrderService가 아니라 이 컨트롤러에 있으므로,
+ * 그 분기 로직만 OrderService를 Mockito로 모킹해서 독립적으로 검증한다.
+ *
+ * order-limit 반영: priceType=LIMIT 요청을 막던 기존 테스트(createOrder_fail_limitNotSupportedYet)는
+ * createLimitOrder()가 생기면서 더 이상 유효한 시나리오가 아니라, LIMIT 요청이 실제로
+ * createLimitOrder()로 라우팅되는지 검증하는 테스트로 대체했다.
  */
 @ExtendWith(MockitoExtension.class)
 class OrderControllerTest {
@@ -72,20 +70,31 @@ class OrderControllerTest {
 
         assertThat(result.getBody().getData().execPrice()).isEqualTo(70_000L);
         verify(orderService).createMarketOrder(USER_ID, request);
+        verify(orderService, never()).createLimitOrder(USER_ID, request);
     }
 
     @Test
-    @DisplayName("priceType이 LIMIT이면 OrderService를 호출하지 않고 INVALID_PRICE_TYPE 예외를 던진다")
-    void createOrder_fail_limitNotSupportedYet() {
-        // feature/order-limit이 아직 병합되지 않아 지정가 주문을 처리할 수단이 없다.
-        // 검증 없이 진행하면 LIMIT 요청도 그대로 시장가로 체결돼버리는 게 이번에 고친 버그였다.
-        CreateOrderRequest limitRequest = new CreateOrderRequest(STOCK_CODE, OrderType.BUY, 1, PriceType.LIMIT, 70_000L);
+    @DisplayName("priceType이 LIMIT이면 OrderService.createLimitOrder()를 호출해 PENDING으로 등록한다")
+    void createOrder_success_limit() {
+        CreateOrderRequest request = new CreateOrderRequest(STOCK_CODE, OrderType.BUY, 1, PriceType.LIMIT, 70_000L);
+        CreateOrderResponse response = new CreateOrderResponse(1L, STOCK_CODE, null, 1, OrderStatus.PENDING);
+        when(orderService.createLimitOrder(USER_ID, request)).thenReturn(response);
 
-        assertThatThrownBy(() -> orderController.createOrder(limitRequest))
-                .isInstanceOf(CustomException.class)
-                .extracting(e -> ((CustomException) e).getErrorCode())
-                .isEqualTo(ErrorCode.INVALID_PRICE_TYPE);
+        var result = orderController.createOrder(request);
 
-        verify(orderService, never()).createMarketOrder(anyLong(), any());
+        assertThat(result.getBody().getData().status()).isEqualTo(OrderStatus.PENDING);
+        verify(orderService).createLimitOrder(USER_ID, request);
+        verify(orderService, never()).createMarketOrder(USER_ID, request);
+    }
+
+    @Test
+    @DisplayName("주문 취소 요청은 OrderService.cancelOrder()를 호출한다")
+    void cancelOrder_success() {
+        Long orderId = 10L;
+
+        var result = orderController.cancelOrder(orderId);
+
+        assertThat(result.getBody().isSuccess()).isTrue();
+        verify(orderService).cancelOrder(USER_ID, orderId);
     }
 }

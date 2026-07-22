@@ -109,4 +109,34 @@ public class Account {
     public void activate() {
         this.status = AccountStatus.ACTIVE;
     }
+
+    /**
+     * 지정가 매수 주문 등록 시, 체결될 경우 필요한 최대 금액(지정가 × 수량)을
+     * 즉시 사용 가능한 balance에서 frozenBalance로 옮겨 묶어둔다. 이렇게 미리 묶어두지
+     * 않으면 같은 계좌로 여러 건의 지정가 매수 주문을 걸어둔 뒤 실제 잔고보다 많은
+     * 금액이 동시에 체결될 수 있다.
+     */
+    public void freezeForOrder(long amount) {
+        this.balance -= amount;
+        this.frozenBalance += amount;
+    }
+
+    /**
+     * 지정가 매수 주문을 취소할 때, freezeForOrder로 묶어둔 금액을 그대로 balance로 되돌린다.
+     */
+    public void unfreezeForOrder(long amount) {
+        this.frozenBalance -= amount;
+        this.balance += amount;
+    }
+
+    /**
+     * 지정가 매수 주문이 체결될 때, 묶어뒀던 frozenAmount(지정가 기준)를 해제하고
+     * 실제 체결가 기준 비용(actualAmount)만 확정 지출로 반영한다. 지정가 매수는
+     * "현재가 <= 지정가"일 때 체결되므로 actualAmount는 항상 frozenAmount 이하이고,
+     * 그 차액(frozenAmount - actualAmount)은 balance로 환급된다.
+     */
+    public void settleFrozenOrder(long frozenAmount, long actualAmount) {
+        this.frozenBalance -= frozenAmount;
+        this.balance += (frozenAmount - actualAmount);
+    }
 }
