@@ -68,6 +68,7 @@ class OrderServiceTest {
     private OrderService orderService;
 
     private static final Long USER_ID = 1L;
+    private static final Long ACCOUNT_ID = 100L;
     private static final String STOCK_CODE = "005930";
 
     private Account account;
@@ -84,6 +85,7 @@ class OrderServiceTest {
         // 시작 잔고 100만원짜리 계좌
         account = Account.builder()
                 .user(user)
+                .accountName("테스트계좌")
                 .accountNumber("ACC-0001")
                 .openedAt(LocalDate.now())
                 .baseBalance(1_000_000L)
@@ -92,7 +94,7 @@ class OrderServiceTest {
 
         // ACCOUNT_NOT_FOUND 테스트처럼 이 stub을 쓰지 않는 케이스도 있어 lenient로 등록한다
         // (안 그러면 MockitoExtension의 strict stubbing 검사가 UnnecessaryStubbingException을 던진다).
-        Mockito.lenient().when(accountRepository.findByUserId(USER_ID)).thenReturn(Optional.of(account));
+        Mockito.lenient().when(accountRepository.findByAccountIdAndUserId(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
 
         // HoldingSettlementService는 @Mock이 아니라 실제 구현을 그대로 쓴다 — 이 테스트들이
         // 검증하는 "보유종목 수량/평단가가 실제로 어떻게 바뀌는지"는 그 서비스 내부 로직이라,
@@ -110,7 +112,7 @@ class OrderServiceTest {
     }
 
     private CreateOrderRequest requestOf(OrderType orderType, int quantity) {
-        return new CreateOrderRequest(STOCK_CODE, orderType, quantity, PriceType.MARKET, 0L);
+        return new CreateOrderRequest(ACCOUNT_ID, STOCK_CODE, orderType, quantity, PriceType.MARKET, 0L);
     }
 
     @Nested
@@ -273,7 +275,7 @@ class OrderServiceTest {
         @Test
         @DisplayName("계좌가 없으면 ACCOUNT_NOT_FOUND 예외를 던진다")
         void fail_accountNotFound() {
-            when(accountRepository.findByUserId(anyLong())).thenReturn(Optional.empty());
+            when(accountRepository.findByAccountIdAndUserId(anyLong(), anyLong())).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> orderService.createMarketOrder(999L, requestOf(OrderType.BUY, 1)))
                     .isInstanceOf(CustomException.class)

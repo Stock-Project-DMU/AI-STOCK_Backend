@@ -140,8 +140,9 @@ public class OrderExecutionService {
      * 매수 체결은 Account.frozenBalance/balance를 반드시 수정하므로 사용자의 동시 취소 요청과는
      * Account.version 낙관적 락으로도 보호되지만, 매도 취소는 Account를 건드리지 않아(OrderService.
      * cancelOrder 참고) 그 보호를 받지 못한다. 그래서 이 Order 행 자체를 findByIdForUpdate로
-     * 비관적 락(SELECT ... FOR UPDATE)을 걸어 조회한다 — OrderService.cancelOrder()도 같은 주문을
-     * findByOrderIdAndAccountIdForUpdate로 잠그므로, 두 트랜잭션은 매수/매도 무관하게 항상
+     * 비관적 락(SELECT ... FOR UPDATE)을 걸어 조회한다 — OrderService.cancelOrder()도 같은 주문
+     * 행을 findByOrderIdAndUserIdForUpdate로 잠그므로(WHERE 절만 다를 뿐 같은 Order 행에
+     * PESSIMISTIC_WRITE), 두 트랜잭션은 매수/매도 무관하게 항상
      * 순서대로만 처리되고 나중에 락을 얻는 쪽은 먼저 처리된 최신 status를 보게 된다.
      */
     @Transactional

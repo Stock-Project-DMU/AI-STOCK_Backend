@@ -49,6 +49,7 @@ class OrderRepositoryIntegrationTest {
                 .build());
         return accountRepository.save(Account.builder()
                 .user(user)
+                .accountName("테스트계좌")
                 .accountNumber("O" + (Math.abs(suffix.hashCode()) % 10_000_000))
                 .openedAt(LocalDate.now())
                 .baseBalance(1_000_000L)
@@ -67,6 +68,19 @@ class OrderRepositoryIntegrationTest {
                 .quantity(quantity)
                 .build();
         order.execute(execPrice);
+        return orderRepository.save(order);
+    }
+
+    private Order newPendingLimitOrder(Account account) {
+        Order order = Order.builder()
+                .account(account)
+                .stockCode("005930")
+                .stockName("삼성전자")
+                .orderType(OrderType.BUY)
+                .priceType(PriceType.LIMIT)
+                .orderPrice(70_000L)
+                .quantity(1)
+                .build();
         return orderRepository.save(order);
     }
 
@@ -131,5 +145,25 @@ class OrderRepositoryIntegrationTest {
         newExecutedOrder(account, 50_000L, 4);  // 200,000
 
         assertThat(orderRepository.sumExecutedAmount() - before).isEqualTo(900_000L);
+    }
+
+    @Test
+    @DisplayName("findByOrderIdAndUserIdForUpdate는 주문 소유자 본인의 userId로만 조회되고, 다른 유저의 userId로는 조회되지 않는다")
+    void findByOrderIdAndUserIdForUpdate_onlyMatchesOwner() {
+        // OrderService.cancelOrder()가 이 메서드로 소유권 검증과 비관적 락을 동시에 처리하므로
+        // (코드 리뷰에서 지적된 부분 — 유닛 테스트는 Mockito로 리포지토리를 모킹해서 실제 JPQL의
+        // WHERE 절(o.account.user.userId = :userId)이 남의 주문을 정말로 걸러내는지 검증하지
+        // 못한다), 실제 MySQL로 그 WHERE 절 자체를 검증한다.
+        Account ownerAccount = newAccount(String.valueOf(System.nanoTime()));
+        Account otherAccount = newAccount(String.valueOf(System.nanoTime() + 1));
+        Order order = newPendingLimitOrder(ownerAccount);
+
+        Optional<Order> foundByOwner = orderRepository.findByOrderIdAndUserIdForUpdate(
+                order.getOrderId(), ownerAccount.getUser().getUserId());
+        Optional<Order> foundByOtherUser = orderRepository.findByOrderIdAndUserIdForUpdate(
+                order.getOrderId(), otherAccount.getUser().getUserId());
+
+        assertThat(foundByOwner).isPresent();
+        assertThat(foundByOtherUser).isEmpty();
     }
 }

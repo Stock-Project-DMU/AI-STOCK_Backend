@@ -13,6 +13,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.teamfp.aistock.domain.account.entity.Account;
 import com.teamfp.aistock.domain.account.repository.AccountRepository;
@@ -72,6 +73,7 @@ class OrderServiceLimitOrderTest {
     private OrderService orderService;
 
     private static final Long USER_ID = 1L;
+    private static final Long ACCOUNT_ID = 100L;
     private static final String STOCK_CODE = "005930";
 
     private Account account;
@@ -84,16 +86,20 @@ class OrderServiceLimitOrderTest {
                 .role(Role.USER)
                 .isActive(true)
                 .build();
+        // cancelOrder()는 order.getAccount().getUser().getUserId()로 소유권을 검증하므로,
+        // 실제 DB 없이 만든 User라도 userId를 채워둬야 한다(자동 생성 PK라 builder에는 없음).
+        ReflectionTestUtils.setField(user, "userId", USER_ID);
 
         account = Account.builder()
                 .user(user)
+                .accountName("테스트계좌")
                 .accountNumber("ACC-0001")
                 .openedAt(LocalDate.now())
                 .baseBalance(1_000_000L)
                 .balance(1_000_000L)
                 .build();
 
-        Mockito.lenient().when(accountRepository.findByUserId(USER_ID)).thenReturn(Optional.of(account));
+        Mockito.lenient().when(accountRepository.findByAccountIdAndUserId(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
         // orderRepository.save()는 실제 DB처럼 orderId를 채워주지 않으므로, 테스트에서는
         // Order.builder()로 만든 엔티티를 그대로 리턴해도 orderId가 null이라 뒤 로직(Redis 등록)
         // 검증에는 지장이 없다 — orderId 자체를 검증하는 케이스는 없다.
@@ -101,7 +107,19 @@ class OrderServiceLimitOrderTest {
     }
 
     private CreateOrderRequest limitRequestOf(OrderType orderType, int quantity, long orderPrice) {
-        return new CreateOrderRequest(STOCK_CODE, orderType, quantity, PriceType.LIMIT, orderPrice);
+        return new CreateOrderRequest(ACCOUNT_ID, STOCK_CODE, orderType, quantity, PriceType.LIMIT, orderPrice);
+    }
+
+    private Order pendingBuyOrder(long orderPrice, int quantity) {
+        return Order.builder()
+                .account(account)
+                .stockCode(STOCK_CODE)
+                .stockName("삼성전자")
+                .orderType(OrderType.BUY)
+                .priceType(PriceType.LIMIT)
+                .orderPrice(orderPrice)
+                .quantity(quantity)
+                .build();
     }
 
     @Nested
@@ -127,13 +145,14 @@ class OrderServiceLimitOrderTest {
         @DisplayName("계좌가 정지 상태면 주문 취소도 거래 행위로 간주해 ACCOUNT_SUSPENDED 예외를 던진다")
         void fail_accountSuspended_cancelOrder() {
             account.suspend();
+            Order order = pendingBuyOrder(70_000L, 10);
+            when(orderRepository.findByOrderIdAndUserIdForUpdate(1L, USER_ID)).thenReturn(Optional.of(order));
 
             assertThatThrownBy(() -> orderService.cancelOrder(USER_ID, 1L))
                     .isInstanceOf(CustomException.class)
                     .extracting(e -> ((CustomException) e).getErrorCode())
                     .isEqualTo(ErrorCode.ACCOUNT_SUSPENDED);
 
-            verify(orderRepository, never()).findByOrderIdAndAccountIdForUpdate(anyLong(), any());
             verify(redisPendingOrderService, never()).removePendingOrder(anyString(), anyLong());
         }
     }
@@ -325,24 +344,12 @@ class OrderServiceLimitOrderTest {
     @DisplayName("지정가 주문 취소")
     class CancelOrder {
 
-        private Order pendingBuyOrder(long orderPrice, int quantity) {
-            return Order.builder()
-                    .account(account)
-                    .stockCode(STOCK_CODE)
-                    .stockName("삼성전자")
-                    .orderType(OrderType.BUY)
-                    .priceType(PriceType.LIMIT)
-                    .orderPrice(orderPrice)
-                    .quantity(quantity)
-                    .build();
-        }
-
         @Test
         @DisplayName("PENDING 매수 주문을 취소하면 frozenBalance가 balance로 되돌아오고 CANCELLED로 바뀐다")
         void success_unfreezesBalance() {
             Order order = pendingBuyOrder(70_000L, 10);
             account.freezeForOrder(700_000L); // 주문 등록 시점에 이미 동결돼 있던 상태를 재현
-            when(orderRepository.findByOrderIdAndAccountIdForUpdate(1L, null)).thenReturn(Optional.of(order));
+            when(orderRepository.findByOrderIdAndUserIdForUpdate(1L, USER_ID)).thenReturn(Optional.of(order));
 
             orderService.cancelOrder(USER_ID, 1L);
 
@@ -355,7 +362,7 @@ class OrderServiceLimitOrderTest {
         @Test
         @DisplayName("존재하지 않거나 내 계좌 소유가 아닌 주문이면 ORDER_NOT_FOUND 예외를 던진다")
         void fail_orderNotFound() {
-            when(orderRepository.findByOrderIdAndAccountIdForUpdate(anyLong(), any())).thenReturn(Optional.empty());
+            when(orderRepository.findByOrderIdAndUserIdForUpdate(anyLong(), anyLong())).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> orderService.cancelOrder(USER_ID, 999L))
                     .isInstanceOf(CustomException.class)
@@ -368,7 +375,7 @@ class OrderServiceLimitOrderTest {
         void fail_alreadyProcessed() {
             Order order = pendingBuyOrder(70_000L, 10);
             order.execute(65_000L);
-            when(orderRepository.findByOrderIdAndAccountIdForUpdate(1L, null)).thenReturn(Optional.of(order));
+            when(orderRepository.findByOrderIdAndUserIdForUpdate(1L, USER_ID)).thenReturn(Optional.of(order));
 
             assertThatThrownBy(() -> orderService.cancelOrder(USER_ID, 1L))
                     .isInstanceOf(CustomException.class)

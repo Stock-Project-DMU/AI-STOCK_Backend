@@ -18,6 +18,12 @@ import jakarta.validation.constraints.PositiveOrZero;
  */
 public record CreateOrderRequest(
 
+        // feature/mypage-account부터 유저가 계좌를 최대 3개까지 가질 수 있어, 어느 계좌로
+        // 주문할지 클라이언트가 명시해야 한다. OrderService는 이 accountId와 인증된 userId를
+        // 함께 검증해(accountRepository.findByAccountIdAndUserId) 소유권도 같이 확인한다.
+        @NotNull(message = "계좌 ID는 필수입니다.")
+        Long accountId,
+
         @NotBlank(message = "종목 코드는 필수입니다.")
         String stockCode,
 

@@ -72,8 +72,8 @@ public class Order {
     @Column(name = "status", nullable = false, length = 10)
     private OrderStatus status;
 
-    // v9 추가: 낙관적 락(accounts.version과 동일한 목적). Order 행 자체를 findByIdForUpdate/
-    // findByOrderIdAndAccountIdForUpdate의 비관적 락으로 보호하는 것이 체결/취소 경합을 막는
+    // v9 추가: 낙관적 락(accounts.version과 동일한 목적). Order 행 자체를 findByIdForUpdate의
+    // 비관적 락으로 보호하는 것이 체결/취소 경합을 막는
     // 주된 방법이지만, OrderRepository에는 그 외에도 잠금 없는 조회 메서드(관리자 기능 등)가
     // 함께 존재해 그 경로로 조회한 뒤 execute()/cancel()을 호출하는 코드가 나중에 추가되더라도
     // JPA가 자동으로 동시 수정 충돌을 막아주는 최후의 안전망 역할을 한다.
