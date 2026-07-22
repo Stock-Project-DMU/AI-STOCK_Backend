@@ -554,7 +554,8 @@ CREATE TABLE inquiries (
   SELECT i.*, u.name, u.login_id
   FROM inquiries i
   JOIN users u ON u.user_id = i.user_id
-  ORDER BY i.status ASC, i.created_at DESC;  -- PENDING이 ANSWERED보다 사전순 앞이라 미답변이 위로 옴
+  ORDER BY i.status DESC, i.created_at DESC;  -- 'PENDING'이 'ANSWERED'보다 사전순 뒤(P > A)이므로
+                                               -- status를 내림차순 정렬해야 미답변이 위로 옴
 
   [문의 관리 — 답변 작성]
   UPDATE inquiries
