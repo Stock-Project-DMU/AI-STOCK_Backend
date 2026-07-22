@@ -2,6 +2,7 @@ package com.teamfp.aistock.domain.stock.service;
 
 import java.util.List;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,7 +17,9 @@ import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.redis.RedisStockCacheService;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class WatchlistService {
@@ -29,6 +32,13 @@ public class WatchlistService {
     // (stock:price)이기 때문이다.
     private final RedisStockCacheService redisStockCacheService;
 
+    // watchlist.uq_user_stock — 같은 유저·종목의 관심종목 등록이 동시에 두 건 이상 요청될 때
+    // 걸리는 유니크 제약. HoldingSettlementService.isUniqueConstraintViolation()과 같은 이유로
+    // DataIntegrityViolationException의 원인이 이 제약인지 메시지로 정확히 구분한다 — stockName이
+    // 컬럼 길이를 초과하는 등 재시도해도 해소되지 않는 다른 저장 실패까지 "이미 등록됨"으로
+    // 오인해 삼켜버리면 안 되기 때문이다.
+    private static final String UNIQUE_CONSTRAINT_NAME = "uq_user_stock";
+
     @Transactional(readOnly = true)
     public List<WatchlistResponse> getMyWatchlist(Long userId) {
         return watchlistRepository.findAllByUserId(userId).stream()
@@ -39,6 +49,9 @@ public class WatchlistService {
     /**
      * 관심종목 추가. 이미 추가되어 있으면(uq_user_stock) 에러 없이 그대로 둔다 —
      * "관심종목 등록"은 토글성 액션이라 중복 요청을 실패로 취급할 이유가 없다.
+     * existsBy 조회와 save() 사이에 동시에 같은 종목을 추가하는 요청이 끼어들면
+     * uq_user_stock을 위반하는 DataIntegrityViolationException이 save() 시점(IDENTITY라 즉시
+     * flush됨)에 터질 수 있는데, 이 역시 위와 같은 이유로 실패로 취급하지 않고 무시한다.
      */
     @Transactional
     public void addWatchlist(Long userId, String stockCode) {
@@ -59,7 +72,19 @@ public class WatchlistService {
                 .stockCode(stockCode)
                 .stockName(priceDto.getStockName())
                 .build();
-        watchlistRepository.save(watchlist);
+        try {
+            watchlistRepository.save(watchlist);
+        } catch (DataIntegrityViolationException e) {
+            if (!isUniqueConstraintViolation(e)) {
+                throw e;
+            }
+            log.info("관심종목 동시 추가 요청 충돌(userId={}, stockCode={}) - 이미 등록된 것으로 처리", userId, stockCode);
+        }
+    }
+
+    private boolean isUniqueConstraintViolation(DataIntegrityViolationException e) {
+        Throwable cause = e.getMostSpecificCause();
+        return cause.getMessage() != null && cause.getMessage().contains(UNIQUE_CONSTRAINT_NAME);
     }
 
     /**

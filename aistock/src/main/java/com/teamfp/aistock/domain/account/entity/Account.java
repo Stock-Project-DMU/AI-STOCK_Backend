@@ -30,7 +30,8 @@ import lombok.NoArgsConstructor;
 
 @Entity
 @Table(name = "accounts", indexes = {
-        @Index(name = "idx_account_status", columnList = "status")
+        @Index(name = "idx_account_status", columnList = "status"),
+        @Index(name = "idx_account_user", columnList = "user_id")
 })
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)

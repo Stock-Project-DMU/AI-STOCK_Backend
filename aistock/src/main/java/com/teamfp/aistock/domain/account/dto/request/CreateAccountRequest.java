@@ -1,6 +1,7 @@
 package com.teamfp.aistock.domain.account.dto.request;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 /**
  * 계좌 개설 요청 DTO. 유저 1명이 성향별로 계좌를 나눠 쓸 수 있도록(최대 3개)
@@ -9,6 +10,7 @@ import jakarta.validation.constraints.NotBlank;
 public record CreateAccountRequest(
 
         @NotBlank(message = "계좌 이름은 필수입니다.")
+        @Size(max = 50, message = "계좌 이름은 50자를 초과할 수 없습니다.")
         String accountName
 ) {
 }
