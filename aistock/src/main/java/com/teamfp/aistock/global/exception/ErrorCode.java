@@ -16,6 +16,8 @@ public enum ErrorCode {
     INSUFFICIENT_HOLDING(HttpStatus.BAD_REQUEST, "INSUFFICIENT_HOLDING", "보유 주식이 부족합니다."),
     ACCOUNT_SUSPENDED(HttpStatus.BAD_REQUEST, "ACCOUNT_SUSPENDED", "정지된 계좌는 주문할 수 없습니다."),
     INVALID_ADMIN_CODE(HttpStatus.BAD_REQUEST, "INVALID_ADMIN_CODE", "관리자 코드가 일치하지 않습니다."),
+    ACCOUNT_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "ACCOUNT_LIMIT_EXCEEDED", "계좌는 최대 3개까지 만들 수 있습니다."),
+    CHARGE_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "CHARGE_LIMIT_EXCEEDED", "자동 충전 가능 횟수(3회)를 초과했습니다. 관리자에게 문의해 주세요."),
 
     // 401 Unauthorized
     INVALID_PASSWORD(HttpStatus.UNAUTHORIZED, "INVALID_PASSWORD", "비밀번호가 일치하지 않습니다."),

@@ -74,6 +74,7 @@ class OrderExecutionServiceTest {
 
         account = Account.builder()
                 .user(user)
+                .accountName("테스트계좌")
                 .accountNumber("ACC-0001")
                 .openedAt(LocalDate.now())
                 .baseBalance(1_000_000L)

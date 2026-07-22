@@ -1,5 +1,16 @@
 -- =====================================================
--- AI STOCK MySQL Schema (최종본 v9)
+-- AI STOCK MySQL Schema (최종본 v10)
+-- 변경사항 v9 → v10:
+--   1. accounts 테이블에 account_name, charge_count 컬럼 추가
+--      (feature/mypage-account — 유저 1명이 최대 3개까지 가상계좌를 만들 수 있도록
+--       변경. account_name은 계좌 구분용 이름("계좌 A" 등)이며 CreateAccountRequest에서
+--       필수값으로 받는다(자동 기본값 없음). charge_count는 계좌별 가상캐시
+--       충전 횟수 — 3회까지는 자동 충전, 그 이상은 관리자 승인 필요(서비스
+--       계층에서 CHARGE_LIMIT_EXCEEDED로 차단, 실제 승인 워크플로우는 이번
+--       범위 밖). 계좌 개수 제한(최대 3개)은 DB 제약이 아니라 AccountService에서
+--       INSERT 전에 COUNT로 검증한다 — accounts.user_id는 이미 v1부터 FK만 있고
+--       UNIQUE가 아니라서(1:N 관계) 스키마 자체는 원래도 여러 계좌를 막지 않았다.
+-- =====================================================
 -- 변경사항 v8 → v9:
 --   1. orders 테이블에 version 컬럼 추가
 --      (낙관적 락 — accounts.version과 동일한 목적. feature/order-limit에서
@@ -191,13 +202,19 @@ CREATE TABLE investment_profile (
 -- 4. 모의투자 계좌 (accounts)
 -- =====================================================
 /*
-  [총 자산 계산 (DB 컬럼 없음 — 실시간 계산)]
+  [계좌 개수 — v10]
+  유저 1명이 최대 3개까지 가상계좌를 만들 수 있다(예: "계좌 A"는 안정적으로,
+  "계좌 B"는 공격적으로 운용해보는 식). accounts.user_id는 처음부터 FK만 있고
+  UNIQUE가 아니었으므로(1:N) 스키마 변경은 필요 없고, 개수 제한(3개)은
+  AccountService.createAccount()에서 COUNT 후 검증한다.
+
+  [총 자산 계산 (DB 컬럼 없음 — 실시간 계산, 계좌 단위)]
   총 자산 = (balance + frozen_balance)
             + Σ(holdings.quantity × Redis stock:price:{stockCode})
-  수익률 = (총 자산 - initial_balance) / initial_balance × 100
+  수익률 = (총 자산 - base_balance) / base_balance × 100
 
   [잔고 구조]
-  initial_balance : 최초 지급 금액 (고정, 수익률 계산 기준)
+  base_balance    : 최초 지급 + 누적 충전 금액 (수익률 계산 기준 — 충전 시 함께 올라감)
   balance         : 즉시 사용 가능한 현금 잔고
   frozen_balance  : 지정가 주문 예약 잠금 금액 (balance에서 이미 차감)
 
@@ -209,6 +226,13 @@ CREATE TABLE investment_profile (
   지정가 매수 등록: balance -= 주문금액, frozen_balance += 주문금액
   지정가 체결:     frozen_balance -= 주문금액 (balance는 이미 차감 완료)
   지정가 취소:     balance += 주문금액,       frozen_balance -= 주문금액
+
+  [가상캐시 충전 — v10]
+  POST /api/accounts/{accountId}/charge 호출 시 balance/base_balance를 charge_amount만큼
+  같이 올리고(수익률에 공짜 충전분이 반영되지 않도록) charge_count를 1 증가시킨다.
+  charge_count가 3 이상이면 CustomException(ErrorCode.CHARGE_LIMIT_EXCEEDED)로 막고,
+  관리자 문의(inquiries)를 통해 별도로 요청하도록 안내한다(관리자 승인 워크플로우 자체는
+  이번 범위 밖 — 필요해지면 admin-account 쪽에 charge_count를 초기화해주는 기능을 추가한다).
 
   [version 컬럼 - 낙관적 락]
   동시성 문제 해결: 지정가 주문 동시 체결 시 잔고 오류 방지
@@ -229,17 +253,20 @@ CREATE TABLE investment_profile (
 CREATE TABLE accounts (
     account_id      BIGINT          NOT NULL AUTO_INCREMENT,
     user_id         BIGINT          NOT NULL,
+    account_name    VARCHAR(50)     NOT NULL,                 -- v10 추가: 계좌 구분용 이름 (예: "계좌 A")
     account_number  VARCHAR(20)     NOT NULL UNIQUE,
     opened_at       DATE            NOT NULL,
-    base_balance BIGINT          NOT NULL DEFAULT 10000000, -- 지급 금액 (수익률 기준)
+    base_balance BIGINT          NOT NULL DEFAULT 10000000, -- 지급/충전 누계 기준 (수익률 기준)
     balance         BIGINT          NOT NULL DEFAULT 10000000, -- 즉시 사용 가능한 현금 잔고
     frozen_balance  BIGINT          NOT NULL DEFAULT 0,        -- 지정가 주문 예약 잠금 금액
+    charge_count    TINYINT         NOT NULL DEFAULT 0,        -- v10 추가: 가상캐시 충전 횟수 (3회까지 자동, 이후 관리자 승인)
     version         BIGINT          NOT NULL DEFAULT 0,        -- 낙관적 락용 버전 번호
     status          ENUM('ACTIVE','SUSPENDED')
                                     NOT NULL DEFAULT 'ACTIVE', -- v7 추가: 관리자에 의한 거래 정지
     created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (account_id),
     INDEX idx_account_status (status),               -- v7 추가: 관리자 페이지 정지 계좌 필터링용
+    INDEX idx_account_user (user_id),                -- v10 추가: "내 계좌 목록" 조회(user_id 기준 최대 3건)용
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
@@ -528,7 +555,8 @@ CREATE TABLE inquiries (
   총 현금  = accounts.balance + accounts.frozen_balance
   주식평가 = Σ (holdings.quantity × Redis stock:price:{stockCode})
   총 자산  = 총 현금 + 주식평가
-  수익률   = (총 자산 - initial_balance) / initial_balance × 100
+  수익률   = (총 자산 - accounts.base_balance) / accounts.base_balance × 100
+  (계좌 단위 계산 — 유저가 계좌를 여러 개 가진 경우 계좌별로 각각 계산한다)
 */
 
 -- =====================================================
