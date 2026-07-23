@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -40,6 +41,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .body(ApiResponse.error(message));
+    }
+
+    // AuthController.refresh() 등에서 @RequestHeader(AUTHORIZATION) 필수 헤더가 누락된 경우
+    // MissingRequestHeaderException이 발생한다. 이를 잡지 않으면 500 에러가 나가므로,
+    // 토큰 누락과 동일하게 ErrorCode.INVALID_TOKEN(401)으로 응답하도록 처리한다.
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMissingRequestHeaderException(MissingRequestHeaderException e) {
+        ErrorCode errorCode = ErrorCode.INVALID_TOKEN;
+        log.warn("Missing Request Header: {}", e.getMessage());
+
+        return ResponseEntity
+                .status(errorCode.getStatus())
+                .body(ApiResponse.error(errorCode.getMessage()));
     }
 
     // Account.version(@Version) 낙관적 락 충돌 — 동시에 같은 계좌로 주문/잔고 변경이 몰려
