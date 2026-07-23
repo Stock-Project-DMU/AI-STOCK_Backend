@@ -1,12 +1,16 @@
 package com.teamfp.aistock.infra.oauth.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Getter
+@Builder
 @NoArgsConstructor
-public class NaverUserInfo {
+@AllArgsConstructor
+public class NaverUserDto {
 
     @JsonProperty("resultcode")
     private String resultCode;
@@ -18,7 +22,9 @@ public class NaverUserInfo {
     private NaverResponse response;
 
     @Getter
+    @Builder
     @NoArgsConstructor
+    @AllArgsConstructor
     public static class NaverResponse {
         @JsonProperty("id")
         private String id; // 네이버 고유 식별값 (문자열)
@@ -30,11 +36,11 @@ public class NaverUserInfo {
         private String name; // 사용자 이름
     }
 
-    // 공통 규격인 SocialUserInfo로 변환
-    public SocialUserInfo toSocialUserInfo() {
+    // 공통 규격인 SocialUserDto로 변환
+    public SocialUserDto toSocialUserDto() {
         if (response == null) {
-            return new SocialUserInfo(null, null, "네이버회원");
+            return new SocialUserDto(null, null, "네이버회원");
         }
-        return new SocialUserInfo(response.getId(), response.getEmail(), response.getName());
+        return new SocialUserDto(response.getId(), response.getEmail(), response.getName());
     }
 }

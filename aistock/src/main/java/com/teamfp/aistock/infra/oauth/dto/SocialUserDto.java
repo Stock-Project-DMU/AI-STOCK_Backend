@@ -5,7 +5,7 @@ import lombok.Getter;
 
 @Getter
 @AllArgsConstructor
-public class SocialUserInfo {
+public class SocialUserDto {
     private String providerId;
     private String email;
     private String name;

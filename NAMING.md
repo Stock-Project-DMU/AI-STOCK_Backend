@@ -282,16 +282,24 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 | 구분 | 이름 |
 |---|---|
 | Controller | `AuthController` |
-| 엔드포인트 | `POST /api/auth/login`, `POST /api/auth/oauth/{provider}`, `POST /api/auth/refresh` |
-| Service | `AuthService` — `login(LoginRequest request)`, `oauthLogin(String provider, OAuthLoginRequest request)`, `reissueToken(String refreshToken)` |
-| Request DTO | `LoginRequest`(loginId, password), `OAuthLoginRequest`(authorizationCode) |
-| Response DTO | `LoginResponse`(accessToken, refreshToken), `TokenResponse`(accessToken, refreshToken) |
-| OAuth Client | `KakaoOAuthClient.getUserInfo(String code)`, `NaverOAuthClient.getUserInfo(String code)`, `GoogleOAuthClient.getUserInfo(String code)` |
-| OAuth Dto | `KakaoUserInfo`(providerId, email, nickname, birthday, birthyear), `NaverUserInfo`(providerId, email, name, birthday, birthyear), `GoogleUserInfo`(providerId, email, name) |
+| 엔드포인트 | `POST /api/auth/login`, `POST /api/auth/oauth/login`, `POST /api/auth/refresh` |
+| Service | `AuthService` — `login(LoginRequest request)`, `socialLogin(OAuthLoginRequest request)`, `processSocialLogin(SocialProvider provider, SocialUserDto userInfo)`(소셜 로그인 실제 처리 — `socialLogin()`이 self 프록시로만 호출하는 `REQUIRES_NEW` 내부 메서드, 아래 참고), `refresh(String authHeader)` |
+| Request DTO | `LoginRequest`(loginId, password), `OAuthLoginRequest`(provider, code) |
+| Response DTO | `LoginResponse`(accessToken, refreshToken, userId, name, email), `TokenResponse`(accessToken, refreshToken) |
+| OAuth Client | `OAuthClient`(인터페이스) — `getProvider()`, `getUserInfo(String code): SocialUserDto`. `KakaoOAuthClient`/`NaverOAuthClient`/`GoogleOAuthClient`가 구현 |
+| OAuth Dto | `SocialUserDto`(providerId, email, name) — Provider 공통 규격. 각 Provider 응답 파싱 전용 DTO는 `toSocialUserDto()`로 변환: `KakaoUserDto`(id, kakaoAccount{email, profile{nickname}}), `NaverUserDto`(resultCode, message, response{id, email, name}), `GoogleUserDto`(id, email, name) |
 | Util | `SecurityUtil.getCurrentUserId()` |
 
 > v8 추가: `AuthService.login()`에서 `user.getStatus() == UserStatus.SUSPENDED`인 경우
 > `CustomException(ErrorCode.USER_SUSPENDED)` throw (기존 `isActive`/탈퇴 확인과 별도 분기).
+
+> **동시 가입 경합 처리**: 소셜 로그인 신규 가입 분기는 조회 후 저장 구조라 동시 요청 시
+> `social_accounts.uq_provider` 유니크 제약 위반(`DataIntegrityViolationException`)이 날 수 있다.
+> `socialLogin()`은 이를 잡아 1회 재시도하는데, `processSocialLogin()`을 반드시 self 프록시
+> (`@Autowired @Lazy` 필드, `OrderExecutionService`와 동일한 패턴)를 통해
+> `@Transactional(REQUIRES_NEW)`로 호출한다 — self 없이 `this.processSocialLogin(...)`을 직접
+> 재귀 호출하면 Spring AOP 프록시를 우회해 REQUIRES_NEW가 적용되지 않고, 방금 flush 실패로
+> 손상된 트랜잭션/Hibernate Session을 재시도 시점에도 그대로 재사용하게 되어 재시도가 무의미해진다.
 
 ### 8-2. feature/auth-signup
 
