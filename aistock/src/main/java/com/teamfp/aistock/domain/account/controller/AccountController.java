@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.teamfp.aistock.domain.account.dto.request.CreateAccountRequest;
 import com.teamfp.aistock.domain.account.dto.response.AccountInfoResponse;
+import com.teamfp.aistock.domain.account.dto.response.ProfitResponse;
 import com.teamfp.aistock.domain.account.service.AccountService;
 import com.teamfp.aistock.global.response.ApiResponse;
 import com.teamfp.aistock.global.util.SecurityUtil;
@@ -41,5 +42,11 @@ public class AccountController {
     public ApiResponse<AccountInfoResponse> chargeBalance(@PathVariable Long accountId) {
         Long userId = SecurityUtil.getCurrentUserId();
         return ApiResponse.success("가상캐시가 충전되었습니다.", accountService.chargeBalance(userId, accountId));
+    }
+
+    @GetMapping("/{accountId}/profit")
+    public ApiResponse<ProfitResponse> getProfit(@PathVariable Long accountId) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        return ApiResponse.success(accountService.getProfit(userId, accountId));
     }
 }

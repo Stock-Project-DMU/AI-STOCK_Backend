@@ -109,4 +109,13 @@ public class User {
     public void activate() {
         this.status = UserStatus.ACTIVE;
     }
+
+    /**
+     * 마이페이지 내 정보 수정. loginId/비밀번호/투자성향은 이 메서드로 바꾸지 않는다
+     * (각각 별도 기능). 이메일 중복 검증은 UserService.updateMyInfo()에서 미리 수행한다.
+     */
+    public void updateInfo(String name, String email) {
+        this.name = name;
+        this.email = email;
+    }
 }
