@@ -144,6 +144,7 @@
 | `ACCESS_DENIED` | 403 |
 | `EMAIL_CODE_MISMATCH` | 400 |
 | `EMAIL_CODE_EXPIRED` | 400 |
+| `EMAIL_NOT_VERIFIED` | 400 (v8 추가 — 이메일 인증을 거치지 않고 `signup()`을 호출한 경우) |
 | `ACCOUNT_NOT_FOUND` | 404 |
 | `INSUFFICIENT_BALANCE` | 400 |
 | `INSUFFICIENT_HOLDING` | 400 |
@@ -265,7 +266,7 @@ redis-logic.md(수정본) 기준 확정된 이름 그대로 사용:
 | 클래스 | 주요 메서드 |
 |---|---|
 | `RedisTokenService` | `saveRefreshToken`, `getRefreshToken`, `isRefreshTokenValid`, `deleteRefreshToken`, `blacklistAccessToken`, `isBlacklisted` |
-| `RedisAuthCodeService` | `saveEmailCode`, `verifyAndDeleteEmailCode`, `incrementLoginFail`, `isLoginLocked`, `resetLoginFail` |
+| `RedisAuthCodeService` | `saveEmailCode`, `verifyAndDeleteEmailCode`, `markEmailVerified`(v8 추가), `consumeEmailVerified`(v8 추가), `incrementLoginFail`, `isLoginLocked`, `resetLoginFail` |
 | `RedisStockCacheService` | `saveStockPrice`, `getStockPrice`, `saveHogaData`, `getHogaData` |
 | `RedisPendingOrderService` | `initPendingOrders`, `addPendingOrder`, `getPendingOrders`, `removePendingOrder` |
 | `RedisRateLimiterService` | `isAllowed`, `increment`, `getRemainingDaily` |
@@ -309,11 +310,17 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 | Service (AuthService 추가) | `signup(SignupRequest request)`, `sendEmailCode(String email)`, `verifyEmailCode(String email, String code)` |
 | Request DTO | `SignupRequest`(loginId, password, name, email, birthdate, `role`, `adminCode`), `EmailCodeRequest`(email), `EmailCodeVerifyRequest`(email, code) |
 | Response DTO | `SignupResponse`(userId, loginId, role) |
-| Util | `DateUtil.parseSocialBirthdate(String birthday, String birthyear)` |
+| Mail Client | `MailClient`(infra/mail) — `sendAuthCode(String toEmail, String code)`. Spring Mail(`JavaMailSender`) 사용, SMTP 설정은 `spring.mail.*`(환경변수 `MAIL_HOST`/`MAIL_PORT`/`MAIL_USERNAME`/`MAIL_PASSWORD`), 발신자 주소는 별도 커스텀 프로퍼티 `app.mail.from`(환경변수 `MAIL_FROM`). 발송 실패 시 `CustomException(ErrorCode.EXTERNAL_API_ERROR)` |
 
 > v8 추가: `SignupRequest.role`(기본값 `USER`)이 `ADMIN`이면 `adminCode`가 필수이며,
 > `AuthService.signup()`에서 서버 환경변수 `ADMIN_SIGNUP_CODE`와 대조 후 불일치 시
 > `CustomException(ErrorCode.INVALID_ADMIN_CODE)` throw. 일치해야만 `Role.ADMIN`으로 가입.
+
+> v8 추가: `signup()`은 이메일 인증을 거치지 않은 이메일로는 가입할 수 없다.
+> `verifyEmailCode()` 성공 시 `RedisAuthCodeService.markEmailVerified(email)`로
+> `auth:email_verified:{email}`(TTL 30분) 마커를 남기고, `signup()`은 중복 아이디/이메일
+> 체크와 관리자 코드 검증을 모두 통과한 뒤 `consumeEmailVerified(email)`로 이 마커를
+> 확인·소비(1회용)한다. 마커가 없으면 `CustomException(ErrorCode.EMAIL_NOT_VERIFIED)` throw.
 
 ### 8-3. feature/auth-logout
 

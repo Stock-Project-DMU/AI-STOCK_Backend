@@ -23,6 +23,19 @@ spring:
           min-idle: 1
           max-wait: -1ms
 
+  mail:
+    host: ${MAIL_HOST}
+    port: ${MAIL_PORT}
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
+    default-encoding: UTF-8
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
 logging:
   level:
     com.teamfp.aistock: info
@@ -33,3 +46,6 @@ cors:
 
 jwt:
   secret: ${JWT_SECRET}
+
+admin:
+  signup-code: ${ADMIN_SIGNUP_CODE}
