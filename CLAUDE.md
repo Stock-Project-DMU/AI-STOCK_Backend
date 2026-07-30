@@ -82,7 +82,8 @@ com.teamfp.aistock
 │   ├── gemini        → GeminiApiClient, dto
 │   ├── dart          → DartApiClient, dto
 │   ├── tavily        → TavilyApiClient, dto
-│   └── oauth         → KakaoOAuthClient, NaverOAuthClient, GoogleOAuthClient, dto
+│   ├── oauth         → KakaoOAuthClient, NaverOAuthClient, GoogleOAuthClient, dto
+│   └── mail          → MailClient (이메일 인증코드 발송, Spring Mail 사용)
 └── resources
     ├── application.yml
     ├── application-dev.yml
@@ -201,6 +202,7 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
 | `auth:refresh:{userId}` | 14일 | Refresh Token |
 | `auth:blacklist:{accessToken}` | Access Token 남은 유효시간(동적) | 로그아웃 블랙리스트 |
 | `auth:email_code:{email}` | 5분 | 이메일 인증코드 |
+| `auth:email_verified:{email}` | 30분 | 이메일 인증 완료 마커 (`signup()`이 소비 후 삭제하는 1회용) |
 | `auth:login_fail:{loginId}` | 10분 | 로그인 실패 카운터 (5회 잠금) |
 | `stock:price:{stockCode}` | 5초 | 현재가 캐시 |
 | `stock:hoga:{stockCode}` | 2초 | 호가 캐시 |

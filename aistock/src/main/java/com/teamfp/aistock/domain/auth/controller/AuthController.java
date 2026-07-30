@@ -1,8 +1,12 @@
 package com.teamfp.aistock.domain.auth.controller;
 
+import com.teamfp.aistock.domain.auth.dto.request.EmailCodeRequest;
+import com.teamfp.aistock.domain.auth.dto.request.EmailCodeVerifyRequest;
 import com.teamfp.aistock.domain.auth.dto.request.LoginRequest;
 import com.teamfp.aistock.domain.auth.dto.request.OAuthLoginRequest;
+import com.teamfp.aistock.domain.auth.dto.request.SignupRequest;
 import com.teamfp.aistock.domain.auth.dto.response.LoginResponse;
+import com.teamfp.aistock.domain.auth.dto.response.SignupResponse;
 import com.teamfp.aistock.domain.auth.dto.response.TokenResponse;
 import com.teamfp.aistock.domain.auth.service.AuthService;
 import com.teamfp.aistock.global.response.ApiResponse;
@@ -43,5 +47,32 @@ public class AuthController {
     public ApiResponse<TokenResponse> refresh(@RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader) {
         TokenResponse response = authService.refresh(authHeader);
         return ApiResponse.success("토큰 재발급에 성공했습니다.", response);
+    }
+
+    /**
+     * 회원가입 API
+     */
+    @PostMapping("/signup")
+    public ApiResponse<SignupResponse> signup(@Valid @RequestBody SignupRequest request) {
+        SignupResponse response = authService.signup(request);
+        return ApiResponse.success("회원가입에 성공했습니다.", response);
+    }
+
+    /**
+     * 이메일 인증코드 발송 API
+     */
+    @PostMapping("/email/send-code")
+    public ApiResponse<Void> sendEmailCode(@Valid @RequestBody EmailCodeRequest request) {
+        authService.sendEmailCode(request.getEmail());
+        return ApiResponse.success("인증코드가 발송되었습니다.", null);
+    }
+
+    /**
+     * 이메일 인증코드 검증 API
+     */
+    @PostMapping("/email/verify-code")
+    public ApiResponse<Void> verifyEmailCode(@Valid @RequestBody EmailCodeVerifyRequest request) {
+        authService.verifyEmailCode(request.getEmail(), request.getCode());
+        return ApiResponse.success("이메일 인증에 성공했습니다.", null);
     }
 }
