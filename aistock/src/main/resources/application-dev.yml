@@ -29,3 +29,7 @@ spring:
 logging:
   level:
     com.teamfp.aistock: debug
+
+# 로컬 개발은 모의투자 서버로 접속한다 (실서버 포트 9443, 모의투자 포트 29443).
+ls:
+  websocket-url: ${LS_WEBSOCKET_URL:wss://openapi.ls-sec.co.kr:29443/websocket}

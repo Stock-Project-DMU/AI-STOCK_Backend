@@ -33,3 +33,7 @@ cors:
 
 jwt:
   secret: ${JWT_SECRET}
+
+# 운영 환경은 실서버(포트 9443)로 접속하며, 로컬 기본값을 물려받지 않도록 기본값 없이 강제한다.
+ls:
+  websocket-url: ${LS_WEBSOCKET_URL}
