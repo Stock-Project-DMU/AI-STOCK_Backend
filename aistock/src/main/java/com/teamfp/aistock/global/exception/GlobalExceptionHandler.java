@@ -10,8 +10,10 @@ import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @Slf4j
@@ -38,9 +40,7 @@ public class GlobalExceptionHandler {
                 : fieldErrors.get(0).getDefaultMessage();
         log.warn("Validation Exception: {}", message);
 
-        return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
-                .body(ApiResponse.error(message));
+        return badRequest(message);
     }
 
     // AuthController.refresh() 등에서 @RequestHeader(AUTHORIZATION) 필수 헤더가 누락된 경우
@@ -70,6 +70,26 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(errorCode.getMessage()));
     }
 
+    // GET /api/orders?accountId=... 처럼 필수 @RequestParam이 누락된 요청. 이 catch-all
+    // @RestControllerAdvice가 없었다면 Spring이 자동으로 400을 응답하지만, 아래
+    // handleException(Exception)이 먼저 잡아 500으로 응답해버리므로 여기서 명시적으로
+    // 400으로 변환한다.
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMissingServletRequestParameterException(MissingServletRequestParameterException e) {
+        log.warn("Missing Request Parameter: {}", e.getMessage());
+
+        return badRequest(ErrorCode.INVALID_INPUT.getMessage());
+    }
+
+    // accountId=abc 처럼 쿼리 파라미터를 선언된 타입(Long 등)으로 바인딩할 수 없는 경우.
+    // 위와 같은 이유로 명시적으로 400으로 변환한다.
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMethodArgumentTypeMismatchException(MethodArgumentTypeMismatchException e) {
+        log.warn("Method Argument Type Mismatch: {}", e.getMessage());
+
+        return badRequest(ErrorCode.INVALID_INPUT.getMessage());
+    }
+
     // 매핑된 컨트롤러가 없는 요청(예: 아직 구현되지 않은 API 경로 호출)은
     // Spring MVC가 정적 리소스 처리기를 거치며 NoResourceFoundException을 던진다.
     // 이걸 아래 handleException(Exception)이 그대로 잡으면 500으로 응답해버리므로
@@ -91,5 +111,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(ApiResponse.error(ErrorCode.INTERNAL_SERVER_ERROR.getMessage()));
+    }
+
+    private ResponseEntity<ApiResponse<Void>> badRequest(String message) {
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.error(message));
     }
 }

@@ -1,6 +1,7 @@
 package com.teamfp.aistock.domain.order.service;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -15,10 +16,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.teamfp.aistock.domain.account.entity.Account;
-import com.teamfp.aistock.domain.account.repository.AccountRepository;
+import com.teamfp.aistock.domain.account.service.AccountService;
+import com.teamfp.aistock.domain.order.dto.HoldingValuationDto;
 import com.teamfp.aistock.domain.order.dto.request.CreateOrderRequest;
 import com.teamfp.aistock.domain.order.dto.response.CreateOrderResponse;
+import com.teamfp.aistock.domain.order.dto.response.HoldingResponse;
+import com.teamfp.aistock.domain.order.dto.response.OrderHistoryResponse;
 import com.teamfp.aistock.domain.order.entity.Holding;
+import com.teamfp.aistock.domain.order.entity.Order;
 import com.teamfp.aistock.domain.order.entity.OrderStatus;
 import com.teamfp.aistock.domain.order.entity.OrderType;
 import com.teamfp.aistock.domain.order.entity.PriceType;
@@ -59,10 +64,13 @@ class OrderServiceTest {
     private HoldingRepository holdingRepository;
 
     @Mock
-    private AccountRepository accountRepository;
+    private AccountService accountService;
 
     @Mock
     private RedisStockCacheService redisStockCacheService;
+
+    @Mock
+    private HoldingValuationService holdingValuationService;
 
     @InjectMocks
     private OrderService orderService;
@@ -94,7 +102,7 @@ class OrderServiceTest {
 
         // ACCOUNT_NOT_FOUND 테스트처럼 이 stub을 쓰지 않는 케이스도 있어 lenient로 등록한다
         // (안 그러면 MockitoExtension의 strict stubbing 검사가 UnnecessaryStubbingException을 던진다).
-        Mockito.lenient().when(accountRepository.findByAccountIdAndUserId(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
+        Mockito.lenient().when(accountService.getOwnedAccount(USER_ID, ACCOUNT_ID)).thenReturn(account);
 
         // HoldingSettlementService는 @Mock이 아니라 실제 구현을 그대로 쓴다 — 이 테스트들이
         // 검증하는 "보유종목 수량/평단가가 실제로 어떻게 바뀌는지"는 그 서비스 내부 로직이라,
@@ -275,7 +283,7 @@ class OrderServiceTest {
         @Test
         @DisplayName("계좌가 없으면 ACCOUNT_NOT_FOUND 예외를 던진다")
         void fail_accountNotFound() {
-            when(accountRepository.findByAccountIdAndUserId(anyLong(), anyLong())).thenReturn(Optional.empty());
+            when(accountService.getOwnedAccount(anyLong(), anyLong())).thenThrow(new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
 
             assertThatThrownBy(() -> orderService.createMarketOrder(999L, requestOf(OrderType.BUY, 1)))
                     .isInstanceOf(CustomException.class)
@@ -308,6 +316,84 @@ class OrderServiceTest {
 
             verify(redisStockCacheService, never()).getStockPrice(anyString());
             verify(orderRepository, never()).save(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("마이페이지 조회 — 주문내역/보유종목")
+    class MyPageQueries {
+
+        @Test
+        @DisplayName("getMyOrderHistory()는 계좌 소유권을 확인한 뒤 주문내역을 최신순으로 반환한다")
+        void getMyOrderHistory_success() {
+            Order order = Order.builder()
+                    .account(account)
+                    .stockCode(STOCK_CODE)
+                    .stockName("삼성전자")
+                    .orderType(OrderType.BUY)
+                    .priceType(PriceType.MARKET)
+                    .orderPrice(70_000L)
+                    .quantity(10)
+                    .build();
+            when(orderRepository.findAllByAccountIdOrderByOrderedAtDesc(ACCOUNT_ID)).thenReturn(List.of(order));
+
+            List<OrderHistoryResponse> responses = orderService.getMyOrderHistory(USER_ID, ACCOUNT_ID);
+
+            assertThat(responses).hasSize(1);
+            assertThat(responses.get(0).stockCode()).isEqualTo(STOCK_CODE);
+        }
+
+        @Test
+        @DisplayName("getMyOrderHistory()는 내 계좌가 아니면 ACCOUNT_NOT_FOUND 예외를 던진다")
+        void getMyOrderHistory_fail_accountNotFound() {
+            when(accountService.getOwnedAccount(anyLong(), anyLong())).thenThrow(new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+
+            assertThatThrownBy(() -> orderService.getMyOrderHistory(USER_ID, 999L))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.ACCOUNT_NOT_FOUND);
+        }
+
+        @Test
+        @DisplayName("getMyHoldings()는 시세 캐시가 있으면 현재가 기준 평가손익을 계산한다")
+        void getMyHoldings_success_withPriceCache() {
+            Holding holding = Holding.builder()
+                    .account(account)
+                    .stockCode(STOCK_CODE)
+                    .stockName("삼성전자")
+                    .quantity(10)
+                    .avgPrice(50_000L)
+                    .build();
+            when(holdingValuationService.getHoldingValuations(ACCOUNT_ID))
+                    .thenReturn(List.of(HoldingValuationDto.of(holding, 60_000L)));
+
+            List<HoldingResponse> responses = orderService.getMyHoldings(USER_ID, ACCOUNT_ID);
+
+            assertThat(responses).hasSize(1);
+            assertThat(responses.get(0).currentPrice()).isEqualTo(60_000L);
+            assertThat(responses.get(0).evaluationProfit()).isEqualTo(100_000L); // (60,000-50,000)*10
+        }
+
+        @Test
+        @DisplayName("getMyHoldings()는 HoldingValuationService가 계산한 결과를 그대로 HoldingResponse로 옮긴다")
+        void getMyHoldings_success_mapsValuationResult() {
+            // 시세 캐시 미스 시 평단가로 대체하는 로직 자체는 HoldingValuationService의 책임이라
+            // (HoldingValuationServiceTest에서 검증), 여기서는 그 결과(currentPrice==avgPrice)를
+            // OrderService가 HoldingResponse로 정확히 옮기는지만 확인한다.
+            Holding holding = Holding.builder()
+                    .account(account)
+                    .stockCode(STOCK_CODE)
+                    .stockName("삼성전자")
+                    .quantity(10)
+                    .avgPrice(50_000L)
+                    .build();
+            when(holdingValuationService.getHoldingValuations(ACCOUNT_ID))
+                    .thenReturn(List.of(HoldingValuationDto.of(holding, 50_000L)));
+
+            List<HoldingResponse> responses = orderService.getMyHoldings(USER_ID, ACCOUNT_ID);
+
+            assertThat(responses.get(0).currentPrice()).isEqualTo(50_000L);
+            assertThat(responses.get(0).evaluationProfit()).isZero();
         }
     }
 }

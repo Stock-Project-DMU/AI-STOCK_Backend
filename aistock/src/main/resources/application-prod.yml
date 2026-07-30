@@ -23,9 +23,31 @@ spring:
           min-idle: 1
           max-wait: -1ms
 
+  mail:
+    host: ${MAIL_HOST}
+    port: ${MAIL_PORT}
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
+    default-encoding: UTF-8
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
 logging:
   level:
     com.teamfp.aistock: info
+
+# 로직 검증용으로 임시 추가한 Swagger UI(SwaggerConfig 참고)는 운영 환경에서 인증 없이
+# API 문서 전체가 노출되지 않도록 여기서 구조적으로 꺼둔다. SecurityConfig의 permitAll
+# 목록에 경로가 남아있어도, 엔드포인트 자체가 비활성화되어 있으면 노출될 수 없다.
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
 
 # 운영 환경은 application.yml의 로컬 기본값을 물려받으면 안 되므로 기본값 없이 필수 환경변수로 강제한다.
 cors:
@@ -37,3 +59,6 @@ jwt:
 # 운영 환경은 실서버(포트 9443)로 접속하며, 로컬 기본값을 물려받지 않도록 기본값 없이 강제한다.
 ls:
   websocket-url: ${LS_WEBSOCKET_URL}
+
+admin:
+  signup-code: ${ADMIN_SIGNUP_CODE}

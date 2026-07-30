@@ -12,12 +12,14 @@ public class RedisAuthCodeService {
 
     private final RedisTemplate<String, String> redisTemplate;
 
-    private static final String EMAIL_CODE_KEY = "auth:email_code:";
-    private static final String LOGIN_FAIL_KEY = "auth:login_fail:";
+    private static final String EMAIL_CODE_KEY     = "auth:email_code:";
+    private static final String EMAIL_VERIFIED_KEY = "auth:email_verified:";
+    private static final String LOGIN_FAIL_KEY     = "auth:login_fail:";
 
-    private static final long EMAIL_CODE_TTL_MINUTES = 5;
-    private static final long LOGIN_FAIL_TTL_MINUTES = 10;
-    private static final int  MAX_LOGIN_FAIL          = 5;
+    private static final long EMAIL_CODE_TTL_MINUTES     = 5;
+    private static final long EMAIL_VERIFIED_TTL_MINUTES = 30;
+    private static final long LOGIN_FAIL_TTL_MINUTES     = 10;
+    private static final int  MAX_LOGIN_FAIL             = 5;
 
     // 이메일 인증 코드 저장
     public void saveEmailCode(String email, String code) {
@@ -33,6 +35,27 @@ public class RedisAuthCodeService {
         String key = EMAIL_CODE_KEY + email;
         String stored = redisTemplate.opsForValue().get(key);
         if (stored != null && stored.equals(inputCode)) {
+            redisTemplate.delete(key);
+            return true;
+        }
+        return false;
+    }
+
+    // 이메일 인증 성공 마킹 (verifyAndDeleteEmailCode() 성공 직후 호출) — 회원가입 폼 작성 시간을
+    // 고려해 인증코드(5분)보다 긴 30분 TTL을 둔다
+    public void markEmailVerified(String email) {
+        redisTemplate.opsForValue().set(
+            EMAIL_VERIFIED_KEY + email,
+            "true",
+            Duration.ofMinutes(EMAIL_VERIFIED_TTL_MINUTES)
+        );
+    }
+
+    // 이메일 인증 여부 확인 후 소비(삭제) — 같은 인증을 여러 회원가입에 재사용하지 못하도록 1회용으로 처리
+    public boolean consumeEmailVerified(String email) {
+        String key = EMAIL_VERIFIED_KEY + email;
+        Boolean existed = redisTemplate.hasKey(key);
+        if (Boolean.TRUE.equals(existed)) {
             redisTemplate.delete(key);
             return true;
         }

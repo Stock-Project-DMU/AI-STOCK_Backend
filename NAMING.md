@@ -74,6 +74,13 @@
   (`applyBuyOrder`의 대칭 — 매도 대금을 잔고에 더함), `Holding.increase(int quantity, long execPrice)`
   (매수 체결 시 수량 증가 + 평단가 가중평균 재계산), `Holding.decrease(int quantity)`
   (매도 체결 시 수량 감소, 0이 되면 호출 측에서 `HoldingRepository.delete()`로 행 삭제).
+- **평가금액 조회 메서드 (feature/mypage-profit 코드리뷰 반영)**: `Holding.resolveValuationPrice(Long
+  currentPrice)` — 마이페이지 수익률/보유종목 조회 시 평가금액 계산용 현재가를 반환한다.
+  `currentPrice`가 null(시세 캐시 미스)이면 `avgPrice`로 대체한다. `AccountService.getProfit()`/
+  `OrderService.getMyHoldings()` 양쪽에서 같은 폴백 로직을 복붙하던 것을 이 메서드 하나로
+  모았다. stock 도메인의 `StockPriceDto`를 직접 받지 않고 `Long`만 받는다 — order 도메인
+  엔티티가 다른 도메인의 DTO 타입에 의존하지 않도록, "캐시에서 현재가를 꺼내는" 책임은
+  호출부(이미 `StockPriceDto`를 쓰고 있는 `AccountService`/`OrderService`)에 남겨둔다.
 - **지정가 주문 동결/정산 메서드 (feature/order-limit 추가)**: `Account.freezeForOrder(long amount)`
   (지정가 매수 주문금액을 `balance`→`frozenBalance`로 동결), `Account.unfreezeForOrder(long amount)`
   (취소 시 `frozenBalance`→`balance` 복원), `Account.settleFrozenOrder(long frozenAmount, long actualAmount)`
@@ -144,6 +151,7 @@
 | `ACCESS_DENIED` | 403 |
 | `EMAIL_CODE_MISMATCH` | 400 |
 | `EMAIL_CODE_EXPIRED` | 400 |
+| `EMAIL_NOT_VERIFIED` | 400 (v8 추가 — 이메일 인증을 거치지 않고 `signup()`을 호출한 경우) |
 | `ACCOUNT_NOT_FOUND` | 404 |
 | `INSUFFICIENT_BALANCE` | 400 |
 | `INSUFFICIENT_HOLDING` | 400 |
@@ -282,8 +290,8 @@ redis-logic.md(수정본) 기준 확정된 이름 그대로 사용:
 | 클래스 | 주요 메서드 |
 |---|---|
 | `RedisTokenService` | `saveRefreshToken`, `getRefreshToken`, `isRefreshTokenValid`, `deleteRefreshToken`, `blacklistAccessToken`, `isBlacklisted` |
-| `RedisAuthCodeService` | `saveEmailCode`, `verifyAndDeleteEmailCode`, `incrementLoginFail`, `isLoginLocked`, `resetLoginFail` |
-| `RedisStockCacheService` | `saveStockPrice`, `getStockPrice`, `saveHogaData`, `getHogaData` |
+| `RedisAuthCodeService` | `saveEmailCode`, `verifyAndDeleteEmailCode`, `markEmailVerified`(v8 추가), `consumeEmailVerified`(v8 추가), `incrementLoginFail`, `isLoginLocked`, `resetLoginFail` |
+| `RedisStockCacheService` | `saveStockPrice`, `getStockPrice`, `saveHogaData`, `getHogaData`, `getStockPrices(Collection<String> stockCodes)`(feature/mypage-profit 코드리뷰 반영 — Redis MGET으로 여러 종목 시세를 한 번에 배치 조회. 종목마다 `getStockPrice()`를 순차 호출하면 보유종목이 N개일 때 N번 왕복이 생기는 문제를 막기 위함. 캐시 미스 종목은 반환 `Map`에서 키 자체가 빠짐) |
 | `RedisPendingOrderService` | `initPendingOrders`, `addPendingOrder`, `getPendingOrders`, `removePendingOrder` |
 | `RedisRateLimiterService` | `isAllowed`, `increment`, `getRemainingDaily` |
 | `RedisOnlineStatusService` (v8 추가) | `clearOnlineStatus()`(서버 재시작 시 `@PostConstruct` 초기화, v9), `addOnline(Long userId)`, `removeOnline(Long userId)`, `countOnline()`, `isOnline(Long userId)` |
@@ -326,11 +334,17 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 | Service (AuthService 추가) | `signup(SignupRequest request)`, `sendEmailCode(String email)`, `verifyEmailCode(String email, String code)` |
 | Request DTO | `SignupRequest`(loginId, password, name, email, birthdate, `role`, `adminCode`), `EmailCodeRequest`(email), `EmailCodeVerifyRequest`(email, code) |
 | Response DTO | `SignupResponse`(userId, loginId, role) |
-| Util | `DateUtil.parseSocialBirthdate(String birthday, String birthyear)` |
+| Mail Client | `MailClient`(infra/mail) — `sendAuthCode(String toEmail, String code)`. Spring Mail(`JavaMailSender`) 사용, SMTP 설정은 `spring.mail.*`(환경변수 `MAIL_HOST`/`MAIL_PORT`/`MAIL_USERNAME`/`MAIL_PASSWORD`), 발신자 주소는 별도 커스텀 프로퍼티 `app.mail.from`(환경변수 `MAIL_FROM`). 발송 실패 시 `CustomException(ErrorCode.EXTERNAL_API_ERROR)` |
 
 > v8 추가: `SignupRequest.role`(기본값 `USER`)이 `ADMIN`이면 `adminCode`가 필수이며,
 > `AuthService.signup()`에서 서버 환경변수 `ADMIN_SIGNUP_CODE`와 대조 후 불일치 시
 > `CustomException(ErrorCode.INVALID_ADMIN_CODE)` throw. 일치해야만 `Role.ADMIN`으로 가입.
+
+> v8 추가: `signup()`은 이메일 인증을 거치지 않은 이메일로는 가입할 수 없다.
+> `verifyEmailCode()` 성공 시 `RedisAuthCodeService.markEmailVerified(email)`로
+> `auth:email_verified:{email}`(TTL 30분) 마커를 남기고, `signup()`은 중복 아이디/이메일
+> 체크와 관리자 코드 검증을 모두 통과한 뒤 `consumeEmailVerified(email)`로 이 마커를
+> 확인·소비(1회용)한다. 마커가 없으면 `CustomException(ErrorCode.EMAIL_NOT_VERIFIED)` throw.
 
 ### 8-3. feature/auth-logout
 
@@ -459,10 +473,70 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 
 | 구분 | 이름 |
 |---|---|
-| 엔드포인트 (AccountController, OrderController, UserController 추가) | `GET /api/accounts/me/profit`, `GET /api/orders`, `GET /api/orders/holdings`, `GET /api/users/me`, `PATCH /api/users/me`, `POST /api/users/me/survey` |
-| Service | `AccountService.getProfit(Long userId)` / `OrderService.getMyOrderHistory(Long userId)`, `OrderService.getMyHoldings(Long userId)` / `UserService` — `getMyInfo(Long userId)`, `updateMyInfo(Long userId, UpdateUserRequest request)`, `saveSurvey(Long userId, SurveyRequest request)` |
+| 엔드포인트 (AccountController, OrderController, UserController 추가) | `GET /api/accounts/{accountId}/profit`, `GET /api/orders?accountId={accountId}`, `GET /api/orders/holdings?accountId={accountId}`, `GET /api/users/me`, `PATCH /api/users/me`, `POST /api/users/me/survey` |
+| Service | `AccountService.getProfit(Long userId, Long accountId)`, `AccountService.getOwnedAccount(Long userId, Long accountId)`(계좌 소유권 검증 공용 메서드) / `OrderService.getMyOrderHistory(Long userId, Long accountId)`, `OrderService.getMyHoldings(Long userId, Long accountId)` / `HoldingValuationService.getHoldingValuations(Long accountId)`(보유종목+시세 평가 공용 메서드, domain.order.service 소속) / `UserService` — `getMyInfo(Long userId)`, `updateMyInfo(Long userId, UpdateUserRequest request)`, `saveSurvey(Long userId, SurveyRequest request)` |
 | Response DTO | `ProfitResponse`(totalAsset, profitAmount, profitRate), `HoldingResponse`(stockCode, stockName, quantity, avgPrice, currentPrice, evaluationProfit), `UserInfoResponse`(userId, loginId, name, email, role, `status`), `InvestmentProfileResponse`(investmentTendency, fundTendency, investmentLevel) |
-| Request DTO | `UpdateUserRequest`(name, email), `SurveyRequest`(answers, investmentTendency, fundTendency) |
+| Request DTO | `UpdateUserRequest`(name, email — 둘 다 `@NotBlank` 필수), `SurveyRequest`(answers: `List<Integer>`, investmentTendency, fundTendency) |
+
+> **계좌 다중화 반영(원래 문서 초안은 계좌 1개 시절 기준이었음)**: `feature/mypage-account`부터
+> 유저 1명이 계좌를 최대 3개까지 가질 수 있게 됐고, 계좌 A/B/C는 서로 완전히 독립된 영역이라
+> (성향별로 나눠 투자 — 합산 개념이 없음) 수익률/주문내역/보유종목 전부 "유저의 전체 계좌 합산"이
+> 아니라 "계좌 하나를 지정해서 그 계좌만" 조회하는 것으로 확정한다. `getProfit`/
+> `getMyOrderHistory`/`getMyHoldings` 모두 시작 지점에서 `AccountService.getOwnedAccount(Long
+> userId, Long accountId)`로 소유권을 검증한다(없으면 `ACCOUNT_NOT_FOUND`) — 코드리뷰에서
+> `accountRepository.findByAccountIdAndUserId(...).orElseThrow(...)`가 `AccountService.
+> getProfit()`과 `OrderService`의 4개 메서드(`createMarketOrder`/`createLimitOrder`/
+> `getMyOrderHistory`/`getMyHoldings`)에 걸쳐 복붙되어 있던 것이 지적돼 `getOwnedAccount()`
+> 하나로 모았다. `OrderService`는 이제 `AccountRepository`를 직접 주입받지 않고
+> `AccountService`를 주입받아 이 메서드를 호출한다.
+>
+> **평가손익 계산 시 시세 캐시 미스 처리**: `stock:price:{stockCode}` 캐시(TTL 5초)는 장 마감
+> 등으로 tick이 끊기면 비어있을 수 있다. 문의(inquiries) 없이 바로 볼 수 있는 마이페이지 조회
+> 화면이 캐시 미스 하나 때문에 전체가 503(`STOCK_PRICE_NOT_AVAILABLE`)으로 죽으면 안 되므로,
+> `getProfit()`/`getMyHoldings()`는 캐시가 비어있는 종목은 `avgPrice`로 대체해 평가손익을 0으로
+> 표시한다(현재가 주문 체결처럼 정확한 실시간가가 반드시 필요한 경로와는 성격이 다르다). 이
+> 폴백 자체는 `Holding.resolveValuationPrice(Long currentPrice)`(1-1 항목) 하나에 모아두고,
+> `AccountService`/`OrderService`는 호출부에서 캐시 조회 결과(있으면 현재가, 없으면 null)만
+> 넘긴다 — order 도메인 엔티티가 stock 도메인의 DTO 타입에 직접 의존하지 않도록 하기 위함.
+>
+> **`HoldingValuationService` 추출 (코드리뷰 반영)**: "보유종목 조회 → 시세 배치 조회
+> (`RedisStockCacheService.getStockPrices(Collection<String> stockCodes)`, 7번 항목 — Redis
+> MGET 한 번으로 종목마다 순차 호출을 피함, 캐시 미스 종목은 반환 Map에서 키 자체가 빠짐) →
+> `Holding.resolveValuationPrice()`로 평단가 대체" 절차를 `AccountService.getProfit()`과
+> `OrderService.getMyHoldings()`가 각자 복붙하고 있었다. 이 절차를 `domain.order.service.
+> HoldingValuationService.getHoldingValuations(Long accountId)`(반환: `List<HoldingValuationDto>`)
+> 하나로 모으고, `AccountService`는 더 이상 `HoldingRepository`/`RedisStockCacheService`를
+> 직접 주입받지 않고 이 서비스(order 도메인 소속)를 통해서만 접근한다 — 이전에는 "거래는
+> 하나의 강하게 결합된 집계"라는 이유로 account 도메인이 order 도메인의 Repository를 직접
+> 참조했는데, 코드리뷰에서 CLAUDE.md 5번 규칙("도메인 간 직접 참조 대신 서비스 계층을 통해
+> 호출")과 어긋난다는 지적을 받아 정리했다.
+>
+> **`HoldingValuationDto`(코드리뷰 반영, `domain.order.dto`)**: `stockCode, stockName, quantity,
+> avgPrice, currentPrice` 필드를 갖는 레코드. 처음엔 이름이 `HoldingValuation`(Dto 접미사
+> 없음)이었고 `Holding` 엔티티를 통째로 담고 있었는데, 코드리뷰에서 두 가지가 지적됐다 —
+> ① CLAUDE.md 5번 규칙의 "내부 DTO는 XxxDto" 이름 규칙 위반, ② account 도메인이
+> `HoldingValuationService`를 거치고도 여전히 `Holding` 엔티티의 메서드(`getQuantity()` 등)를
+> 직접 호출해 도메인 경계를 넘는 목적이 절반만 달성됨. 정적 팩토리 `HoldingValuationDto.
+> of(Holding holding, Long currentPrice)`로 엔티티에서 필요한 값만 꺼내 담도록 정리했고,
+> `HoldingResponse.of(Holding, long)`도 `HoldingResponse.of(HoldingValuationDto)`로 바꿔
+> 같은 라운드에 추가된 두 DTO가 동일하게 정적 팩토리 메서드를 쓰도록 맞췄다.
+>
+> **엔티티 메서드 추가**: `User.updateInfo(String name, String email)`(1-1 항목),
+> `InvestmentProfile.updateSurvey(int investmentTendency, int fundTendency, String surveyAnswers)`
+> (investmentLevel은 이 설문에서 바꾸지 않는다 — 별도 평가 로직은 이번 범위 밖),
+> `Holding.resolveValuationPrice(Long currentPrice)`(위 항목 참고).
+>
+> **코드리뷰 반영 (버그 수정)**: `UpdateUserRequest.email`을 `@NotBlank`로 필수화했다 —
+> 원래 선택 필드였는데, 생략(null) 시 `User.updateInfo()`가 그대로 반영해 기존 이메일을
+> 지워버리는 문제가 있었다(카카오 무동의 가입자처럼 이메일이 원래 null인 계정 제외하고는 항상
+> 값을 채워 보내야 한다). `updateMyInfo()`의 이메일 동일 여부 비교는 `equalsIgnoreCase`를
+> 쓴다 — DB 콜레이션(`utf8mb4_unicode_ci`)이 대소문자를 구분하지 않아, `equals`로 비교하면
+> 본인이 대소문자만 바꿔 재입력했을 때 `existsByEmail`이 자기 자신과 매칭돼 `DUPLICATE_EMAIL`을
+> 잘못 던지는 문제가 있었다. `saveSurvey()`의 최초 제출 저장은 `HoldingSettlementService`와
+> 동일한 패턴으로 `DataIntegrityViolationException`(uq_user_profile 위반)을 잡아
+> `OPTIMISTIC_LOCK_CONFLICT`로 변환한다(동시 이중 제출 경합 대응). `GlobalExceptionHandler`에
+> `MissingServletRequestParameterException`/`MethodArgumentTypeMismatchException` 핸들러를
+> 추가해 `accountId` 쿼리 파라미터 누락/타입 불일치 시 500 대신 400으로 응답한다.
 
 ### 8-9. feature/ai-planning
 

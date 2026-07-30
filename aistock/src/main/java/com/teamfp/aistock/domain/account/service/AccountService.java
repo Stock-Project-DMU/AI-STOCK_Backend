@@ -9,8 +9,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.teamfp.aistock.domain.account.dto.request.CreateAccountRequest;
 import com.teamfp.aistock.domain.account.dto.response.AccountInfoResponse;
+import com.teamfp.aistock.domain.account.dto.response.ProfitResponse;
 import com.teamfp.aistock.domain.account.entity.Account;
 import com.teamfp.aistock.domain.account.repository.AccountRepository;
+import com.teamfp.aistock.domain.order.service.HoldingValuationService;
 import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.exception.CustomException;
@@ -33,6 +35,11 @@ public class AccountService {
 
     private final AccountRepository accountRepository;
     private final UserRepository userRepository;
+    // 수익률 계산에 필요한 보유종목+시세 평가는 order 도메인의 HoldingRepository/
+    // RedisStockCacheService를 여기서 직접 주입받지 않고, 그 도메인의 서비스인
+    // HoldingValuationService를 통해서만 접근한다(코드리뷰 반영 — 이전에는 Repository를
+    // 직접 참조해 도메인 경계를 넘었었다).
+    private final HoldingValuationService holdingValuationService;
 
     @Transactional(readOnly = true)
     public List<AccountInfoResponse> getMyAccounts(Long userId) {
@@ -103,5 +110,46 @@ public class AccountService {
      */
     private String generateAccountNumber() {
         return "VA" + UUID.randomUUID().toString().replace("-", "").substring(0, 10).toUpperCase();
+    }
+
+    /**
+     * accountId+userId로 계좌를 조회하고 소유권까지 함께 검증한다. AccountService/OrderService
+     * 여러 메서드(getProfit, createMarketOrder, createLimitOrder, getMyOrderHistory,
+     * getMyHoldings)가 각자 findByAccountIdAndUserId(...).orElseThrow(ACCOUNT_NOT_FOUND)를
+     * 복붙해 쓰던 것을 이 메서드 하나로 모았다 — 소유권 검증 정책이 바뀌면(예: 정지 계좌 처리
+     * 방식 변경) 한 곳만 고치면 된다.
+     */
+    @Transactional(readOnly = true)
+    public Account getOwnedAccount(Long userId, Long accountId) {
+        return accountRepository.findByAccountIdAndUserId(accountId, userId)
+                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+    }
+
+    /**
+     * 계좌 수익률 조회. 계좌 A/B/C는 서로 독립된 영역이라 항상 계좌 하나 단위로 계산한다
+     * (schema.sql "총 자산 계산 참고").
+     *
+     * 총 자산 = (balance + frozenBalance) + Σ(holdings.quantity × 현재가)
+     * 수익률  = (총 자산 - baseBalance) / baseBalance × 100
+     *
+     * 보유종목 시세 평가는 HoldingValuationService.getHoldingValuations()로 한 번에 배치
+     * 조회한다(종목마다 Redis를 순차 호출하지 않기 위함, OrderService.getMyHoldings()와
+     * 동일한 로직을 공유).
+     */
+    @Transactional(readOnly = true)
+    public ProfitResponse getProfit(Long userId, Long accountId) {
+        Account account = getOwnedAccount(userId, accountId);
+
+        long stockValuation = holdingValuationService.getHoldingValuations(accountId).stream()
+                .mapToLong(valuation -> valuation.currentPrice() * valuation.quantity())
+                .sum();
+
+        long totalAsset = account.getBalance() + account.getFrozenBalance() + stockValuation;
+        long profitAmount = totalAsset - account.getBaseBalance();
+        double profitRate = account.getBaseBalance() == 0
+                ? 0.0
+                : profitAmount * 100.0 / account.getBaseBalance();
+
+        return ProfitResponse.of(totalAsset, profitAmount, profitRate);
     }
 }

@@ -1,4 +1,13 @@
-# Redis 키 설계 및 로직 (최종본 v5)
+# Redis 키 설계 및 로직 (최종본 v6)
+
+**변경사항 v5 → v6**
+1. `auth:email_verified:{email}` 키 추가 (TTL 30분) — `feature/auth-signup`에서 이메일 인증
+   (`verifyEmailCode()`)과 회원가입(`signup()`)을 연결하는 1회용 마커. 인증 성공 시
+   `RedisAuthCodeService.markEmailVerified()`로 저장하고, `signup()`이 다른 검증(중복 아이디/
+   이메일, 관리자 코드)을 다 통과한 뒤 `consumeEmailVerified()`로 확인과 동시에 삭제한다.
+   이전에는 `sendEmailCode()`/`verifyEmailCode()` API가 `signup()`과 코드상 전혀 연결돼 있지
+   않아, 인증 절차 없이도 `POST /api/auth/signup`을 바로 호출하면 가입이 그대로 성공하는
+   문제가 있었다.
 
 **변경사항 v4 → v5**
 1. `RedisOnlineStatusService`에 서버 재시작 시 초기화 로직(`clearOnlineStatus`) 추가
@@ -16,13 +25,14 @@
 
 **키 네이밍 규칙**: `{서비스}:{목적}:{식별자}`
 
-## TTL 정책 요약 v4 — 9개 키
+## TTL 정책 요약 v6 — 10개 키
 
 | 키 | TTL | 용도 |
 |---|---|---|
 | `auth:refresh:{userId}` | 14일 | Refresh Token 저장 |
 | `auth:blacklist:{accessToken}` | Access Token 만료(동적) | 로그아웃 토큰 차단 |
 | `auth:email_code:{email}` | 5분 | 이메일 인증 코드 |
+| `auth:email_verified:{email}` | 30분 | 이메일 인증 완료 마커 (`signup()`이 소비 후 삭제하는 1회용) |
 | `auth:login_fail:{loginId}` | 10분 | 로그인 실패 횟수 (5회 잠금) |
 | `stock:price:{stockCode}` | 5초 | 실시간 주가 캐시 |
 | `stock:hoga:{stockCode}` | 2초 | 호가창 데이터 캐시 |
@@ -135,12 +145,14 @@ public class RedisAuthCodeService {
 
     private final RedisTemplate<String, String> redisTemplate;
 
-    private static final String EMAIL_CODE_KEY = "auth:email_code:";
-    private static final String LOGIN_FAIL_KEY = "auth:login_fail:";
+    private static final String EMAIL_CODE_KEY     = "auth:email_code:";
+    private static final String EMAIL_VERIFIED_KEY = "auth:email_verified:";
+    private static final String LOGIN_FAIL_KEY     = "auth:login_fail:";
 
-    private static final long EMAIL_CODE_TTL_MINUTES = 5;
-    private static final long LOGIN_FAIL_TTL_MINUTES = 10;
-    private static final int  MAX_LOGIN_FAIL          = 5;
+    private static final long EMAIL_CODE_TTL_MINUTES     = 5;
+    private static final long EMAIL_VERIFIED_TTL_MINUTES = 30;
+    private static final long LOGIN_FAIL_TTL_MINUTES     = 10;
+    private static final int  MAX_LOGIN_FAIL             = 5;
 
     // 이메일 인증 코드 저장
     public void saveEmailCode(String email, String code) {
@@ -156,6 +168,27 @@ public class RedisAuthCodeService {
         String key = EMAIL_CODE_KEY + email;
         String stored = redisTemplate.opsForValue().get(key);
         if (stored != null && stored.equals(inputCode)) {
+            redisTemplate.delete(key);
+            return true;
+        }
+        return false;
+    }
+
+    // 이메일 인증 성공 마킹 (verifyAndDeleteEmailCode() 성공 직후 호출) — 회원가입 폼 작성
+    // 시간을 고려해 인증코드(5분)보다 긴 30분 TTL을 둔다
+    public void markEmailVerified(String email) {
+        redisTemplate.opsForValue().set(
+            EMAIL_VERIFIED_KEY + email,
+            "true",
+            Duration.ofMinutes(EMAIL_VERIFIED_TTL_MINUTES)
+        );
+    }
+
+    // 이메일 인증 여부 확인 후 소비(삭제) — 같은 인증을 여러 회원가입에 재사용하지 못하도록 1회용으로 처리
+    public boolean consumeEmailVerified(String email) {
+        String key = EMAIL_VERIFIED_KEY + email;
+        Boolean existed = redisTemplate.hasKey(key);
+        if (Boolean.TRUE.equals(existed)) {
             redisTemplate.delete(key);
             return true;
         }
