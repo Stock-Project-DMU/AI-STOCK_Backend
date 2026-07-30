@@ -67,7 +67,13 @@ public class SecurityConfig {
             "/api/auth/oauth/**",
             "/api/auth/refresh",
             "/api/auth/email/**",
-            "/ws-stomp/**"
+            "/ws-stomp/**",
+            // 로직 검증용 Swagger UI — 문서 화면 자체는 인증 없이 열람 가능해야 브라우저에서 바로
+            // 확인할 수 있다. 보호된 API 호출은 UI의 Authorize 버튼에 JWT를 넣어야 하므로
+            // 별도의 인증 우회는 아니다(운영 배포 전 제거 예정인 임시 개발 도구).
+            "/swagger-ui/**",
+            "/swagger-ui.html",
+            "/v3/api-docs/**"
     };
 
     /**

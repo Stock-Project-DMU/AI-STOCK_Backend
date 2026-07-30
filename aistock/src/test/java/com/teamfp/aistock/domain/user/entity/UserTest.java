@@ -58,4 +58,16 @@ class UserTest {
 
         assertThat(user.isActive()).isTrue();
     }
+
+    @Test
+    @DisplayName("updateInfo() 호출 시 name/email만 바뀌고 loginId 등 다른 필드는 그대로다")
+    void updateInfo_changesNameAndEmailOnly() {
+        User user = newUser();
+
+        user.updateInfo("새이름", "new@example.com");
+
+        assertThat(user.getName()).isEqualTo("새이름");
+        assertThat(user.getEmail()).isEqualTo("new@example.com");
+        assertThat(user.getLoginId()).isEqualTo("tester");
+    }
 }

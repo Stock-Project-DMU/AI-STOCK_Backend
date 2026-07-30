@@ -31,6 +31,9 @@ dependencies {
 	runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
 	runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
 
+	// 로직 검증용 Swagger UI — 브라우저에서 각 API를 직접 눌러보고 결과를 바로 확인하기 위한 임시 개발 도구
+	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.0'
+
 	runtimeOnly 'com.mysql:mysql-connector-j'
 
 	compileOnly 'org.projectlombok:lombok'

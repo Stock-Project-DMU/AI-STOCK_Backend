@@ -84,4 +84,20 @@ public class Holding {
     public void decrease(int quantity) {
         this.quantity -= quantity;
     }
+
+    /**
+     * 수익률/보유종목 화면에서 쓸 평가용 현재가를 반환한다. Redis stock:price 캐시가 비어있으면
+     * (장 마감 등으로 최근 tick이 없으면) avgPrice로 대체해, 캐시 미스 하나 때문에 조회 화면
+     * 전체가 실패하지 않도록 한다. 이 폴백 정책은 AccountService.getProfit()/
+     * OrderService.getMyHoldings() 양쪽에서 동일하게 써야 하므로 Holding 자신이 갖고 있는
+     * avgPrice를 기준으로 이 엔티티에 둔다(같은 로직을 두 서비스에 각각 복붙하지 않기 위함).
+     *
+     * StockPriceDto(stock 도메인의 DTO) 대신 Long을 받는 이유: order 도메인 엔티티가 다른
+     * 도메인의 DTO 타입에 직접 의존하지 않도록, "캐시에서 현재가를 꺼내는" 책임은 호출부
+     * (AccountService/OrderService, 이미 StockPriceDto를 쓰고 있음)에 남겨두고 이 엔티티는
+     * "현재가가 있는지 없는지"만 안다.
+     */
+    public long resolveValuationPrice(Long currentPrice) {
+        return currentPrice != null ? currentPrice : this.avgPrice;
+    }
 }
