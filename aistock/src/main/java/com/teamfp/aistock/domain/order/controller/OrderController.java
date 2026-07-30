@@ -1,16 +1,22 @@
 package com.teamfp.aistock.domain.order.controller;
 
+import java.util.List;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.teamfp.aistock.domain.order.dto.request.CreateOrderRequest;
 import com.teamfp.aistock.domain.order.dto.response.CreateOrderResponse;
+import com.teamfp.aistock.domain.order.dto.response.HoldingResponse;
+import com.teamfp.aistock.domain.order.dto.response.OrderHistoryResponse;
 import com.teamfp.aistock.domain.order.entity.PriceType;
 import com.teamfp.aistock.domain.order.service.OrderService;
 import com.teamfp.aistock.global.response.ApiResponse;
@@ -53,5 +59,19 @@ public class OrderController {
         Long userId = SecurityUtil.getCurrentUserId();
         orderService.cancelOrder(userId, orderId);
         return ResponseEntity.ok(ApiResponse.success("주문이 취소되었습니다.", null));
+    }
+
+    // 계좌 A/B/C는 서로 독립된 영역이라 항상 accountId로 특정 계좌를 지정해서 조회한다
+    // (유저의 전체 계좌 합산이 아님 — NAMING.md 8-8 참고).
+    @GetMapping
+    public ApiResponse<List<OrderHistoryResponse>> getMyOrderHistory(@RequestParam Long accountId) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        return ApiResponse.success(orderService.getMyOrderHistory(userId, accountId));
+    }
+
+    @GetMapping("/holdings")
+    public ApiResponse<List<HoldingResponse>> getMyHoldings(@RequestParam Long accountId) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        return ApiResponse.success(orderService.getMyHoldings(userId, accountId));
     }
 }

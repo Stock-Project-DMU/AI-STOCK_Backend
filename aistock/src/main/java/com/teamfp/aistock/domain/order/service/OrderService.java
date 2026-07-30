@@ -1,5 +1,6 @@
 package com.teamfp.aistock.domain.order.service;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.stereotype.Service;
@@ -10,10 +11,12 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import com.teamfp.aistock.domain.account.entity.Account;
 import com.teamfp.aistock.domain.account.entity.AccountStatus;
-import com.teamfp.aistock.domain.account.repository.AccountRepository;
+import com.teamfp.aistock.domain.account.service.AccountService;
 import com.teamfp.aistock.domain.order.dto.PendingOrderDto;
 import com.teamfp.aistock.domain.order.dto.request.CreateOrderRequest;
 import com.teamfp.aistock.domain.order.dto.response.CreateOrderResponse;
+import com.teamfp.aistock.domain.order.dto.response.HoldingResponse;
+import com.teamfp.aistock.domain.order.dto.response.OrderHistoryResponse;
 import com.teamfp.aistock.domain.order.entity.Holding;
 import com.teamfp.aistock.domain.order.entity.Order;
 import com.teamfp.aistock.domain.order.entity.OrderStatus;
@@ -35,8 +38,15 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final HoldingRepository holdingRepository;
-    private final AccountRepository accountRepository;
+    // 계좌 소유권 검증(findByAccountIdAndUserId + ACCOUNT_NOT_FOUND)은 AccountService.
+    // getOwnedAccount()로 일원화했다 — 예전에는 이 클래스가 AccountRepository를 직접 주입받아
+    // 같은 검증을 4곳(createMarketOrder/createLimitOrder/getMyOrderHistory/getMyHoldings)에서
+    // 각각 복붙하고 있었다.
+    private final AccountService accountService;
     private final HoldingSettlementService holdingSettlementService;
+    // getMyHoldings()의 "보유종목 조회 + 시세 배치 조회 + 평단가 폴백"은 AccountService.
+    // getProfit()과 똑같은 절차라 HoldingValuationService로 공용화했다(코드리뷰 반영).
+    private final HoldingValuationService holdingValuationService;
     // 현재가는 도메인 간 서비스 호출(domain.stock.StockService)이 아니라
     // global/redis 서비스를 직접 조회한다 — feature/stock-price가 아직 구현 전이라
     // StockService에 의존하면 이 기능이 그쪽 완료를 기다려야 하고, CLAUDE.md 7번
@@ -60,8 +70,7 @@ public class OrderService {
      */
     @Transactional
     public CreateOrderResponse createMarketOrder(Long userId, CreateOrderRequest request) {
-        Account account = accountRepository.findByAccountIdAndUserId(request.accountId(), userId)
-                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+        Account account = accountService.getOwnedAccount(userId, request.accountId());
         if (account.getStatus() == AccountStatus.SUSPENDED) {
             throw new CustomException(ErrorCode.ACCOUNT_SUSPENDED);
         }
@@ -135,8 +144,9 @@ public class OrderService {
      *
      * 격리수준을 READ_COMMITTED로 지정하는 이유: MySQL 기본(REPEATABLE READ)에서는 한
      * 트랜잭션의 일반 조회(FOR UPDATE가 아닌 SELECT)가 그 트랜잭션의 "첫 조회 시점" 스냅샷을
-     * 계속 사용한다. 이 메서드 맨 위 accountRepository.findByAccountIdAndUserId()가 그 첫
-     * 조회라 스냅샷이 거기서 고정되는데, 매도 분기의 findHolding()(FOR UPDATE)이 다른 트랜잭션의 커밋을
+     * 계속 사용한다. 이 메서드 맨 위 accountService.getOwnedAccount()(내부적으로
+     * findByAccountIdAndUserId 실행)가 그 첫 조회라 스냅샷이 거기서 고정되는데, 매도 분기의
+     * findHolding()(FOR UPDATE)이 다른 트랜잭션의 커밋을
      * 기다렸다가 락을 얻어도 — FOR UPDATE는 최신 커밋 데이터를 보지만 스냅샷 자체를 갱신하진
      * 않는다 — 바로 다음의 sumPendingSellQuantity()(일반 조회)는 여전히 그 오래된 스냅샷을 볼
      * 수 있어서, 방금 다른 트랜잭션이 커밋한 매도 주문을 못 보고 넘어갈 수 있다. 이는 sell 예약
@@ -145,8 +155,7 @@ public class OrderService {
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public CreateOrderResponse createLimitOrder(Long userId, CreateOrderRequest request) {
-        Account account = accountRepository.findByAccountIdAndUserId(request.accountId(), userId)
-                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+        Account account = accountService.getOwnedAccount(userId, request.accountId());
         if (account.getStatus() == AccountStatus.SUSPENDED) {
             throw new CustomException(ErrorCode.ACCOUNT_SUSPENDED);
         }
@@ -297,5 +306,32 @@ public class OrderService {
                 afterCommitTask.run();
             }
         });
+    }
+
+    /**
+     * 계좌 하나의 주문내역 조회. 계좌 A/B/C는 서로 독립된 영역이라 항상 accountId로 특정 계좌를
+     * 지정해서 조회한다(유저의 전체 계좌 합산이 아님). accountService.getOwnedAccount()로
+     * 소유권을 검증한다 — createMarketOrder()/createLimitOrder()와 같은 패턴.
+     */
+    @Transactional(readOnly = true)
+    public List<OrderHistoryResponse> getMyOrderHistory(Long userId, Long accountId) {
+        accountService.getOwnedAccount(userId, accountId);
+        return orderRepository.findAllByAccountIdOrderByOrderedAtDesc(accountId).stream()
+                .map(OrderHistoryResponse::from)
+                .toList();
+    }
+
+    /**
+     * 계좌 하나의 보유종목 목록 조회. 시세 배치 조회 + 평단가 폴백은
+     * HoldingValuationService.getHoldingValuations()로 공용화했다(AccountService.getProfit()과
+     * 동일한 로직).
+     */
+    @Transactional(readOnly = true)
+    public List<HoldingResponse> getMyHoldings(Long userId, Long accountId) {
+        accountService.getOwnedAccount(userId, accountId);
+
+        return holdingValuationService.getHoldingValuations(accountId).stream()
+                .map(HoldingResponse::of)
+                .toList();
     }
 }

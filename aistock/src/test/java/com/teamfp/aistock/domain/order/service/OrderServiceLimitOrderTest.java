@@ -16,7 +16,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.teamfp.aistock.domain.account.entity.Account;
-import com.teamfp.aistock.domain.account.repository.AccountRepository;
+import com.teamfp.aistock.domain.account.service.AccountService;
 import com.teamfp.aistock.domain.order.dto.PendingOrderDto;
 import com.teamfp.aistock.domain.order.dto.request.CreateOrderRequest;
 import com.teamfp.aistock.domain.order.dto.response.CreateOrderResponse;
@@ -61,7 +61,7 @@ class OrderServiceLimitOrderTest {
     private HoldingRepository holdingRepository;
 
     @Mock
-    private AccountRepository accountRepository;
+    private AccountService accountService;
 
     @Mock
     private RedisStockCacheService redisStockCacheService;
@@ -99,7 +99,7 @@ class OrderServiceLimitOrderTest {
                 .balance(1_000_000L)
                 .build();
 
-        Mockito.lenient().when(accountRepository.findByAccountIdAndUserId(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
+        Mockito.lenient().when(accountService.getOwnedAccount(USER_ID, ACCOUNT_ID)).thenReturn(account);
         // orderRepository.save()는 실제 DB처럼 orderId를 채워주지 않으므로, 테스트에서는
         // Order.builder()로 만든 엔티티를 그대로 리턴해도 orderId가 null이라 뒤 로직(Redis 등록)
         // 검증에는 지장이 없다 — orderId 자체를 검증하는 케이스는 없다.

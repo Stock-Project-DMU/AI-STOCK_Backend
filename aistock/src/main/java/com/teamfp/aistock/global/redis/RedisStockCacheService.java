@@ -1,6 +1,10 @@
 package com.teamfp.aistock.global.redis;
 
 import java.time.Duration;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
@@ -77,6 +81,47 @@ public class RedisStockCacheService {
         } catch (JacksonException e) {
             throw new CustomException(ErrorCode.REDIS_SERIALIZATION_ERROR, e);
         }
+    }
+
+    /**
+     * 여러 종목의 현재가를 Redis MGET 한 번으로 조회한다. 마이페이지 수익률/보유종목 화면처럼
+     * 보유종목 N개의 시세를 한 번에 보여줘야 하는 화면에서, 종목마다 getStockPrice()를
+     * 순차 호출하면 N번의 Redis 왕복이 발생하는 것을 막기 위함이다.
+     *
+     * 캐시가 비어있는(TTL 만료) 종목은 반환되는 Map에서 키 자체가 빠진다 — 호출부가
+     * Map.get(stockCode)가 null인 경우를 직접 처리해야 한다(예: 평단가로 대체).
+     *
+     * @param stockCodes 조회할 종목코드 목록
+     * @return 종목코드 → 현재가 DTO. 캐시 미스 종목은 포함되지 않는다.
+     */
+    public Map<String, StockPriceDto> getStockPrices(Collection<String> stockCodes) {
+        if (stockCodes.isEmpty()) {
+            return Map.of();
+        }
+
+        List<String> codes = List.copyOf(stockCodes);
+        List<String> keys = codes.stream().map(code -> STOCK_PRICE_KEY + code).toList();
+        List<String> values = redisTemplate.opsForValue().multiGet(keys);
+        // multiGet()은 시그니처상 @Nullable이라 연결 장애 등으로 null을 반환할 가능성이
+        // 있다 — 단일 조회 getStockPrice()가 캐시 미스를 null로 처리하는 것과 동일하게,
+        // 여기서도 예외 대신 "전부 미스"로 취급해 호출부가 평단가 등으로 대체할 수 있게 한다.
+        if (values == null) {
+            return Map.of();
+        }
+
+        Map<String, StockPriceDto> result = new HashMap<>();
+        for (int i = 0; i < codes.size(); i++) {
+            String json = values.get(i);
+            if (json == null) {
+                continue;
+            }
+            try {
+                result.put(codes.get(i), objectMapper.readValue(json, StockPriceDto.class));
+            } catch (JacksonException e) {
+                throw new CustomException(ErrorCode.REDIS_SERIALIZATION_ERROR, e);
+            }
+        }
+        return result;
     }
 
     /**
