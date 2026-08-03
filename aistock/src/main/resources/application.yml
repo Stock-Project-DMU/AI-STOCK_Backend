@@ -22,6 +22,15 @@ admin:
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
 
+# LS증권 Open API 연동 설정 - appkey/appsecret은 절대 코드·yml에 하드코딩하지 않고
+# 실행 환경변수(LS_APP_KEY, LS_APP_SECRET)로만 주입한다(.env는 gitignore 대상).
+# 접근토큰 발급 엔드포인트는 실서버/모의투자 서버 공통이며, appkey/appsecret 자체가 모의/실 계정을 구분한다.
+# 실시간시세 WebSocket 접속 URL은 모의/실서버 포트가 달라 프로필별(application-dev.yml/application-prod.yml)로 분리한다.
+ls:
+  token-url: ${LS_TOKEN_URL:https://openapi.ls-sec.co.kr:8080/oauth2/token}
+  app-key: ${LS_APP_KEY}
+  app-secret: ${LS_APP_SECRET}
+
 # 회원가입 이메일 인증코드 발신자 주소 (spring.mail과 별개 커스텀 프로퍼티)
 app:
   mail:

@@ -56,5 +56,11 @@ cors:
 jwt:
   secret: ${JWT_SECRET}
 
+# 운영 환경은 실서버(포트 9443)로 접속하며, 로컬 기본값을 물려받지 않도록 기본값 없이 강제한다.
+# mode는 현재 real 고정 — 추후 Mock 전환 브랜치에서 다시 바뀔 값이지만 지금은 실제 LS 연동을 사용한다.
+ls:
+  mode: real
+  websocket-url: ${LS_WEBSOCKET_URL}
+
 admin:
   signup-code: ${ADMIN_SIGNUP_CODE}

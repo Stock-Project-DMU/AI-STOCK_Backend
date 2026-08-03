@@ -42,3 +42,11 @@ spring:
 logging:
   level:
     com.teamfp.aistock: debug
+
+# 로컬 개발은 모의투자 서버로 접속한다 (실서버 포트 9443, 모의투자 포트 29443).
+# mode 기본값은 mock — CI/테스트 및 LS 연동이 필요 없는 로컬 개발에서는 LsWebSocketClient 빈
+# 자체가 생성되지 않아 LS_APP_KEY/LS_APP_SECRET 없이도 컨텍스트 로딩이 통과한다. 실제 LS 연동이
+# 필요한 로컬 개발자는 .env나 개인 프로필에서 LS_MODE=real로 오버라이드하면 된다.
+ls:
+  mode: ${LS_MODE:mock}
+  websocket-url: ${LS_WEBSOCKET_URL:wss://openapi.ls-sec.co.kr:29443/websocket}
