@@ -7,6 +7,7 @@ import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
@@ -40,11 +41,19 @@ public class LsWebSocketHandler extends TextWebSocketHandler {
     private final ObjectMapper objectMapper;
     private final LsReconnectService lsReconnectService;
 
+    // afterConnectionClosed()에서 LsWebSocketClient.disconnect()로 인한 의도적 종료인지
+    // 판단하기 위해 필요하다. LsWebSocketClient가 이미 이 클래스를 생성자로 주입받고 있어
+    // (LsWebSocketClient → LsWebSocketHandler) 여기서 LsWebSocketClient를 그대로 주입받으면
+    // 즉시 순환 참조가 생기므로, LsReconnectService와 동일하게 {@code @Lazy} 프록시로 실제 빈
+    // 해석을 최초 호출 시점까지 미뤄 순환을 끊는다.
+    private final LsWebSocketClient lsWebSocketClient;
+
     public LsWebSocketHandler(List<LsMarketDataListener> listeners, ObjectMapper objectMapper,
-                               LsReconnectService lsReconnectService) {
+                               LsReconnectService lsReconnectService, @Lazy LsWebSocketClient lsWebSocketClient) {
         this.listeners = listeners;
         this.objectMapper = objectMapper;
         this.lsReconnectService = lsReconnectService;
+        this.lsWebSocketClient = lsWebSocketClient;
     }
 
     @Override
@@ -92,6 +101,10 @@ public class LsWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
+        if (lsWebSocketClient.isIntentionalDisconnect()) {
+            log.info("LS WebSocket 연결이 의도적으로 종료됨(disconnect() 호출), 재연결하지 않음, status={}", status);
+            return;
+        }
         log.warn("LS WebSocket 연결이 종료됨, status={}", status);
         lsReconnectService.scheduleReconnect();
     }
