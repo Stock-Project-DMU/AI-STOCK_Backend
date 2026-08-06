@@ -31,6 +31,8 @@ public class WatchlistService {
     // (schema.sql 13개 테이블 기준) stockName을 얻을 수 있는 유일한 소스가 LS증권 tick 캐시
     // (stock:price)이기 때문이다.
     private final RedisStockCacheService redisStockCacheService;
+    // v14, feature/stock-price: 관심종목 추가/삭제를 LS 실시간 구독 참조 카운트에 반영한다.
+    private final StockSubscriptionManager stockSubscriptionManager;
 
     // watchlist.uq_user_stock — 같은 유저·종목의 관심종목 등록이 동시에 두 건 이상 요청될 때
     // 걸리는 유니크 제약. HoldingSettlementService.isUniqueConstraintViolation()과 같은 이유로
@@ -74,6 +76,7 @@ public class WatchlistService {
                 .build();
         try {
             watchlistRepository.save(watchlist);
+            stockSubscriptionManager.increaseWatchlistSubscription(stockCode);
         } catch (DataIntegrityViolationException e) {
             if (!isUniqueConstraintViolation(e)) {
                 throw e;
@@ -92,6 +95,9 @@ public class WatchlistService {
      */
     @Transactional
     public void removeWatchlist(Long userId, String stockCode) {
-        watchlistRepository.deleteByUserIdAndStockCode(userId, stockCode);
+        int deletedCount = watchlistRepository.deleteByUserIdAndStockCode(userId, stockCode);
+        if (deletedCount > 0) {
+            stockSubscriptionManager.decreaseWatchlistSubscription(stockCode);
+        }
     }
 }

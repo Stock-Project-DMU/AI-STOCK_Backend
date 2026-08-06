@@ -31,4 +31,8 @@ public interface RecentViewedRepository extends JpaRepository<RecentViewed, Long
     @Modifying
     @Query("delete from RecentViewed r where r.user.userId = :userId")
     void deleteByUserId(@Param("userId") Long userId);
+
+    // 4주차 feature/stock-price StockNameResolver용 — stockCode만으로 이미 누군가 최근 조회한 적
+    // 있는 종목의 stockName을 찾는다(유저 무관, 어느 행이든 하나만 있으면 됨).
+    Optional<RecentViewed> findFirstByStockCode(String stockCode);
 }

@@ -133,6 +133,7 @@ public class LsWebSocketHandler extends TextWebSocketHandler {
                 .stockName(null)
                 .currentPrice(body.path("price").asLong())
                 .changeRate(body.path("drate").asDouble())
+                .changeAmount(body.path("change").asLong())
                 .volume(body.path("volume").asLong())
                 .tradedAt(parseTradedAt(body.path("chetime").asString(null)))
                 .build();
