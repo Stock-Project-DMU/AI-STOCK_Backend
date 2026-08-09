@@ -301,6 +301,14 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 > v8 추가: `AuthService.login()`에서 `user.getStatus() == UserStatus.SUSPENDED`인 경우
 > `CustomException(ErrorCode.USER_SUSPENDED)` throw (기존 `isActive`/탈퇴 확인과 별도 분기).
 
+> feature/auth-logout 추가: `login()`이 같은 `loginId`로 반복되는 로그인 시도(브루트포스)를
+> 막기 위해 `RedisAuthCodeService`의 로그인 실패 카운터(`incrementLoginFail`/`isLoginLocked`/
+> `resetLoginFail`, `auth:login_fail:{loginId}`)를 사용한다. 진입 시 `isLoginLocked()`가
+> true면 `CustomException(ErrorCode.LOGIN_LOCKED)`를 즉시 throw하고, 비밀번호 불일치
+> (`INVALID_PASSWORD`) 시 `incrementLoginFail()`을 호출한다(10분 내 5회 실패 시 잠금).
+> 아이디 자체가 없는 경우(`USER_NOT_FOUND`)는 브루트포스 대상이 아니므로 카운트하지 않는다.
+> 로그인에 최종 성공하면 `resetLoginFail()`로 카운터를 초기화한다.
+
 > **동시 가입 경합 처리**: 소셜 로그인 신규 가입 분기는 조회 후 저장 구조라 동시 요청 시
 > `social_accounts.uq_provider` 유니크 제약 위반(`DataIntegrityViolationException`)이 날 수 있다.
 > `socialLogin()`은 이를 잡아 1회 재시도하는데, `processSocialLogin()`을 반드시 self 프록시

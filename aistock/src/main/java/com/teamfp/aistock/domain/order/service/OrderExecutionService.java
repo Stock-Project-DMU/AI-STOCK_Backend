@@ -11,6 +11,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.teamfp.aistock.domain.account.entity.Account;
+import com.teamfp.aistock.domain.notification.entity.NotificationType;
+import com.teamfp.aistock.domain.notification.service.NotificationService;
 import com.teamfp.aistock.domain.order.dto.PendingOrderDto;
 import com.teamfp.aistock.domain.order.entity.Holding;
 import com.teamfp.aistock.domain.order.entity.Order;
@@ -41,6 +43,8 @@ public class OrderExecutionService {
     private final HoldingRepository holdingRepository;
     private final RedisPendingOrderService redisPendingOrderService;
     private final HoldingSettlementService holdingSettlementService;
+    // 지정가 주문 체결 시 알림 발송 — 도메인 간 직접 참조 대신 서비스 계층을 통해 호출한다.
+    private final NotificationService notificationService;
 
     // execute()의 @Transactional은 Spring AOP 프록시를 거쳐야만 실제로 트랜잭션을 연다.
     // checkAndExecute()가 같은 클래스 안에서 execute(...)를 그냥 호출하면(self-invocation)
@@ -169,6 +173,18 @@ public class OrderExecutionService {
         }
 
         order.execute(currentPrice);
+
+        // pendingOrder.getUserId()를 쓴다 — order.getAccount().getUser()는 LAZY라 굳이
+        // User를 추가로 로딩할 필요 없이 Redis 캐시(PendingOrderDto)에 이미 있는 userId를 그대로 쓴다.
+        notificationService.notify(pendingOrder.getUserId(), NotificationType.ORDER, "주문 체결", buildExecutionMessage(order));
+    }
+
+    private String buildExecutionMessage(Order order) {
+        String action = order.getOrderType() == OrderType.BUY ? "매수" : "매도";
+        return String.format(
+                "%s %s %d주가 %,d원에 체결되었습니다.",
+                order.getStockName(), action, order.getQuantity(), order.getExecPrice()
+        );
     }
 
     private void executeBuy(Order order, Account account, long currentPrice) {

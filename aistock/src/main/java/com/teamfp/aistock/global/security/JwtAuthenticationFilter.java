@@ -1,6 +1,7 @@
 package com.teamfp.aistock.global.security;
 
 import com.teamfp.aistock.global.exception.CustomException;
+import com.teamfp.aistock.global.redis.RedisTokenService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -20,6 +21,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtProvider jwtProvider;
     private final CustomUserDetailsService customUserDetailsService;
+    private final RedisTokenService redisTokenService;
 
     @Override
     protected void doFilterInternal(
@@ -29,7 +31,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     ) throws ServletException, IOException {
         String token = jwtProvider.resolveToken(request);
 
-        if (StringUtils.hasText(token) && jwtProvider.validateToken(token)) {
+        // 로그아웃 시 블랙리스트에 등록된 토큰은 만료 전이라도 인증에서 제외한다.
+        if (StringUtils.hasText(token) && jwtProvider.validateToken(token) && !redisTokenService.isBlacklisted(token)) {
             authenticate(token);
         }
 

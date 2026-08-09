@@ -101,6 +101,12 @@ public class AuthService {
      * 일반 로그인
      */
     public LoginResponse login(LoginRequest request) {
+        // 같은 아이디로 짧은 시간에 반복적으로 로그인을 시도하는 것을 막기 위한 잠금 검사.
+        // 10분 내 5회 비밀번호 실패 시 잠기며, 로그인에 성공하면 카운터가 초기화된다.
+        if (redisAuthCodeService.isLoginLocked(request.getLoginId())) {
+            throw new CustomException(ErrorCode.LOGIN_LOCKED);
+        }
+
         User user = userRepository.findByLoginId(request.getLoginId())
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
 
@@ -111,6 +117,7 @@ public class AuthService {
 
         // 비밀번호 검증
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+            redisAuthCodeService.incrementLoginFail(request.getLoginId());
             throw new CustomException(ErrorCode.INVALID_PASSWORD);
         }
 
@@ -119,6 +126,7 @@ public class AuthService {
             throw new CustomException(ErrorCode.USER_SUSPENDED);
         }
 
+        redisAuthCodeService.resetLoginFail(request.getLoginId());
         return generateLoginResponse(user);
     }
 
@@ -246,6 +254,19 @@ public class AuthService {
                 .accessToken(newAccessToken)
                 .refreshToken(newRefreshToken)
                 .build();
+    }
+
+    /**
+     * 로그아웃. Access Token은 남은 유효시간만큼만 블랙리스트에 등록해 즉시 무효화하고
+     * (JwtAuthenticationFilter가 매 요청마다 블랙리스트 여부를 확인한다), Refresh Token은
+     * Redis에서 삭제해 재발급(refresh())을 막는다.
+     */
+    public void logout(Long userId, String accessToken) {
+        long remainingMillis = jwtProvider.getRemainingMillis(accessToken);
+        if (remainingMillis > 0) {
+            redisTokenService.blacklistAccessToken(accessToken, remainingMillis);
+        }
+        redisTokenService.deleteRefreshToken(userId);
     }
 
     /**
