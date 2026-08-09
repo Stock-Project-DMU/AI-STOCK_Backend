@@ -17,6 +17,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import com.teamfp.aistock.domain.account.entity.Account;
 import com.teamfp.aistock.domain.account.service.AccountService;
+import com.teamfp.aistock.domain.notification.service.NotificationService;
 import com.teamfp.aistock.domain.order.dto.HoldingValuationDto;
 import com.teamfp.aistock.domain.order.dto.request.CreateOrderRequest;
 import com.teamfp.aistock.domain.order.dto.response.CreateOrderResponse;
@@ -71,6 +72,9 @@ class OrderServiceTest {
 
     @Mock
     private HoldingValuationService holdingValuationService;
+
+    @Mock
+    private NotificationService notificationService;
 
     @InjectMocks
     private OrderService orderService;

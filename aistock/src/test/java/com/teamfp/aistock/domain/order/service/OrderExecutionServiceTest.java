@@ -17,6 +17,7 @@ import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.teamfp.aistock.domain.account.entity.Account;
+import com.teamfp.aistock.domain.notification.service.NotificationService;
 import com.teamfp.aistock.domain.order.dto.PendingOrderDto;
 import com.teamfp.aistock.domain.order.entity.Holding;
 import com.teamfp.aistock.domain.order.entity.Order;
@@ -55,6 +56,9 @@ class OrderExecutionServiceTest {
 
     @Mock
     private RedisPendingOrderService redisPendingOrderService;
+
+    @Mock
+    private NotificationService notificationService;
 
     @InjectMocks
     private OrderExecutionService orderExecutionService;
