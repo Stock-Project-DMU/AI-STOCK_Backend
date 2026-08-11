@@ -33,6 +33,7 @@
 | `MessageRole` | `USER`, `AI` | `domain.ai.entity` |
 | `NotificationType` | `SYSTEM`, `ORDER`, `AI`, `SIMULATION` | `domain.notification.entity` |
 | `InquiryStatus` | `PENDING`, `ANSWERED` | `domain.inquiry.entity` |
+| `PriceDirection` | `UP`, `DOWN`, `FLAT` | `domain.stock.dto` (4주차 `feature/stock-price` 추가 — Entity/DB 컬럼이 아니라 `StockPriceResponse` 응답 시점에 `changeRate` 부호로 계산해서 채우는 값이라 `entity`가 아닌 `dto` 패키지에 둔다) |
 
 ---
 
@@ -103,13 +104,13 @@
 | `SocialAccountRepository` | `findByProviderAndProviderId(SocialProvider provider, String providerId)`, `deleteByUserId(Long userId)` |
 | `InvestmentProfileRepository` | `findByUserId(Long userId)`, `deleteByUserId(Long userId)` |
 | `AccountRepository` | `findAllByUserId(Long userId)`(내 계좌 목록, 최대 3건), `findAllByUserIdForUpdate(Long userId)`(mypage-account 추가 — `@Lock(PESSIMISTIC_WRITE)`, `AccountService.createAccount()`가 계좌 개수 확인과 저장 사이의 동시 개설 경합을 막는 데 사용. 처음에는 `UserRepository.findByIdForUpdate`로 User 행 전체를 잠갔는데, User는 계좌와 무관한 다른 기능도 앞으로 잠글 수 있는 공용 자원이라 Account 쪽만 잠그는 이 메서드로 좁혔다 — 매칭 행이 0개여도 idx_account_user 인덱스로 갭 락이 걸려 동시 삽입을 막는다), `findByAccountIdAndUserId(Long accountId, Long userId)`(mypage-account 추가 — 계좌 소유권 검증 겸 조회. order-market/order-limit의 `findByUserId(Long userId)`를 대체 — 유저가 계좌를 여러 개 가질 수 있어 단일 계좌를 가정한 조회는 더 이상 쓰지 않는다), `findByAccountIdAndUserIdForUpdate(Long accountId, Long userId)`(mypage-account 추가 — `@Lock(PESSIMISTIC_WRITE)`, `AccountService.chargeBalance()`가 chargeCount 확인과 반영 사이의 동시 충전 경합을 막는 데 사용. `findByAccountIdAndUserId`와 WHERE 절이 동일해 `FIND_BY_ACCOUNT_ID_AND_USER_ID` 상수로 공유), `findByAccountNumber(String accountNumber)`, `deleteByUserId(Long userId)` |
-| `HoldingRepository` | `findAllByAccountId(Long accountId)`, `findByAccountIdAndStockCode(Long accountId, String stockCode)` |
-| `OrderRepository` | `findAllByStockCodeAndStatus(String stockCode, OrderStatus status)`, `findAllByAccountIdOrderByOrderedAtDesc(Long accountId)`, `findByOrderIdAndAccountId(Long orderId, Long accountId)`, `findAllByStatusWithAccountAndUser(OrderStatus status)`, `countByStatus(OrderStatus status)`(관리자 대시보드 — 총 거래건수), `findTop20ByStatusOrderByExecutedAtDesc(OrderStatus status)`(관리자 대시보드 — 최근 거래 20건), `findAllOrdersWithUser(Pageable pageable)`(관리자 전체 거래 목록, `@Query` JOIN FETCH account.user), `findOrderWithUserById(Long orderId)`(관리자 거래 상세, `@Query` JOIN FETCH), `sumExecutedAmount()`(관리자 대시보드 — 총 거래대금, `@Query SUM(execPrice*quantity)`), `findByIdForUpdate(Long orderId)`(feature/order-limit 추가 — `@Lock(PESSIMISTIC_WRITE)`, `OrderExecutionService.execute()`용), `findByOrderIdAndUserIdForUpdate(Long orderId, Long userId)`(mypage-account 추가 — `@Lock(PESSIMISTIC_WRITE)`, `OrderService.cancelOrder()`용. 계좌가 여러 개가 되면서 한때 `findByIdForUpdate(orderId)`로 먼저 잠근 뒤 소유자를 나중에 검증하는 방식을 썼는데, 그러면 남의 orderId로도 락이 먼저 걸려버려(락 경합 + 존재 여부를 응답 시간으로 구분당하는 사이드채널) 과거 `findByOrderIdAndAccountIdForUpdate(Long orderId, Long accountId)`처럼 소유권을 WHERE 절(이번엔 accountId 대신 userId로 조인)에 넣어 조회와 동시에 걸러내는 방식으로 되돌렸다), `sumPendingSellQuantity(Long accountId, String stockCode)`(feature/order-limit 추가 — 같은 계좌·종목으로 이미 등록된 PENDING 지정가 매도 주문 수량 합계. `createLimitOrder()`가 매도 등록 시 `보유수량 - 이미 대기 중인 매도 수량`으로 검증해, 같은 종목을 초과해서 중복 매도 등록하는 것을 등록 시점에 막는다. 이 조회는 일반 SELECT라 MySQL 기본 격리수준(REPEATABLE READ)에서는 트랜잭션 시작 시점 스냅샷을 볼 수 있어, `createLimitOrder()` 자체를 `@Transactional(isolation = READ_COMMITTED)`로 지정해 항상 최신 커밋 데이터를 보게 한다) |
-| `WatchlistRepository` | `findAllByUserId(Long userId)`, `existsByUserIdAndStockCode(Long userId, String stockCode)`, `deleteByUserIdAndStockCode(Long userId, String stockCode)`, `deleteByUserId(Long userId)` |
+| `HoldingRepository` | `findAllByAccountId(Long accountId)`, `findByAccountIdAndStockCode(Long accountId, String stockCode)`, `findFirstByStockCode(String stockCode)`(4주차 `feature/stock-price` 추가 — `StockNameResolver`가 종목명 조회 시 사용, 8-4 참고) |
+| `OrderRepository` | `findAllByStockCodeAndStatus(String stockCode, OrderStatus status)`, `findAllByAccountIdOrderByOrderedAtDesc(Long accountId)`, `findByOrderIdAndAccountId(Long orderId, Long accountId)`, `findAllByStatusWithAccountAndUser(OrderStatus status)`, `countByStatus(OrderStatus status)`(관리자 대시보드 — 총 거래건수), `findTop20ByStatusOrderByExecutedAtDesc(OrderStatus status)`(관리자 대시보드 — 최근 거래 20건), `findAllOrdersWithUser(Pageable pageable)`(관리자 전체 거래 목록, `@Query` JOIN FETCH account.user), `findOrderWithUserById(Long orderId)`(관리자 거래 상세, `@Query` JOIN FETCH), `sumExecutedAmount()`(관리자 대시보드 — 총 거래대금, `@Query SUM(execPrice*quantity)`), `findByIdForUpdate(Long orderId)`(feature/order-limit 추가 — `@Lock(PESSIMISTIC_WRITE)`, `OrderExecutionService.execute()`용), `findByOrderIdAndUserIdForUpdate(Long orderId, Long userId)`(mypage-account 추가 — `@Lock(PESSIMISTIC_WRITE)`, `OrderService.cancelOrder()`용. 계좌가 여러 개가 되면서 한때 `findByIdForUpdate(orderId)`로 먼저 잠근 뒤 소유자를 나중에 검증하는 방식을 썼는데, 그러면 남의 orderId로도 락이 먼저 걸려버려(락 경합 + 존재 여부를 응답 시간으로 구분당하는 사이드채널) 과거 `findByOrderIdAndAccountIdForUpdate(Long orderId, Long accountId)`처럼 소유권을 WHERE 절(이번엔 accountId 대신 userId로 조인)에 넣어 조회와 동시에 걸러내는 방식으로 되돌렸다), `sumPendingSellQuantity(Long accountId, String stockCode)`(feature/order-limit 추가 — 같은 계좌·종목으로 이미 등록된 PENDING 지정가 매도 주문 수량 합계. `createLimitOrder()`가 매도 등록 시 `보유수량 - 이미 대기 중인 매도 수량`으로 검증해, 같은 종목을 초과해서 중복 매도 등록하는 것을 등록 시점에 막는다. 이 조회는 일반 SELECT라 MySQL 기본 격리수준(REPEATABLE READ)에서는 트랜잭션 시작 시점 스냅샷을 볼 수 있어, `createLimitOrder()` 자체를 `@Transactional(isolation = READ_COMMITTED)`로 지정해 항상 최신 커밋 데이터를 보게 한다), `findFirstByStockCode(String stockCode)`(4주차 `feature/stock-price` 추가 — `StockNameResolver`용, 8-4 참고) |
+| `WatchlistRepository` | `findAllByUserId(Long userId)`, `existsByUserIdAndStockCode(Long userId, String stockCode)`, `deleteByUserIdAndStockCode(Long userId, String stockCode)`(v14, 4주차 `feature/stock-price`에서 반환 타입 `void`→`int`로 변경 — `WatchlistService.removeWatchlist()`가 실제로 삭제된 행이 있었는지 알아야 `StockSubscriptionManager.decreaseWatchlistSubscription()`을 호출할지 판단할 수 있어서다. `RecentViewedRepository.touchViewedAt()`과 동일한 이유), `deleteByUserId(Long userId)`, `findFirstByStockCode(String stockCode)`(4주차 `feature/stock-price` 추가 — `StockNameResolver`용, 8-4 참고) |
 | `AiPlanningSessionRepository` | `findAllByUserIdOrderByUpdatedAtDesc(Long userId)`, `findByUserIdAndSessionId(Long userId, Long sessionId)`, `deleteByUserId(Long userId)` |
 | `AiPlanningMessageRepository` | `findAllBySessionIdOrderByCreatedAtAsc(Long sessionId)` |
 | `SimulationRepository` | `findAllByUserIdOrderByCreatedAtDesc(Long userId)`, `findByUserIdAndSimulationId(Long userId, Long simulationId)`, `deleteByUserId(Long userId)` |
-| `RecentViewedRepository` | `findAllByUserIdOrderByViewedAtDesc(Long userId)`, `findByUserIdAndStockCode(Long userId, String stockCode)`, `touchViewedAt(Long userId, String stockCode)`(mypage-account 추가 — `@Modifying`, 이미 본 종목을 다시 볼 때 새 행 대신 viewedAt만 UPDATE. delete 후 재삽입 방식은 `RecentViewed`가 `@GeneratedValue(IDENTITY)`라 save()가 즉시 INSERT를 실행해버려 아직 flush 안 된 DELETE와 충돌해 `uq_user_stock_view` 위반이 나는 버그가 있어 이 방식으로 교체했다), `deleteByUserId(Long userId)` |
+| `RecentViewedRepository` | `findAllByUserIdOrderByViewedAtDesc(Long userId)`, `findByUserIdAndStockCode(Long userId, String stockCode)`, `touchViewedAt(Long userId, String stockCode)`(mypage-account 추가 — `@Modifying`, 이미 본 종목을 다시 볼 때 새 행 대신 viewedAt만 UPDATE. delete 후 재삽입 방식은 `RecentViewed`가 `@GeneratedValue(IDENTITY)`라 save()가 즉시 INSERT를 실행해버려 아직 flush 안 된 DELETE와 충돌해 `uq_user_stock_view` 위반이 나는 버그가 있어 이 방식으로 교체했다), `deleteByUserId(Long userId)`, `findFirstByStockCode(String stockCode)`(4주차 `feature/stock-price` 추가 — `StockNameResolver`용, 8-4 참고) |
 | `NotificationRepository` | `findAllByUserIdOrderByCreatedAtDesc(Long userId)`, `countByUserIdAndIsReadFalse(Long userId)`, `findByNotiIdAndUserId(Long notiId, Long userId)` |
 | `InquiryRepository` | `findAllByUserIdOrderByCreatedAtDesc(Long userId)`(사용자 본인 문의 목록), `findByInquiryIdAndUserId(Long inquiryId, Long userId)`(본인 문의 상세, 소유권 검증), `findAllByOrderByStatusDescCreatedAtDesc()`(관리자 전체 목록 — "PENDING"이 "ANSWERED"보다 알파벳순 뒤(P > A)라 status 내림차순 정렬해야 미답변 우선 노출), `deleteByUserId(Long userId)`(탈퇴 처리용) |
 
@@ -262,7 +263,7 @@ AWS Parameter Store에서 민감한 설정값(JWT_SECRET, DB 자격증명, `ADMI
 | `LsWebSocketHandler` | `handleMessage(String rawMessage)`, `onTickReceived(LsTickData tickData)`, `onHogaReceived(LsHogaData hogaData)` |
 | `LsReconnectService` | `scheduleReconnect()`, `reconnectWithBackoff()` |
 | `LsMarketDataListener` (v9 추가) | `onTickReceived(LsTickData tickData)`, `onHogaReceived(LsHogaData hogaData)` — infra는 domain을 직접 참조하지 않으므로(CLAUDE.md 4번), `LsWebSocketHandler`가 파싱한 시세를 domain에 넘기기 위한 콜백 인터페이스. 4주차 `feature/stock-price`의 `StockBroadcastService`가 이를 구현해 스프링 빈으로 등록하면 자동으로 연결된다. |
-| `LsTickData` (dto) | `stockCode`, `stockName`, `currentPrice`, `changeRate`, `volume`, `tradedAt` — `stockName`은 LS 실시간 체결 응답에 종목명 필드 자체가 없어 파싱 시 항상 `null`로 둔다(아래 참고) |
+| `LsTickData` (dto) | `stockCode`, `stockName`, `currentPrice`, `changeRate`, `changeAmount`(v14 추가), `volume`, `tradedAt` — `stockName`은 LS 실시간 체결 응답에 종목명 필드 자체가 없어 파싱 시 항상 `null`로 둔다(아래 참고). `changeAmount`는 LS 원본 `change` 필드(전일대비, 항상 부호 없는 절대값)를 그대로 옮긴 것 — 부호 없음에 주의, 부호를 반영한 최종 등락 금액은 4주차 `feature/stock-price`의 `StockBroadcastService`가 `changeRate` 부호를 적용해 `StockPriceDto.changeAmount`로 변환할 때 붙인다 |
 | `LsHogaData` (dto) | `stockCode`, `askPrices`(List), `askVolumes`(List), `bidPrices`(List), `bidVolumes`(List) |
 | `LsTokenResponse` (dto, v10 추가) | `accessToken`, `tokenType`, `expiresIn`, `scope` — `/oauth2/token` 응답(`access_token`/`token_type`/`expires_in`/`scope`)을 Jackson `@JsonProperty`로 매핑하는 내부 DTO. `LsWebSocketClient`가 토큰 발급 시에만 사용 |
 | `LsAuthenticationException` (v10 추가) | `LsWebSocketClient`가 `/oauth2/token` 발급 응답을 HTTP 401/403으로 받았을 때 던지는 런타임 예외. `LsReconnectService.reconnectWithBackoff()`가 이 예외 타입으로 "인증 실패로 의심되는 경우"와 "네트워크 문제로 의심되는 경우"를 구분해 로그를 남긴다 (도메인에 노출되는 예외가 아니라 infra 내부 재연결 로직 전용이라 `CustomException`/`ErrorCode`를 쓰지 않음) |
@@ -280,6 +281,7 @@ AWS Parameter Store에서 민감한 설정값(JWT_SECRET, DB 자격증명, `ADMI
 - **실시간 등록/해제 ACK 응답 포맷 (v12 실측 확정)**: 등록(`tr_type:"3"`) 요청에 대한 응답은 body 없이 `{"header":{"tr_type":"3","tr_cd":"S3_","rsp_cd":"...","rsp_msg":"..."},"body":null}` 형태로 온다 — 성공 시 `rsp_cd:"00000"`, `rsp_msg:"정상처리되었습니다"` (모의투자 계정으로 재확인, v12), 실패 시(예: 계좌 성격/접속 서버 불일치) `rsp_cd:"10001"`과 원인 메시지(v11). 실제 체결/호가 데이터는 이 ACK과 별개로 이후 도착하는, body가 채워진 메시지로 온다. `LsWebSocketHandler.handleMessage()`는 `header.rsp_cd`가 있으면(성공/실패 무관) body를 파싱하지 않고 무시하되, `00000`은 debug 로그, 그 외는 warn 로그로 구분한다 (v12).
 - **모의투자 앱키 정정 후 재확인 (v12)**: `.env`를 모의투자용 appkey/appsecret으로 교체 후 재테스트한 결과, 토큰 발급 성공(HTTP 200) + S3_/K3_/H1_/HA_ 4개 TR 모두 등록 ACK `rsp_cd:"00000"` 정상 수신 확인. 다만 테스트 시점이 장 마감 이후(23시경 KST)라 실제 체결/호가 tick 이벤트 자체가 발생하지 않아, 체결/호가 응답 body의 실제 필드명은 **아직 라이브로 재검증되지 못했다** — 위 필드명은 여전히 공식 카탈로그 문서 예시(v10) 기준. 장중(평일 09:00~15:30 KST)에 재접속해서 실제 body를 받아 최종 검증 필요.
 - **부호 처리 최종 확정 (v13, 2026-07-28 09:16~09:19 KST 장중 실측)**: 삼성전자(005930, 하락), SK하이닉스(000660, 하락), KB금융(105560, 상승→하락 전환 포함) 등 12개 종목 실시간 체결 데이터로 검증 완료. 결론 — `drate`는 API가 이미 부호를 포함해서 보내주므로(`"-8.17"` 등) `LsWebSocketHandler.parseTick()`이 `body.path("drate").asDouble()`로 그대로 파싱하는 기존 구현이 **추가 보정 없이 정확함**을 확인했다(코드 변경 불필요). `change`는 반대로 항상 부호 없는 절대값이라 방향 판단에 못 쓰지만 `LsTickData`가애초에 `change`를 읽지 않으므로 영향 없음. `cgubun`은 등락구분이 아니라 체결마다 바뀌는 별도 성격의 필드로 확인돼(위 필드명 항목 참고) 애초에 방향 판단용으로 쓰면 안 되고, 실제 등락구분 코드는 `sign`(2상승/3보합/5하락 실측 확인, 1상한/4하한 미관측)에 있다. 현재 `LsTickData`/`parseTick()`은 `sign`/`cgubun`을 아예 안 읽으므로 기존 구현 그대로 유지.
+- **`changeAmount` 파싱 추가 (v14, 4주차 `feature/stock-price`)**: `StockPriceDto.changeAmount`(등락 금액, 원)를 채우려면 `changeRate`만으로는 부족해(반올림 오차 발생) LS 원본 `change` 필드(전일대비 절대값, 부호 없음)를 새로 파싱하기로 확정했다. `LsTickData`에 `changeAmount` 필드를 추가하고 `parseTick()`에 `.changeAmount(body.path("change").asLong())`를 추가한다 — `drate`/`sign`/`cgubun` 처리는 v13 결론 그대로 유지, `change` 필드 파싱만 새로 켠다.
 
 ---
 
@@ -361,8 +363,46 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 | Controller | `StockController` |
 | 엔드포인트 | `GET /api/stocks/{stockCode}`, `GET /api/stocks/{stockCode}/hoga` |
 | Service | `StockService` — `getCurrentPrice(String stockCode)`, `getHoga(String stockCode)` |
-| Broadcast | `StockBroadcastService` — `onTickReceived(LsTickData tickData)`, `broadcastPrice(String stockCode, StockPriceDto dto)` |
-| Response DTO | `StockPriceResponse`(stockCode, stockName, currentPrice, changeRate, volume), `HogaResponse`(stockCode, askPrices, askVolumes, bidPrices, bidVolumes) |
+| Broadcast | `StockBroadcastService` — `onTickReceived(LsTickData tickData)`, `broadcastPrice(String stockCode, StockPriceDto dto)`, `onHogaReceived(LsHogaData hogaData)`, `broadcastHoga(String stockCode, HogaDto dto)` (`LsMarketDataListener`의 두 콜백을 모두 구현) |
+| 종목명 조회 | `StockNameResolver`(domain/stock/service) — `resolveStockName(String stockCode)`. `LsTickData.stockName`이 항상 null로 오기 때문에, `WatchlistRepository`/`HoldingRepository`/`OrderRepository`/`RecentViewedRepository`의 `findFirstByStockCode(String stockCode)`를 순서대로 조회해 처음 찾은 이름을 반환한다(admin 도메인과 동일하게 여러 도메인의 Repository를 직접 주입받아 조합하는 예외적 컴포넌트, CLAUDE.md 4번 참고). 4개 테이블 어디에도 없으면 null을 반환하고, `StockBroadcastService`는 이 경우 `stockCode`를 이름 대신 사용한다 — 근본 해결은 하단 `> 종목명 폴백 한계` 참고 |
+| Response DTO | `StockPriceResponse`(stockCode, stockName, currentPrice, changeAmount, changeRate, direction, volume), `HogaResponse`(stockCode, askPrices, askVolumes, bidPrices, bidVolumes) — `direction`은 `PriceDirection`(0번 전역 Enum 참고), `changeAmount`는 `StockBroadcastService.toStockPriceDto()`가 계산한 부호 있는 등락 금액을 그대로 응답에 노출한 것(v14) |
+| STOMP 토픽 (v14 확정) | 가격 `/topic/stock/{stockCode}`(`StockPriceResponse`), 호가 `/topic/stock/{stockCode}/hoga`(`HogaResponse`) — REST 엔드포인트 구분(`GET /api/stocks/{stockCode}` vs `/hoga`)과 동일하게 분리, 프론트가 가격만 필요하면 호가 토픽은 구독하지 않아도 됨 |
+| 구독 관리 (v14 확정) | `StockSubscriptionManager`(domain/stock/service) — `increaseWatchlistSubscription(String stockCode)`, `decreaseWatchlistSubscription(String stockCode)`, `increaseViewingSubscription(String stockCode)`, `decreaseViewingSubscription(String stockCode)`. `LsWebSocketClient`는 `ls.mode=real`일 때만 빈으로 존재하므로 `Optional<LsWebSocketClient>`로 생성자 주입받는다 — mock 모드(`Optional.empty()`)에서는 구독 카운터만 갱신하고 실제 `subscribe()`/`unsubscribe()` 호출은 debug 로그만 남기고 건너뛴다 |
+| STOMP 세션 리스너 (v14 확정) | `StockViewSubscriptionListener`(global/stomp) — `handleSessionSubscribe(SessionSubscribeEvent event)`, `handleSessionUnsubscribe(SessionUnsubscribeEvent event)`, `handleSessionDisconnect(SessionDisconnectEvent event)` |
+
+> **종목명 폴백 한계 (v14 추가, 미해결 이슈)**: `StockNameResolver`는 우리 DB(watchlist/holdings/
+> orders/recent_viewed)에 이미 등록된 종목만 이름을 찾을 수 있다. 아무도 관심등록·매매·조회한
+> 적 없는 신규/미거래 종목은 LS tick도 `stockName`이 null로 오고 우리 DB 어디에도 이름이 없어
+> `stockCode`가 그대로 노출된다. 이 브랜치 범위에서는 해결하지 않고 `KNOWN_ISSUES.md`에 별도
+> 이슈로 남긴다 — 근본 해결책(DART 기업개황 API 연동 vs `stock_master` 테이블 신설)은 팀 회의에서
+> 결정 필요.
+>
+> **구독(subscribe) 트리거 시점 확정 (v14)**: 하이브리드 방식으로 간다.
+> 1. `WatchlistService.addWatchlist()`가 실제로 새 행을 저장했을 때(멱등 스킵/동시성 충돌로
+>    실패한 경우는 제외) `StockSubscriptionManager.increaseWatchlistSubscription()`을 호출해
+>    영구 구독으로 취급한다. `removeWatchlist()`가 실제로 행을 삭제했을 때(`deleteByUserIdAndStockCode`
+>    반환값 > 0, 위 1-2 참고) `decreaseWatchlistSubscription()`을 호출한다.
+> 2. 종목 상세페이지 진입 시 클라이언트가 `/topic/stock/{stockCode}`를 STOMP SUBSCRIBE하면
+>    `StockViewSubscriptionListener.handleSessionSubscribe()`가 destination에서 stockCode를
+>    추출해 `increaseViewingSubscription()`을 호출하고 (세션ID, 구독ID) → stockCode 매핑을
+>    저장한다. 클라이언트가 UNSUBSCRIBE하면 `handleSessionUnsubscribe()`가 매핑을 조회해
+>    `decreaseViewingSubscription()`을 호출한다. 세션이 비정상 종료(UNSUBSCRIBE 프레임 없이
+>    끊김)되면 `handleSessionDisconnect()`가 그 세션이 갖고 있던 매핑 전부에 대해
+>    `decreaseViewingSubscription()`을 호출하고 정리한다 — `SessionDisconnectEvent`로 보완
+>    처리하는 패턴은 CLAUDE.md 8번의 온라인 추적 정책과 동일한 논리다.
+> 3. `StockSubscriptionManager`는 종목별 구독자 수(관심종목+조회 합산)를
+>    `ConcurrentHashMap<String, AtomicInteger>`로 관리한다(단일 서버 운영 전제 — Redis 키로
+>    승격할지는 다중 서버로 확장될 때 재검토). 0→1 전환 시 `LsWebSocketClient.subscribe()`,
+>    1→0 전환 시 `unsubscribe()`를 호출한다.
+> 4. 소켓당 종목 512개 제한: 0→1 전환으로 새 종목을 구독하려는 시점에 이미 관리 중인 종목 수가
+>    512개 이상이면 `subscribe()` 호출 자체는 그대로 진행하되 warn 로그만 남긴다(실제 초과 여부·
+>    거부 응답은 `LsWebSocketHandler`의 기존 ACK 로깅으로 확인 — 본격적인 대응은 범위 밖).
+>
+> **주의 (v14 발견, 이번 브랜치 범위 아님)**: CLAUDE.md 8번/NAMING.md 7번은 `RedisOnlineStatusService`와
+> `StompAuthInterceptor`의 CONNECT/DISCONNECT 온라인 추적이 이미 구현된 것처럼 기술하지만, 실제
+> 코드에는 `RedisOnlineStatusService`도 `SessionDisconnectEvent` 리스너도 없다(`StompAuthInterceptor`는
+> CONNECT 인증만 처리). `StockViewSubscriptionListener`가 이 저장소 최초의 STOMP 세션 이벤트
+> 리스너가 된다. 문서-코드 불일치는 `KNOWN_ISSUES.md` 2번에 별도로 남긴다.
 
 ### 8-5. feature/order-market
 

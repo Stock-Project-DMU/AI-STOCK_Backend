@@ -29,4 +29,8 @@ public interface HoldingRepository extends JpaRepository<Holding, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select h from Holding h where h.account.accountId = :accountId and h.stockCode = :stockCode")
     Optional<Holding> findByAccountIdAndStockCode(@Param("accountId") Long accountId, @Param("stockCode") String stockCode);
+
+    // 4주차 feature/stock-price StockNameResolver용 — stockCode만으로 이미 누군가 보유 중인
+    // 종목의 stockName을 찾는다(계좌 무관, 어느 행이든 하나만 있으면 됨).
+    Optional<Holding> findFirstByStockCode(String stockCode);
 }

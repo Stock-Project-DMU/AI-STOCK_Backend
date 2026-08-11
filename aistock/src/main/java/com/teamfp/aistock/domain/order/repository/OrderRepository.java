@@ -82,4 +82,8 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
             + "where o.account.accountId = :accountId and o.stockCode = :stockCode "
             + "and o.orderType = 'SELL' and o.status = 'PENDING'")
     int sumPendingSellQuantity(@Param("accountId") Long accountId, @Param("stockCode") String stockCode);
+
+    // 4주차 feature/stock-price StockNameResolver용 — stockCode만으로 이미 누군가 주문한 적 있는
+    // 종목의 stockName을 찾는다(계좌/유저 무관, 어느 주문이든 하나만 있으면 됨).
+    Optional<Order> findFirstByStockCode(String stockCode);
 }

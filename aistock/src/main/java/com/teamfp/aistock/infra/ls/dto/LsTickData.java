@@ -21,6 +21,7 @@ public class LsTickData {
     private String stockName;        // 종목명
     private long currentPrice;       // 체결가
     private double changeRate;       // 전일 종가 대비 등락률(%)
+    private long changeAmount;       // 전일 종가 대비 등락 금액 — LS 원본 그대로 부호 없는 절대값
     private long volume;             // 당일 누적 거래량
     private LocalDateTime tradedAt;  // 체결 시각
 }
