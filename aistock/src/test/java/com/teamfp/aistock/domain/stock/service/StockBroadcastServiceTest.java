@@ -2,6 +2,12 @@ package com.teamfp.aistock.domain.stock.service;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -131,5 +137,43 @@ class StockBroadcastServiceTest {
 
         verify(redisStockCacheService).saveHogaData(eq("005930"), any(HogaDto.class));
         verify(messagingTemplate).convertAndSend(eq("/topic/stock/005930/hoga"), any(HogaResponse.class));
+    }
+
+    @Test
+    @DisplayName("같은 종목코드로 여러 스레드가 동시에 isThrottled()를 호출해도 정확히 하나만 통과(false)한다")
+    void isThrottled_OnlyOneThreadPassesUnderConcurrency() throws InterruptedException {
+        ConcurrentHashMap<String, Long> lastProcessedAt = new ConcurrentHashMap<>();
+        String stockCode = "005930";
+        int threadCount = 50;
+
+        ExecutorService executorService = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch readyLatch = new CountDownLatch(threadCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(threadCount);
+        AtomicInteger passedCount = new AtomicInteger(0);
+
+        for (int i = 0; i < threadCount; i++) {
+            executorService.submit(() -> {
+                readyLatch.countDown();
+                try {
+                    startLatch.await();
+                    if (!stockBroadcastService.isThrottled(lastProcessedAt, stockCode)) {
+                        passedCount.incrementAndGet();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    doneLatch.countDown();
+                }
+            });
+        }
+
+        readyLatch.await();
+        startLatch.countDown();
+        boolean completed = doneLatch.await(5, TimeUnit.SECONDS);
+        executorService.shutdown();
+
+        assertThat(completed).isTrue();
+        assertThat(passedCount.get()).isEqualTo(1);
     }
 }

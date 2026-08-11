@@ -2,6 +2,7 @@ package com.teamfp.aistock.domain.stock.service;
 
 import java.time.LocalDateTime;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -111,13 +112,26 @@ public class StockBroadcastService implements LsMarketDataListener {
         return resolved != null ? resolved : stockCode;
     }
 
-    private boolean isThrottled(ConcurrentHashMap<String, Long> lastProcessedAt, String stockCode) {
+    // get→검사→put이 원자적이지 않으면 같은 종목의 tick 두 개가 서로 다른
+    // tickTaskExecutor 워커 스레드에서 동시에 진입해 둘 다 통과할 수 있다(경쟁 상태).
+    // compute()는 종목코드(키) 단위로 락을 잡고 원자적으로 실행되므로 get+put을
+    // 하나의 원자 연산으로 묶을 수 있다. 단, "반환된 타임스탬프가 내가 넘긴 now와
+    // 같은가"로 통과 여부를 판단하면 안 된다 — 여러 스레드가 시스템 클록 해상도
+    // 이내(Windows는 약 15ms 단위)에 거의 동시에 진입하면 서로 다른 스레드의 now가
+    // 우연히 같은 값이 되어, 실제로는 맵을 갱신하지 않은 스레드도 "통과"로 오판된다
+    // (StockBroadcastServiceTest의 동시성 테스트로 재현 확인됨). 그래서 compute()의
+    // 리매핑 함수 안에서 "이번 호출이 실제로 맵을 갱신시켰는지"를 AtomicBoolean으로
+    // 직접 표시한다. 테스트에서 직접 검증하기 위해 package-private로 둔다.
+    boolean isThrottled(ConcurrentHashMap<String, Long> lastProcessedAt, String stockCode) {
         long now = System.currentTimeMillis();
-        Long last = lastProcessedAt.get(stockCode);
-        if (last != null && now - last < THROTTLE_INTERVAL_MILLIS) {
-            return true;
-        }
-        lastProcessedAt.put(stockCode, now);
-        return false;
+        AtomicBoolean updatedByThisCall = new AtomicBoolean(false);
+        lastProcessedAt.compute(stockCode, (code, last) -> {
+            if (last != null && now - last < THROTTLE_INTERVAL_MILLIS) {
+                return last;
+            }
+            updatedByThisCall.set(true);
+            return now;
+        });
+        return !updatedByThisCall.get();
     }
 }
