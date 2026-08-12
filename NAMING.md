@@ -674,9 +674,19 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 | 엔드포인트 | `GET /api/admin/users`, `GET /api/admin/users/{userId}`, `PATCH /api/admin/users/{userId}/status` |
 | Service | `AdminUserService` — `getUsers(Pageable pageable)`, `getUserDetail(Long userId)`, `updateUserStatus(Long userId, AdminUserStatusRequest request)` |
 | Request DTO | `AdminUserStatusRequest`(status) |
-| Response DTO | `AdminUserListResponse`(userId, loginId, name, email, role, status, createdAt), `AdminUserDetailResponse`(기본정보 필드 + `account`: 기존 `AccountInfoResponse` 재사용 + `holdings`: 기존 `List<HoldingResponse>` 재사용 + `orders`: 기존 `List<OrderHistoryResponse>` 재사용) |
+| Response DTO | `AdminUserListResponse`(userId, loginId, name, email, role, status, createdAt), `AdminUserDetailResponse`(기본정보 필드 + `accounts`: `List<AccountInfoResponse>` 재사용 + `holdings`: `List<HoldingResponse>` 재사용 + `orders`: `List<OrderHistoryResponse>` 재사용) |
 
 > `AdminUserDetailResponse`는 기존 마이페이지용 DTO(`AccountInfoResponse`, `HoldingResponse`, `OrderHistoryResponse`)를 그대로 내부 필드로 재사용한다 — 동일한 형태의 응답 DTO를 중복 정의하지 않는다.
+>
+> 유저 1명이 계좌를 최대 3개(A/B/C)까지 가질 수 있어(`feature/mypage-account`) `account`(단수) 대신
+> `accounts`(복수, 전체 계좌 리스트)로 정의한다. `holdings`/`orders`도 계좌별로 나누지 않고
+> 유저가 가진 **모든 계좌를 합산**해서 보여준다 — 개별 계좌 단위로 파고드는 조회는
+> `feature/admin-account`(8-16, `GET /api/admin/accounts/{accountId}`)가 담당한다.
+> `AdminUserService.buildDetail()`이 `AccountRepository.findAllByUserId()`로 계좌 목록을 구한 뒤,
+> 계좌별로 `HoldingValuationService.getHoldingValuations(accountId)` /
+> `OrderRepository.findAllByAccountIdOrderByOrderedAtDesc(accountId)`를 호출해 합치고,
+> `orders`는 합친 뒤 `orderedAt` 기준 내림차순으로 다시 정렬한다(계좌별로는 이미 정렬되어 있지만
+> 여러 계좌를 합치면 전체 순서가 깨지기 때문).
 
 ### 8-18. feature/admin-inquiry (v8 신규 — 관리자 측 문의 확인/답변)
 

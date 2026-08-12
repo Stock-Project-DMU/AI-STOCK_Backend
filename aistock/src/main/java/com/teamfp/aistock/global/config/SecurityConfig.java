@@ -139,6 +139,8 @@ public class SecurityConfig {
                 // 경로별 인가 규칙: PUBLIC_URLS는 누구나 접근 가능, 그 외에는 인증(JWT) 필요
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(PUBLIC_URLS).permitAll()
+                        // v8 추가 — 관리자 전용 API는 ROLE_ADMIN만 접근 가능 (CLAUDE.md 8번, NAMING.md 4번)
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 )
 
