@@ -17,6 +17,11 @@ public interface HoldingRepository extends JpaRepository<Holding, Long> {
     @Query("select h from Holding h where h.account.accountId = :accountId")
     List<Holding> findAllByAccountId(@Param("accountId") Long accountId);
 
+    // 관리자 사용자 상세 — 유저가 가진 계좌 여러 개(최대 3개)를 계좌별로 N번 조회하지 않고
+    // 한 번에 조회하기 위한 배치 조회(feature/admin-user 코드리뷰 반영, NAMING.md 8-17 참고).
+    @Query("select h from Holding h where h.account.accountId in :accountIds")
+    List<Holding> findAllByAccountIdIn(@Param("accountIds") List<Long> accountIds);
+
     // 매수/매도 체결 시 같은 보유종목 행을 동시에 읽고 고쳐서 수량·평단가가 유실되는(lost update)
     // 경합을 막기 위해 비관적 락(SELECT ... FOR UPDATE)으로 조회한다. holdings 테이블에
     // version 컬럼을 추가하는 낙관적 락 대신 이 방식을 쓰는 이유는 스키마 변경 없이도
