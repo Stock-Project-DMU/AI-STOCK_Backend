@@ -22,6 +22,13 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     @Query("select o from Order o where o.account.accountId = :accountId order by o.orderedAt desc")
     List<Order> findAllByAccountIdOrderByOrderedAtDesc(@Param("accountId") Long accountId);
 
+    // 관리자 사용자 상세 — 유저가 가진 계좌 여러 개(최대 3개)를 계좌별로 N번 조회하지 않고
+    // 한 번에 조회하기 위한 배치 조회. IN 절 하나로 전체 계좌의 주문을 합쳐서 정렬까지
+    // DB에서 끝내므로, 계좌별로 나눠 조회한 뒤 애플리케이션 레벨에서 다시 정렬할 필요가 없다
+    // (feature/admin-user 코드리뷰 반영, NAMING.md 8-17 참고).
+    @Query("select o from Order o where o.account.accountId in :accountIds order by o.orderedAt desc")
+    List<Order> findAllByAccountIdInOrderByOrderedAtDesc(@Param("accountIds") List<Long> accountIds);
+
     @Query("select o from Order o where o.orderId = :orderId and o.account.accountId = :accountId")
     Optional<Order> findByOrderIdAndAccountId(@Param("orderId") Long orderId, @Param("accountId") Long accountId);
 
