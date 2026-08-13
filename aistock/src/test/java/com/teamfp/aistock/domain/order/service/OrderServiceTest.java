@@ -17,6 +17,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import com.teamfp.aistock.domain.account.entity.Account;
 import com.teamfp.aistock.domain.account.service.AccountService;
+import com.teamfp.aistock.domain.notification.entity.NotificationType;
 import com.teamfp.aistock.domain.notification.service.NotificationService;
 import com.teamfp.aistock.domain.order.dto.HoldingValuationDto;
 import com.teamfp.aistock.domain.order.dto.request.CreateOrderRequest;
@@ -42,6 +43,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -150,6 +152,18 @@ class OrderServiceTest {
         }
 
         @Test
+        @DisplayName("체결되면 알림 서비스에 주문 체결 알림을 정확한 인자로 보낸다")
+        void buy_success_notifiesExecution() {
+            when(redisStockCacheService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(70_000L));
+            when(holdingRepository.findByAccountIdAndStockCode(any(), anyString())).thenReturn(Optional.empty());
+
+            orderService.createMarketOrder(USER_ID, requestOf(OrderType.BUY, 10));
+
+            String expectedMessage = String.format("%s %s %d주가 %,d원에 체결되었습니다.", "삼성전자", "매수", 10, 70_000L);
+            verify(notificationService).notify(eq(USER_ID), eq(NotificationType.ORDER), eq("주문 체결"), eq(expectedMessage));
+        }
+
+        @Test
         @DisplayName("이미 보유 중인 종목을 추가 매수하면 평단가가 가중평균으로 재계산된다")
         void buy_success_recalculatesAveragePrice() {
             Holding existing = Holding.builder()
@@ -182,6 +196,7 @@ class OrderServiceTest {
 
             assertThat(account.getBalance()).isEqualTo(1_000_000L); // 잔고 그대로
             verify(orderRepository, never()).save(any());
+            verify(notificationService, never()).notify(any(), any(), any(), any());
         }
 
         @Test
@@ -227,6 +242,25 @@ class OrderServiceTest {
             assertThat(existing.getQuantity()).isEqualTo(6);
             assertThat(response.status()).isEqualTo(OrderStatus.EXECUTED);
             verify(holdingRepository, never()).delete(any());
+        }
+
+        @Test
+        @DisplayName("체결되면 알림 서비스에 주문 체결 알림을 정확한 인자로 보낸다")
+        void sell_success_notifiesExecution() {
+            Holding existing = Holding.builder()
+                    .account(account)
+                    .stockCode(STOCK_CODE)
+                    .stockName("삼성전자")
+                    .quantity(10)
+                    .avgPrice(50_000L)
+                    .build();
+            when(redisStockCacheService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(60_000L));
+            when(holdingRepository.findByAccountIdAndStockCode(any(), anyString())).thenReturn(Optional.of(existing));
+
+            orderService.createMarketOrder(USER_ID, requestOf(OrderType.SELL, 4));
+
+            String expectedMessage = String.format("%s %s %d주가 %,d원에 체결되었습니다.", "삼성전자", "매도", 4, 60_000L);
+            verify(notificationService).notify(eq(USER_ID), eq(NotificationType.ORDER), eq("주문 체결"), eq(expectedMessage));
         }
 
         @Test

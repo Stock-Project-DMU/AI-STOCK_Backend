@@ -337,6 +337,17 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 > 체크와 관리자 코드 검증을 모두 통과한 뒤 `consumeEmailVerified(email)`로 이 마커를
 > 확인·소비(1회용)한다. 마커가 없으면 `CustomException(ErrorCode.EMAIL_NOT_VERIFIED)` throw.
 
+> 코드리뷰 반영 — `SignupRequest.password`에 `@MaxByteSize(max = 72)`(`global/util` 신규 —
+> 아래 참고)를 추가했다. BCrypt는 72바이트를 넘는 입력을 뒷부분부터 잘라버리는데, 상한 검증이
+> 없으면 그 사실을 모르는 사용자가 긴 비밀번호를 입력해도 가입 자체는 성공해버려 뒷부분이
+> 조용히 무시된 채로 해시·저장된다. 처음에는 `@Size(max = 72)`를 썼는데, `@Size`는 "글자 수"
+> 기준이라 한글처럼 UTF-8에서 3바이트를 차지하는 멀티바이트 문자가 섞이면 글자 수는 72 미만인데
+> 실제 바이트 수는 72를 넘어 여전히 잘리는 경우를 못 막았다. 그래서 `global/util`에 커스텀 Bean
+> Validation 제약 `MaxByteSize`(어노테이션) + `MaxByteSizeValidator`(`ConstraintValidator`
+> 구현체)를 새로 추가해 문자 수 대신 실제 바이트 수(`String.getBytes(charset).length`, 기본
+> UTF-8)로 검증하도록 바꿨다. `SecurityUtil`과 마찬가지로 특정 도메인에 속하지 않는 범용
+> 검증 로직이라 `global/util`에 둔다 — CLAUDE.md 4번 디렉토리 구조상 새 폴더는 아니다.
+
 ### 8-3. feature/auth-logout
 
 | 구분 | 이름 |
@@ -569,6 +580,16 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 | 엔드포인트 | `GET /api/notifications`, `PATCH /api/notifications/{notiId}/read`, `GET /api/notifications/unread-count` |
 | Service | `NotificationService` — `getMyNotifications(Long userId)`, `markAsRead(Long userId, Long notiId)`, `getUnreadCount(Long userId)`, `notify(Long userId, NotificationType type, String title, String content)`(내부 발송용) |
 | Response DTO | `NotificationResponse`(notiId, type, title, content, isRead, createdAt), `NotificationCountResponse`(unreadCount) |
+
+> 코드리뷰 반영 — `notify()`는 대부분 `OrderService.createMarketOrder()`/`OrderExecutionService.execute()`
+> 등 호출 측의 `@Transactional` 안에서 참여 트랜잭션으로 호출된다. DB 저장(`notificationRepository.save()`)은
+> 그 트랜잭션에 그대로 맡겨 함께 롤백되게 두지만, STOMP 유니캐스팅(`messagingTemplate.convertAndSendToUser()`)은
+> `TransactionSynchronizationManager.registerSynchronization()`으로 등록한 `afterCommit()` 콜백에서만
+> 실행한다 — `OrderService.registerAfterCommit()`(8-5, Redis pending order 반영을 커밋 후로 미루는 것과
+> 동일한 목적·동일한 패턴)의 private 헬퍼를 `NotificationService`에도 그대로 복제했다. 커밋 전에 STOMP를
+> 먼저 보내면 클라이언트가 알림을 받자마자 관련 데이터를 조회해도 아직 커밋 전이라 안 보일 수 있고, 이후
+> 트랜잭션이 롤백돼도 이미 나간 STOMP는 취소할 수 없기 때문이다. 트랜잭션 동기화가 비활성 상태(단위
+> 테스트 등)면 기존 헬퍼와 동일하게 즉시 실행으로 대체한다.
 
 ### 8-13. feature/inquiry (v8 신규 — 사용자 측 문의)
 
