@@ -1,6 +1,5 @@
 package com.teamfp.aistock.domain.admin.service;
 
-import java.util.Comparator;
 import java.util.List;
 
 import org.springframework.data.domain.Page;
@@ -44,7 +43,9 @@ public class AdminUserService {
 
     @Transactional(readOnly = true)
     public Page<AdminUserListResponse> getUsers(Pageable pageable) {
-        return userRepository.findAll(pageable).map(AdminUserListResponse::from);
+        // 탈퇴(deactivate)한 유저는 관리자 목록에서 제외한다. deactivate()가 loginId/name/email을
+        // "deleted_N"/"탈퇴회원"/null로 익명화해버려 관리 대상으로서 의미가 없기 때문이다.
+        return userRepository.findAllByIsActiveTrue(pageable).map(AdminUserListResponse::from);
     }
 
     @Transactional(readOnly = true)
@@ -65,33 +66,38 @@ public class AdminUserService {
 
     /**
      * 유저가 가진 계좌(A/B/C, 최대 3개)를 전부 조회해 accounts는 리스트 그대로,
-     * holdings/orders는 계좌별로 조회한 결과를 하나로 합쳐서 보여준다(NAMING.md 8-17 참고).
-     * orders는 계좌별로는 orderedAt 내림차순으로 조회되지만, 여러 계좌 결과를 합치면 전체
-     * 순서가 깨지므로 합친 뒤 다시 orderedAt 기준으로 정렬한다.
+     * holdings/orders는 계좌별로 나눠 조회하지 않고 IN 절 배치 조회로 한 번에 합쳐서
+     * 보여준다(NAMING.md 8-17 참고). orders는 배치 조회 쿼리 자체에서 orderedAt
+     * 내림차순으로 정렬되므로 애플리케이션 레벨에서 다시 정렬할 필요가 없다.
      */
     private AdminUserDetailResponse buildDetail(User user) {
         List<Account> accounts = accountRepository.findAllByUserId(user.getUserId());
+        if (accounts.isEmpty()) {
+            return AdminUserDetailResponse.of(user, List.of(), List.of(), List.of());
+        }
 
         List<AccountInfoResponse> accountResponses = accounts.stream()
                 .map(AccountInfoResponse::from)
                 .toList();
 
-        List<HoldingResponse> holdings = accounts.stream()
-                .flatMap(account -> holdingValuationService.getHoldingValuations(account.getAccountId()).stream())
+        List<Long> accountIds = accounts.stream().map(Account::getAccountId).toList();
+
+        List<HoldingResponse> holdings = holdingValuationService.getHoldingValuations(accountIds).stream()
                 .map(HoldingResponse::of)
                 .toList();
 
-        List<OrderHistoryResponse> orders = accounts.stream()
-                .flatMap(account -> orderRepository.findAllByAccountIdOrderByOrderedAtDesc(account.getAccountId()).stream())
+        List<OrderHistoryResponse> orders = orderRepository.findAllByAccountIdInOrderByOrderedAtDesc(accountIds).stream()
                 .map(OrderHistoryResponse::from)
-                .sorted(Comparator.comparing(OrderHistoryResponse::orderedAt).reversed())
                 .toList();
 
         return AdminUserDetailResponse.of(user, accountResponses, holdings, orders);
     }
 
+    // 탈퇴(deactivate) 유저는 목록뿐 아니라 상세 조회·상태변경에서도 막는다 — getUsers()의
+    // findAllByIsActiveTrue와 동일한 기준(isActive)으로 findByUserIdAndIsActiveTrue를 써서,
+    // 목록에는 없는데 userId를 직접 넣으면 조회·변경이 되는 불일치가 없게 한다.
     private User findUser(Long userId) {
-        return userRepository.findById(userId)
+        return userRepository.findByUserIdAndIsActiveTrue(userId)
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
     }
 }

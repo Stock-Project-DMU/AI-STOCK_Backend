@@ -45,4 +45,25 @@ public class HoldingValuationService {
                 })
                 .toList();
     }
+
+    /**
+     * 계좌 여러 개(관리자 사용자 상세 — 유저당 최대 3개)의 보유종목을 계좌별로 N번 조회하지
+     * 않고 한 번에 평가한다. uq_account_stock은 계좌 하나 안에서만 종목코드 중복을 막아주므로,
+     * 계좌가 여러 개 섞이면 같은 종목코드가 여러 번 나올 수 있어 시세 배치 조회 전 distinct()가
+     * 필요하다(AdminUserService 코드리뷰 반영, NAMING.md 8-17 참고).
+     */
+    @Transactional(readOnly = true)
+    public List<HoldingValuationDto> getHoldingValuations(List<Long> accountIds) {
+        List<Holding> holdings = holdingRepository.findAllByAccountIdIn(accountIds);
+        Map<String, StockPriceDto> prices = redisStockCacheService.getStockPrices(
+                holdings.stream().map(Holding::getStockCode).distinct().toList());
+
+        return holdings.stream()
+                .map(holding -> {
+                    StockPriceDto priceDto = prices.get(holding.getStockCode());
+                    Long currentPrice = priceDto != null ? priceDto.getCurrentPrice() : null;
+                    return HoldingValuationDto.of(holding, currentPrice);
+                })
+                .toList();
+    }
 }
