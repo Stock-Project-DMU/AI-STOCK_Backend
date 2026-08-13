@@ -12,6 +12,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import com.teamfp.aistock.domain.account.entity.Account;
 import com.teamfp.aistock.domain.account.entity.AccountStatus;
 import com.teamfp.aistock.domain.account.service.AccountService;
+import com.teamfp.aistock.domain.notification.entity.NotificationType;
+import com.teamfp.aistock.domain.notification.service.NotificationService;
 import com.teamfp.aistock.domain.order.dto.PendingOrderDto;
 import com.teamfp.aistock.domain.order.dto.request.CreateOrderRequest;
 import com.teamfp.aistock.domain.order.dto.response.CreateOrderResponse;
@@ -56,6 +58,8 @@ public class OrderService {
     // 지정가 미체결 주문 대기 목록(pending:orders:{stockCode}) 관리도 같은 이유로
     // global/redis 서비스를 직접 주입받아 쓴다.
     private final RedisPendingOrderService redisPendingOrderService;
+    // 주문 체결 시 알림 발송 — 도메인 간 직접 참조 대신 서비스 계층(NotificationService)을 통해 호출한다.
+    private final NotificationService notificationService;
 
     /**
      * 현재가(시장가) 주문 — 잔고/보유수량을 확인한 뒤 실시간 현재가로 즉시 체결한다.
@@ -105,7 +109,17 @@ public class OrderService {
         order.execute(currentPrice);
         orderRepository.save(order);
 
+        notificationService.notify(userId, NotificationType.ORDER, "주문 체결", buildExecutionMessage(order));
+
         return CreateOrderResponse.from(order);
+    }
+
+    private String buildExecutionMessage(Order order) {
+        String action = order.getOrderType() == OrderType.BUY ? "매수" : "매도";
+        return String.format(
+                "%s %s %d주가 %,d원에 체결되었습니다.",
+                order.getStockName(), action, order.getQuantity(), order.getExecPrice()
+        );
     }
 
     private void executeBuy(Account account, CreateOrderRequest request, String stockName, long currentPrice, long totalAmount) {

@@ -1,9 +1,11 @@
 package com.teamfp.aistock.domain.auth.dto.request;
 
 import com.teamfp.aistock.domain.user.entity.Role;
+import com.teamfp.aistock.global.util.MaxByteSize;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -17,6 +19,14 @@ public class SignupRequest {
     private String loginId;
 
     @NotBlank(message = "비밀번호는 필수 입력 값입니다.")
+    @Pattern(
+            regexp = "^(?=.*[A-Za-z])(?=.*\\d).{8,}$",
+            message = "비밀번호는 8자 이상, 영문과 숫자를 포함해야 합니다."
+    )
+    // BCrypt는 72바이트를 넘는 입력을 뒷부분부터 잘라버린다. @Size(max=72)는 "글자 수" 기준이라
+    // 한글처럼 멀티바이트 문자가 섞이면 72자 미만인데도 실제로는 72바이트를 넘어 여전히 잘릴 수
+    // 있으므로, 실제 바이트 수를 기준으로 검증하는 커스텀 제약(MaxByteSize)을 쓴다(코드리뷰 반영).
+    @MaxByteSize(max = 72, message = "비밀번호는 72바이트를 초과할 수 없습니다.")
     private String password;
 
     @NotBlank(message = "이름은 필수 입력 값입니다.")

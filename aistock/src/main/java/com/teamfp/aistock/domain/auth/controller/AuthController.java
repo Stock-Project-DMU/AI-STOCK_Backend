@@ -10,6 +10,8 @@ import com.teamfp.aistock.domain.auth.dto.response.SignupResponse;
 import com.teamfp.aistock.domain.auth.dto.response.TokenResponse;
 import com.teamfp.aistock.domain.auth.service.AuthService;
 import com.teamfp.aistock.global.response.ApiResponse;
+import com.teamfp.aistock.global.security.JwtProvider;
+import com.teamfp.aistock.global.util.SecurityUtil;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
@@ -21,6 +23,7 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
 
     private final AuthService authService;
+    private final JwtProvider jwtProvider;
 
     /**
      * 일반 로그인 API
@@ -47,6 +50,17 @@ public class AuthController {
     public ApiResponse<TokenResponse> refresh(@RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader) {
         TokenResponse response = authService.refresh(authHeader);
         return ApiResponse.success("토큰 재발급에 성공했습니다.", response);
+    }
+
+    /**
+     * 로그아웃 API. Access Token 블랙리스트 등록 + Refresh Token 삭제.
+     */
+    @PostMapping("/logout")
+    public ApiResponse<Void> logout(@RequestHeader(HttpHeaders.AUTHORIZATION) String authHeader) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        String accessToken = jwtProvider.extractBearerToken(authHeader);
+        authService.logout(userId, accessToken);
+        return ApiResponse.success("로그아웃되었습니다.", null);
     }
 
     /**
