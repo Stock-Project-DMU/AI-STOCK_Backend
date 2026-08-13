@@ -65,4 +65,23 @@ public class AiPlanningSession {
         this.title = title;
         this.status = SessionStatus.ACTIVE;
     }
+
+    /**
+     * 세션 제목 자동 채우기. 생성 시 title은 null이며, 첫 메시지가 저장될 때
+     * AiPlanningService.sendMessage()가 사용자 메시지 앞부분을 잘라 한 번만 채운다.
+     */
+    public void updateTitle(String title) {
+        this.title = title;
+    }
+
+    /**
+     * 세션에 새 메시지가 오갈 때마다 호출해 updatedAt을 최신화한다. title은 첫 메시지에서
+     * 한 번만 바뀌므로, title 변경이 없는 두 번째 메시지부터는 세션 엔티티 자체가 dirty로
+     * 감지되지 않아 @LastModifiedDate가 자동으로 갱신되지 않는다 — 그 결과
+     * getMySessions()의 "최근 대화순" 정렬이 방금 답장을 주고받은 세션에는 반영되지 않는
+     * 문제가 있었다. 매 턴마다 명시적으로 호출해 정렬 기준을 항상 최신 상태로 유지한다.
+     */
+    public void recordActivity() {
+        this.updatedAt = LocalDateTime.now();
+    }
 }

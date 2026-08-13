@@ -64,3 +64,18 @@ ls:
 
 admin:
   signup-code: ${ADMIN_SIGNUP_CODE}
+
+# 운영 환경은 application.yml의 로컬 기본값(빈 문자열)을 물려받으면 안 되므로 필수 환경변수로 강제한다.
+app:
+  gemini:
+    api-key: ${GEMINI_API_KEY}
+    judge-api-url: ${GEMINI_JUDGE_API_URL}
+    answer-api-url: ${GEMINI_ANSWER_API_URL}
+  dart:
+    api-key: ${DART_API_KEY}
+    api-url: ${DART_API_URL}
+    corp-code-url: ${DART_CORP_CODE_URL}
+  naver:
+    client-id: ${NAVER_CLIENT_ID}
+    client-secret: ${NAVER_CLIENT_SECRET}
+    api-url: ${NAVER_NEWS_API_URL}

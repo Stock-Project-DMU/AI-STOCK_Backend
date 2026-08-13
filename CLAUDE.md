@@ -18,7 +18,8 @@
 
 - **백엔드**: Spring Boot 4.0.6 (Java 21), JPA, Spring Security, WebSocket/STOMP
 - **DB**: MySQL (AWS RDS), Redis (AWS ElastiCache)
-- **외부 API**: LS증권 OpenAPI(WebSocket 시세), Gemini API, Open DART, Tavily, OAuth(카카오/네이버/구글)
+- **외부 API**: LS증권 OpenAPI(WebSocket 시세), Gemini API, Open DART, 네이버 뉴스 검색 API(NCP API Hub, AI 재무설계 상담 뉴스 검색), OAuth(카카오/네이버/구글)
+  (Tavily는 뉴스 검색 백엔드로 쓰다가 2026-08-05 네이버로 교체, 관련 코드·설정은 2026-08-06 완전 삭제됨)
 - **인프라**: AWS EC2, AWS Parameter Store, Docker Compose(로컬)
 - **빌드**: Gradle
 
@@ -75,13 +76,15 @@ com.teamfp.aistock
 │   ├── exception      → CustomException, ErrorCode, GlobalExceptionHandler
 │   ├── response       → ApiResponse
 │   ├── redis          → RedisTokenService, RedisAuthCodeService, RedisStockCacheService,
-│   │                     RedisPendingOrderService, RedisRateLimiterService, RedisOnlineStatusService
-│   └── util           → DateUtil, SecurityUtil
+│   │                     RedisPendingOrderService, RedisRateLimiterService, RedisOnlineStatusService,
+│   │                     RedisAiToolCacheService
+│   └── util           → DateUtil, SecurityUtil, ExternalApiInvoker, NewsRelevanceMatcher
 ├── infra
 │   ├── ls            → LsWebSocketClient, LsWebSocketHandler, LsReconnectService, dto
 │   ├── gemini        → GeminiApiClient, dto
 │   ├── dart          → DartApiClient, dto
-│   ├── tavily        → TavilyApiClient, dto
+│   ├── naver         → NaverNewsApiClient, dto (뉴스 검색 — infra/oauth의 NaverOAuthClient와는
+│   │                    별개, feature/ai-planning이 뉴스 조회에 사용)
 │   ├── oauth         → KakaoOAuthClient, NaverOAuthClient, GoogleOAuthClient, dto
 │   └── mail          → MailClient (이메일 인증코드 발송, Spring Mail 사용)
 └── resources
@@ -210,8 +213,9 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
 | `gemini:rate:{userId}:minute` | 1분 | Gemini Rate Limiter (분당 3회) |
 | `gemini:rate:{userId}:daily` | 1일 | Gemini Rate Limiter (일일 10회) |
 | `admin:online:users` | 없음 (이벤트 기반) | 관리자 대시보드 — 온라인 사용자 집합 (WebSocket CONNECT/DISCONNECT 시 갱신) |
+| `ai:tool:{sessionId}:{도구이름}?{인자}` | 30분 | AI 상담 세션 내 DART/네이버 도구 실행 결과 캐시 (같은 조건 재조회 시 재사용) |
 
-- Redis 접근은 반드시 `global/redis`의 **6개** 서비스 클래스를 통해서만 한다.
+- Redis 접근은 반드시 `global/redis`의 **7개** 서비스 클래스를 통해서만 한다.
 - 도메인 서비스에서 RedisTemplate 직접 주입 금지.
 
 ---

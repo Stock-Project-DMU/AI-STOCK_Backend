@@ -103,12 +103,12 @@
 | `UserRepository` | `findByLoginId(String loginId)`, `findByEmail(String email)`, `existsByLoginId(String loginId)`, `existsByEmail(String email)`, `findByUserIdAndIsActiveTrue(Long userId)`, `countByIsActiveTrue()`(관리자 대시보드 — 총 사용자 수), `findAllByIsActiveTrue(Pageable pageable)`(feature/admin-user 코드리뷰 반영 — 관리자 사용자 목록에서 탈퇴 유저 제외, 8-17 참고) |
 | `SocialAccountRepository` | `findByProviderAndProviderId(SocialProvider provider, String providerId)`, `deleteByUserId(Long userId)` |
 | `InvestmentProfileRepository` | `findByUserId(Long userId)`, `deleteByUserId(Long userId)` |
-| `AccountRepository` | `findAllByUserId(Long userId)`(내 계좌 목록, 최대 3건), `findAllByUserIdForUpdate(Long userId)`(mypage-account 추가 — `@Lock(PESSIMISTIC_WRITE)`, `AccountService.createAccount()`가 계좌 개수 확인과 저장 사이의 동시 개설 경합을 막는 데 사용. 처음에는 `UserRepository.findByIdForUpdate`로 User 행 전체를 잠갔는데, User는 계좌와 무관한 다른 기능도 앞으로 잠글 수 있는 공용 자원이라 Account 쪽만 잠그는 이 메서드로 좁혔다 — 매칭 행이 0개여도 idx_account_user 인덱스로 갭 락이 걸려 동시 삽입을 막는다), `findByAccountIdAndUserId(Long accountId, Long userId)`(mypage-account 추가 — 계좌 소유권 검증 겸 조회. order-market/order-limit의 `findByUserId(Long userId)`를 대체 — 유저가 계좌를 여러 개 가질 수 있어 단일 계좌를 가정한 조회는 더 이상 쓰지 않는다), `findByAccountIdAndUserIdForUpdate(Long accountId, Long userId)`(mypage-account 추가 — `@Lock(PESSIMISTIC_WRITE)`, `AccountService.chargeBalance()`가 chargeCount 확인과 반영 사이의 동시 충전 경합을 막는 데 사용. `findByAccountIdAndUserId`와 WHERE 절이 동일해 `FIND_BY_ACCOUNT_ID_AND_USER_ID` 상수로 공유), `findByAccountNumber(String accountNumber)`, `deleteByUserId(Long userId)` |
+| `AccountRepository` | `findAllByUserId(Long userId)`(내 계좌 목록, 최대 3건 — `ORDER BY accountId asc` 고정, feature/ai-planning 추가: `AiPlanningService.findPrimaryHolding()`이 "첫 번째 계좌"를 가정하고 `accounts.get(0)`을 쓰는데 ORDER BY가 없으면 호출마다 다른 계좌가 나올 수 있어 생성 순서로 고정), `findAllByUserIdForUpdate(Long userId)`(mypage-account 추가 — `@Lock(PESSIMISTIC_WRITE)`, `AccountService.createAccount()`가 계좌 개수 확인과 저장 사이의 동시 개설 경합을 막는 데 사용. 처음에는 `UserRepository.findByIdForUpdate`로 User 행 전체를 잠갔는데, User는 계좌와 무관한 다른 기능도 앞으로 잠글 수 있는 공용 자원이라 Account 쪽만 잠그는 이 메서드로 좁혔다 — 매칭 행이 0개여도 idx_account_user 인덱스로 갭 락이 걸려 동시 삽입을 막는다), `findByAccountIdAndUserId(Long accountId, Long userId)`(mypage-account 추가 — 계좌 소유권 검증 겸 조회. order-market/order-limit의 `findByUserId(Long userId)`를 대체 — 유저가 계좌를 여러 개 가질 수 있어 단일 계좌를 가정한 조회는 더 이상 쓰지 않는다), `findByAccountIdAndUserIdForUpdate(Long accountId, Long userId)`(mypage-account 추가 — `@Lock(PESSIMISTIC_WRITE)`, `AccountService.chargeBalance()`가 chargeCount 확인과 반영 사이의 동시 충전 경합을 막는 데 사용. `findByAccountIdAndUserId`와 WHERE 절이 동일해 `FIND_BY_ACCOUNT_ID_AND_USER_ID` 상수로 공유), `findByAccountNumber(String accountNumber)`, `deleteByUserId(Long userId)` |
 | `HoldingRepository` | `findAllByAccountId(Long accountId)`, `findByAccountIdAndStockCode(Long accountId, String stockCode)`, `findFirstByStockCode(String stockCode)`(4주차 `feature/stock-price` 추가 — `StockNameResolver`가 종목명 조회 시 사용, 8-4 참고), `findAllByAccountIdIn(List<Long> accountIds)`(feature/admin-user 코드리뷰 반영 — 계좌별 N+1 조회 대신 배치 조회, 8-17 참고) |
 | `OrderRepository` | `findAllByStockCodeAndStatus(String stockCode, OrderStatus status)`, `findAllByAccountIdOrderByOrderedAtDesc(Long accountId)`, `findByOrderIdAndAccountId(Long orderId, Long accountId)`, `findAllByStatusWithAccountAndUser(OrderStatus status)`, `countByStatus(OrderStatus status)`(관리자 대시보드 — 총 거래건수), `findTop20ByStatusOrderByExecutedAtDesc(OrderStatus status)`(관리자 대시보드 — 최근 거래 20건), `findAllOrdersWithUser(Pageable pageable)`(관리자 전체 거래 목록, `@Query` JOIN FETCH account.user), `findOrderWithUserById(Long orderId)`(관리자 거래 상세, `@Query` JOIN FETCH), `sumExecutedAmount()`(관리자 대시보드 — 총 거래대금, `@Query SUM(execPrice*quantity)`), `findByIdForUpdate(Long orderId)`(feature/order-limit 추가 — `@Lock(PESSIMISTIC_WRITE)`, `OrderExecutionService.execute()`용), `findByOrderIdAndUserIdForUpdate(Long orderId, Long userId)`(mypage-account 추가 — `@Lock(PESSIMISTIC_WRITE)`, `OrderService.cancelOrder()`용. 계좌가 여러 개가 되면서 한때 `findByIdForUpdate(orderId)`로 먼저 잠근 뒤 소유자를 나중에 검증하는 방식을 썼는데, 그러면 남의 orderId로도 락이 먼저 걸려버려(락 경합 + 존재 여부를 응답 시간으로 구분당하는 사이드채널) 과거 `findByOrderIdAndAccountIdForUpdate(Long orderId, Long accountId)`처럼 소유권을 WHERE 절(이번엔 accountId 대신 userId로 조인)에 넣어 조회와 동시에 걸러내는 방식으로 되돌렸다), `sumPendingSellQuantity(Long accountId, String stockCode)`(feature/order-limit 추가 — 같은 계좌·종목으로 이미 등록된 PENDING 지정가 매도 주문 수량 합계. `createLimitOrder()`가 매도 등록 시 `보유수량 - 이미 대기 중인 매도 수량`으로 검증해, 같은 종목을 초과해서 중복 매도 등록하는 것을 등록 시점에 막는다. 이 조회는 일반 SELECT라 MySQL 기본 격리수준(REPEATABLE READ)에서는 트랜잭션 시작 시점 스냅샷을 볼 수 있어, `createLimitOrder()` 자체를 `@Transactional(isolation = READ_COMMITTED)`로 지정해 항상 최신 커밋 데이터를 보게 한다), `findFirstByStockCode(String stockCode)`(4주차 `feature/stock-price` 추가 — `StockNameResolver`용, 8-4 참고), `findAllByAccountIdInOrderByOrderedAtDesc(List<Long> accountIds)`(feature/admin-user 코드리뷰 반영 — 계좌별 N+1 조회 대신 배치 조회, `@Query` ORDER BY까지 DB에서 처리, 8-17 참고) |
 | `WatchlistRepository` | `findAllByUserId(Long userId)`, `existsByUserIdAndStockCode(Long userId, String stockCode)`, `deleteByUserIdAndStockCode(Long userId, String stockCode)`(v14, 4주차 `feature/stock-price`에서 반환 타입 `void`→`int`로 변경 — `WatchlistService.removeWatchlist()`가 실제로 삭제된 행이 있었는지 알아야 `StockSubscriptionManager.decreaseWatchlistSubscription()`을 호출할지 판단할 수 있어서다. `RecentViewedRepository.touchViewedAt()`과 동일한 이유), `deleteByUserId(Long userId)`, `findFirstByStockCode(String stockCode)`(4주차 `feature/stock-price` 추가 — `StockNameResolver`용, 8-4 참고) |
 | `AiPlanningSessionRepository` | `findAllByUserIdOrderByUpdatedAtDesc(Long userId)`, `findByUserIdAndSessionId(Long userId, Long sessionId)`, `deleteByUserId(Long userId)` |
-| `AiPlanningMessageRepository` | `findAllBySessionIdOrderByCreatedAtAsc(Long sessionId)` |
+| `AiPlanningMessageRepository` | `findAllBySessionIdOrderByCreatedAtAsc(Long sessionId)`, `findRecentBySessionId(Long sessionId, Pageable pageable)`(feature/ai-planning 추가 — 내림차순 + `Pageable`로 최근 N건만 DB 레벨에서 가져온 뒤 `AiPlanningService.buildHistory()`가 다시 뒤집어서 씀. `createdAt`이 초 단위 정밀도라 같은 초에 USER/AI가 저장되는 경우를 대비해 `messageId`를 2차 정렬 키로 사용) |
 | `SimulationRepository` | `findAllByUserIdOrderByCreatedAtDesc(Long userId)`, `findByUserIdAndSimulationId(Long userId, Long simulationId)`, `deleteByUserId(Long userId)` |
 | `RecentViewedRepository` | `findAllByUserIdOrderByViewedAtDesc(Long userId)`, `findByUserIdAndStockCode(Long userId, String stockCode)`, `touchViewedAt(Long userId, String stockCode)`(mypage-account 추가 — `@Modifying`, 이미 본 종목을 다시 볼 때 새 행 대신 viewedAt만 UPDATE. delete 후 재삽입 방식은 `RecentViewed`가 `@GeneratedValue(IDENTITY)`라 save()가 즉시 INSERT를 실행해버려 아직 flush 안 된 DELETE와 충돌해 `uq_user_stock_view` 위반이 나는 버그가 있어 이 방식으로 교체했다), `deleteByUserId(Long userId)`, `findFirstByStockCode(String stockCode)`(4주차 `feature/stock-price` 추가 — `StockNameResolver`용, 8-4 참고) |
 | `NotificationRepository` | `findAllByUserIdOrderByCreatedAtDesc(Long userId)`, `countByUserIdAndIsReadFalse(Long userId)`, `findByNotiIdAndUserId(Long notiId, Long userId)` |
@@ -160,6 +160,7 @@
 | `STOCK_NOT_FOUND` | 404 |
 | `RESOURCE_NOT_FOUND` | 404 |
 | `OPTIMISTIC_LOCK_CONFLICT` | 409 |
+| `AI_SESSION_NOT_FOUND` | 404 (feature/ai-planning 추가 — 본인 소유가 아니거나 존재하지 않는 AI 상담 세션 조회/메시지 전송 시) |
 | `GEMINI_RATE_LIMIT_EXCEEDED` | 429 |
 | `REDIS_SERIALIZATION_ERROR` | 500 |
 | `EXTERNAL_API_ERROR` | 502 |
@@ -297,6 +298,7 @@ redis-logic.md(수정본) 기준 확정된 이름 그대로 사용:
 | `RedisPendingOrderService` | `initPendingOrders`, `addPendingOrder`, `getPendingOrders`, `removePendingOrder` |
 | `RedisRateLimiterService` | `isAllowed`, `increment`, `getRemainingDaily` |
 | `RedisOnlineStatusService` (v8 추가) | `clearOnlineStatus()`(서버 재시작 시 `@PostConstruct` 초기화, v9), `addOnline(Long userId)`, `removeOnline(Long userId)`, `countOnline()`, `isOnline(Long userId)` |
+| `RedisAiToolCacheService` (feature/ai-planning 추가) | `getCachedResult(Long sessionId, String toolKey)`, `cacheResult(Long sessionId, String toolKey, String result)` — 키 `ai:tool:{sessionId}:{toolKey}`(TTL 30분), AI 상담 세션 내 DART/LS/네이버 도구 실행 결과 캐시(같은 조건 재조회 시 재사용). 8-9 참고 |
 
 DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRate, volume, updatedAt), `HogaDto`(stockCode, askPrices, askVolumes, bidPrices, bidVolumes, updatedAt), `PendingOrderDto`(redis-logic.md 확정본과 동일)
 
@@ -599,15 +601,176 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 
 ### 8-9. feature/ai-planning
 
+**Tavily는 뉴스 검색 백엔드로 쓰다가 2026-08-05 네이버로 교체, 2026-08-06 `TavilyApiClient`/dto 완전
+삭제됨(CLAUDE.md 참고). 아래는 LS증권 Open API 대대적 확장(2026-08-10~11) 이후 최종 상태.**
+
 | 구분 | 이름 |
 |---|---|
 | Controller | `AiPlanningController` |
-| 엔드포인트 | `POST /api/ai/planning/sessions`, `GET /api/ai/planning/sessions`, `GET /api/ai/planning/sessions/{sessionId}/messages`, `POST /api/ai/planning/sessions/{sessionId}/messages` |
-| Service | `AiPlanningService` — `createSession(Long userId)`, `getMySessions(Long userId)`, `getMessages(Long userId, Long sessionId)`, `sendMessage(Long userId, Long sessionId, AiChatRequest request)` |
-| Request DTO | `AiChatRequest`(content) |
-| Response DTO | `AiChatResponse`(messageId, role, content, createdAt) |
-| Infra Client | `GeminiApiClient.generate(GeminiRequest request)`, `DartApiClient.getFinancials(DartFinancialRequest request)`, `TavilyApiClient.search(TavilySearchRequest request)` |
-| Infra Dto | `GeminiRequest`(prompt, history), `GeminiResponse`(content, tokenCount), `DartFinancialRequest`(corpCode, year), `DartFinancialResponse`(...), `TavilySearchRequest`(query), `TavilySearchResponse`(results) |
+| 엔드포인트 | `POST /api/ai/planning/sessions`, `GET /api/ai/planning/sessions`, `GET /api/ai/planning/sessions/{sessionId}/messages`, `POST /api/ai/planning/sessions/{sessionId}/messages` — 사용자 식별은 4개 전부 요청 바디가 아니라 `SecurityUtil.getCurrentUserId()`로 한다 |
+| Service | `AiPlanningService` — `createSession(Long userId)`, `getMySessions(Long userId)`, `getMessages(Long userId, Long sessionId)`, `sendMessage(Long userId, Long sessionId, AiChatRequest request)`. `loadHistory(Long userId, Long sessionId)`/`saveTurn(Long userId, Long sessionId, String userContent, GeminiResponse geminiResponse)`도 public인데, 실제 용도가 아니라 `@Lazy self` 프록시로 자기 자신을 주입받아 `@Transactional` 트랜잭션 경계를 강제로 나누기 위한 self-invocation 패턴(Spring AOP 프록시는 같은 빈 안에서의 직접 호출엔 안 걸리는 한계 우회) — 외부에서 호출할 일은 없다 |
+| Request DTO | `AiChatRequest`(`@NotBlank @Size(max = 2000) content`) — 2000자 제한은 DB TEXT 컬럼 여유 확보 + Gemini 토큰 비용 통제 목적 |
+| Response DTO | `AiChatResponse`(messageId, role, content, createdAt), `AiPlanningSessionResponse`(sessionId, title, status, createdAt, updatedAt) — 둘 다 정적 팩토리 `from(Entity)` 보유 |
+
+**Gemini 연동 (`infra/gemini`)**
+- `GeminiApiClient.generate(GeminiRequest request)` — 단일 메서드. `judgeApiUrl`(`app.gemini.judge-api-url`)/
+  `answerApiUrl`(`app.gemini.answer-api-url`) 두 모델 URL을 `request.model()`(`GeminiRequest.GeminiModel`
+  — `JUDGE`/`ANSWER`)로 분기해서 호출한다. `JUDGE`는 도구 호출 여부/어떤 도구를 쓸지 판단하는 라운드
+  겸 도구가 필요 없는 잡담·되묻기의 최종 답변까지 담당하는 저렴한 모델(현재 둘 다
+  `gemini-3.1-flash-lite`로 수렴 — 애초 계획한 2.5-flash-lite/2.5-flash 조합은 이 계정에서 404라 못 씀,
+  `-latest` 별칭은 더 비싼 3.6-flash로 뜨는 문제도 있어 회피), `ANSWER`는 도구 결과·보유종목·투자성향을
+  종합하는 최종 강제-텍스트 라운드(이 라운드엔 `tools`를 아예 안 보낸다) 전용.
+- `GeminiRequest`(systemInstruction, prompt, history, tools, functionExchangeRounds, model) — `systemInstruction`은
+  `contents`/`prompt`와 완전히 분리된 별도 최상위 JSON 필드로 매 턴 한 번만 전송한다(2026-08-07 확정,
+  과거엔 매 턴 `contents`에 통째로 재삽입해서 모델이 "방금 지침을 받은 것"처럼 여겨 인사를 계속
+  반복하는 버그가 있었음). 내부 record: `GeminiModel`(enum `JUDGE`/`ANSWER`), `HistoryTurn`(role, content),
+  `ToolDeclaration`(name, description, parameters, required), `ParameterSpec`(type, description),
+  `FunctionExchange`(functionName, args, thoughtSignature, functionResult)
+- `GeminiResponse`(content, tokenCount, functionCalls) — `isFunctionCall()`, 내부 record `FunctionCall`(name, args, thoughtSignature)
+
+**DART 연동 (`infra/dart`)**
+- `DartApiClient` — `getFinancials(DartFinancialRequest request)`, `getRecentQuarterlyFinancials(String corpCode)`,
+  `getCapitalChangeDecisions(String corpCode, String changeType)`, `getOwnershipInfo(String corpCode, String infoType)`,
+  `getSupportedDisclosureTypesWithDescription()`(static — 공시유형 약 70종의 이름을 `DISCLOSURE_REGISTRY`에서
+  동적으로 뽑아 Gemini 도구 스키마 enum에 그대로 꽂는다, NAMING.md에 70종을 전부 나열하지 않고 코드
+  `DartApiClient.DISCLOSURE_REGISTRY`를 원본으로 삼는다), `getDisclosureInfo(String corpCode, String disclosureType)`,
+  `isBlankOfContent(List<Map<String, Object>> items, Set<String> boilerplateKeys)`, `resolveCorpCodeByName(String companyName)`,
+  `resolveStockCodeByName(String companyName)` — 2026-08-13 두 메서드 모두 정확 일치 실패 시 2단계
+  폴백 추가: (1) 대소문자·법인 접미사("주식회사"/"(주)"/"㈜") 무시한 정규화 일치, (2) 그래도 실패하면
+  `GROUP_NAME_ALIASES`(SK↔에스케이/LG↔엘지/GS↔지에스/CJ↔씨제이/KT↔케이티, 보수적으로 확인된 것만
+  등록)로 그룹명을 치환해 재시도. 라이브 테스트로 "sk쉴더스"가 DART 원본엔 "에스케이쉴더스"로만
+  등록돼 있어 정확 일치로 못 찾던 문제 실측 후 추가(뉴스 검색의 `NewsRelevanceMatcher.KNOWN_ALIASES`와
+  같은 원칙)
+- `DartFinancialRequest`(corpCode, year), `DartFinancialResponse`(corpCode, bizYear, revenue, operatingProfit,
+  netIncome, totalAssets, totalLiabilities, totalEquity)
+
+**AI 도구(Gemini function-calling) 27개** — `AiPlanningService.converseWithTools()`가 매 라운드 전달하는
+`tools` 목록. `*_TOOL_NAME` 상수 → 파라미터(괄호 안은 enum 값) → 실제 처리 클라이언트/TR 순.
+"묶음형"은 하나의 도구가 mode류 파라미터로 여러 LS TR을 분기해서 부르는 도구(48개 후보를 18개로
+압축한 결과, CLAUDE.md 4번 "infra는 domain을 통해서만" 원칙과 별개로 이건 Gemini 판단 정확도·
+프롬프트 비용 문제로 압축한 것).
+
+| 도구 이름 | 파라미터 | 분기(묶음형만) → 실제 호출 |
+|---|---|---|
+| `search_securities_news` | companyName(필수), topic, periodDays | `NaverNewsApiClient.search()` |
+| `get_financial_statements` | companyName(필수), period(`연간`/`분기`) | `연간`→`DartApiClient.getFinancials()`, `분기`→`getRecentQuarterlyFinancials()` |
+| `get_capital_change_info` | companyName(필수), changeType(`유상증자`/`무상증자`) | `DartApiClient.getCapitalChangeDecisions()` |
+| `get_ownership_info` | companyName(필수), infoType(`현황`/`변동`) | `DartApiClient.getOwnershipInfo()` |
+| `get_disclosure_info` | companyName(필수), disclosureType(`DISCLOSURE_REGISTRY` 약 70종) | `DartApiClient.getDisclosureInfo()` |
+| `get_current_price` | companyName(필수) | `LsMarketDataApiClient.getCurrentPrice()`(t1102) — 30분 도구 캐시 대상에서 제외, `ConfirmedPrice` 확정 패턴 적용(아래 참고) |
+| `get_foreign_institutional_trend` | companyName(필수), periodMonths(선택, 1~24) | `LsInvestorTrendApiClient.getTrend()`(t1716, periodMonths 있으면 최대 2년까지 조회 후 합계·최고/최저일 요약) |
+| `get_investment_opinion` | companyName(필수) | `LsInvestInfoApiClient.getInvestmentOpinions()`(t3401) |
+| `get_shareholder_meeting_schedule` | companyName(필수) | `LsInvestInfoApiClient.getShareholderMeetingSchedule()`(t3202) |
+| `get_market_ranking` | rankingType(`PRICE_CHANGE_RATE`/`MARKET_CAP`/`VOLUME`/`TRADING_VALUE`/`VOLUME_SURGE`/`AFTER_HOURS_PRICE_CHANGE_RATE`/`AFTER_HOURS_VOLUME`) | `LsHighItemApiClient`의 7개 메서드(t1441/t1444/t1452/t1463/t1466/t1481/t1482)로 1:1 분기. `AFTER_HOURS_*` 2개는 `DateUtil.isAfterHoursTradingTime()` 게이트 |
+| `get_theme_info` | mode(`THEME_TO_STOCKS`/`STOCK_TO_THEMES`/`HOT_THEMES`), themeName(조건부), companyName(조건부) | `LsSectorApiClient`의 `getThemeConstituentsByName()`(t8425 이름→코드 캐시 후 t1537)/`getThemesForStock()`(t1532)/`getHotThemes()`(t1533) |
+| `get_financial_ranking` | criteria(`SALES_GROWTH`/`OPERATING_INCOME_GROWTH`/`DEBT_RATIO`/`EPS`/`BPS`/`ROE`/`PER`/`PBR`/`PEG`) | `LsInvestInfoApiClient.getFinancialRanking()`(t3341) — criteria는 코드(`1`/`2`/`4`/`6`/`7`/`8`/`9`/`a`/`b`)로 매핑 후 전달 |
+| `get_overseas_index` | indexName(`다우지수`/`나스닥`/`원달러환율`/`국제유가`) | `LsInvestInfoApiClient.getOverseasIndex()`(t3521) — 종목 심볼로 매핑 후 전달 |
+| `get_market_liquidity_trend` | periodMonths(선택, 1~24) | `LsInvestInfoApiClient.getMarketLiquidityTrend()`(t8428, periodMonths 있으면 최대 2년까지 조회 후 최고/최저일 요약) |
+| `get_stock_technical_signal` | companyName(필수) | `LsMarketDataApiClient.getPivotLevels()`(t1105) |
+| `get_historical_price` | companyName(필수), periodMonths(선택, 1~24) | `LsMarketDataApiClient.getHistoricalPrices()`(t1305, periodMonths 있으면 월봉으로 전환해 최대 24개월 조회 — open/high/low 실측값으로 기간 내 최고가·최저가를 코드가 직접 계산해 답에 덧붙임) |
+| `get_multi_stock_price` | companyNames(필수, 콤마구분 최대 5개) | `LsMarketDataApiClient.getMultiStockPrices()`(t8407) — `ConfirmedPrice` 확정 패턴 적용 |
+| `get_stock_risk_flag` | companyName(필수) | `LsMarketDataApiClient.getRiskFlags()`(t1404 관리종목 + t1405 투자경고/매매정지) |
+| `get_call_auction_price` | companyName(필수) | `LsMarketDataApiClient.getRecentCallAuctionPrices()`(t1486) — `DateUtil.isCallAuctionTime()` 게이트 |
+| `get_stock_credit_info` | companyName(필수), infoType(`COLLATERAL_LOAN`/`MARGIN_REQUIREMENT`/`MARGIN_TRADING`/`SECURITIES_LENDING`), periodMonths(선택, 1~24, infoType=`SECURITIES_LENDING`일 때만) | `LsEtcApiClient`의 4개 메서드(CLNAQ00100/t1411/t1921/t1941)로 1:1 분기. `SECURITIES_LENDING`(t1941)만 periodMonths로 최대 2년 확장 가능(2026-08-13 추가) — `MARGIN_TRADING`(t1921)은 LS API 자체에 기간 파라미터가 없어(연속조회 커서만 지원) 확장 불가로 확인됨, 항상 최근 며칠만 조회 |
+| `get_etf_info` | companyName(필수), infoType(`PRICE`/`CONSTITUENTS`) | `CONSTITUENTS`→`LsEtfApiClient.getConstituents()`(t1904), 그 외(기본 `PRICE`)→`getCurrentPrice()`(t1901) |
+| `get_program_trading_summary` | mode(`MARKET_SNAPSHOT`/`TOP_STOCKS`) | `TOP_STOCKS`→`LsProgramApiClient.getTopProgramTradingStocks()`(t1636), 그 외(기본)→`getMarketSnapshot()`(t1640) |
+| `get_investor_trend_summary` | mode(`BY_INVESTOR_TYPE`/`BY_MARKET`) | `BY_MARKET`→`LsInvestorApiClient.getMarketComparison()`(t1615), 그 외(기본)→`getInvestorTypeSummary()`(t1601) |
+| `get_new_listing_stocks` | periodMonths(선택, 1~24) | `LsEtcApiClient.getNewListings()`(t1403, periodMonths 있으면 최대 2년까지 확장, 2026-08-13 추가) |
+| `get_short_selling_trend` | companyName(필수), periodMonths(선택, 1~24) | `LsEtcApiClient.getShortSellingTrend()`(t1927, periodMonths 있으면 최대 2년까지 조회 후 합계·최고일 요약) |
+| `get_stock_master_info` | companyName(필수) | `LsEtcApiClient.getStockMasterInfo()`(t8436) |
+| `get_industry_info` | marketName(`코스피`/`코스닥`), mode(`CURRENT`/`TREND`/`EXPECTED`), callAuctionSession(`장전`/`장후`, EXPECTED일 때만), periodMonths(선택, 1~24, mode=TREND일 때만) | `TREND`→`LsIndustryApiClient.getTrend()`(t1514, periodMonths 있으면 월봉으로 전환해 최대 24개월 조회 후 최고/최저 요약), `EXPECTED`→`getExpectedIndex()`(t1485, `DateUtil.isCallAuctionTime()` 게이트), 그 외(기본 `CURRENT`)→`getCurrentPrice()`(t1511) |
+
+**`ConfirmedPrice` 확정 시세 패턴 (2026-08-11 라이브 테스트로 도입)** — Gemini가 답변 문장을 작성하며
+가격·거래량 숫자를 옮겨 적다가 실제로 다른 숫자를 지어내는 사고가 라이브에서 실측됐다(자릿수
+누락, 완전히 다른 숫자 등). "절대 틀리면 안 되는 숫자"는 모델에게 "잘 베껴 써라"라고 프롬프트로
+부탁하는 방식이 구조적으로 불안정하다는 결론을 내려, 코드가 직접 보장하는 방식으로 전환했다.
+`AiPlanningService`의 private record `ConfirmedPrice`(stockName, stockCode, price, volume) —
+`get_current_price`/`get_multi_stock_price` 두 도구만 호출할 때마다 `CopyOnWriteArrayList<ConfirmedPrice>
+confirmedCurrentPrices`(`executeTool()`이 `aiToolTaskExecutor`로 동시 실행되므로 스레드 안전 컬렉션
+필요)에 실측값을 쌓아두고, 모델의 최종 답변 뒤에 `"\n\n[확인된 시세] %s(%s) %,d원, 거래량 %,d주"`
+형식으로 코드가 직접 이어붙인다(모델이 옮겨 적은 본문 숫자와 무관하게 항상 정확). 이 두 도구는
+30분 도구 캐시 자체도 우회한다(시세는 그때그때 달라지는 값이라).
+
+**LS증권 REST API 클라이언트 (`infra/ls`, 27개 도구 중 `get_*` 조회 전용 — 6번 섹션의
+`LsWebSocketClient`/`LsWebSocketHandler`/`LsReconnectService`/`LsMarketDataListener`/
+`LsAuthenticationException`(실시간 체결·호가 WebSocket 계열)과는 완전히 별개 카테고리)**
+
+| 클라이언트 | 엔드포인트(`ls.*-url`) | 공개 메서드 → TR코드 |
+|---|---|---|
+| `LsAccessTokenProvider` | `${ls.token-url}` | `issueAccessToken()` — 아래 10개 클라이언트가 전부 공유하는 토큰 발급 전용 컴포넌트(WebSocket 쪽 `LsWebSocketClient`는 이걸 안 쓰고 자체 토큰 발급 로직을 유지) |
+| `LsMarketDataApiClient` | `market-data-url` | `getCurrentPrice(String stockCode)`→t1102, `getRiskFlags(String stockCode)`→t1404+t1405, `getPivotLevels(String stockCode)`→t1105, `getRecentHistoricalPrices(String stockCode)`/`getHistoricalPrices(String stockCode, Integer periodMonths)`→t1305(periodMonths 없으면 일봉 최근 5건, 있으면 월봉으로 전환해 최대 24개월=2년, 2026-08-13 추가 — open/high/low도 함께 파싱), `getMultiStockPrices(List<String> stockCodes)`→t8407(최대 5종목), `getRecentCallAuctionPrices(String stockCode)`→t1486(최대 5건, 시간대 게이트는 호출부 책임) |
+| `LsInvestorTrendApiClient` | `frgr-itt-url` | `getRecentTrend(String stockCode)`/`getTrend(String stockCode, Integer periodMonths)`→t1716(외인기관종목별동향, periodMonths 없으면 최근 10일·최대 5건, 있으면 최대 24개월=2년까지 일별 원본 그대로 반환해 호출부가 합계·최고/최저일 계산, 2026-08-13 추가) |
+| `LsInvestInfoApiClient` | `investinfo-url` | `getInvestmentOpinions(String stockCode)`→t3401(최대 5건), `getShareholderMeetingSchedule(String stockCode)`→t3202(`upgu=="09"` 필터, 최대 5건), `getFinancialRanking(String criteria)`→t3341(최대 10건), `getOverseasIndex(String kind, String symbol)`→t3521, `getRecentMarketLiquidityTrend()`/`getMarketLiquidityTrend(Integer periodMonths)`→t8428(periodMonths 없으면 최근 7일·최대 5건, 있으면 최대 24개월=2년, 2026-08-13 추가) |
+| `LsHighItemApiClient` | `high-item-url` | `getTopPriceChangeRate()`→t1441, `getTopMarketCap()`→t1444, `getTopVolume()`→t1452, `getTopTradingValue()`→t1463, `getSurgingVolumeVsYesterday()`→t1466, `getTopAfterHoursPriceChangeRate()`→t1481, `getTopAfterHoursVolume()`→t1482 (전부 `List<LsRankingItemDto>`, 최대 10건) |
+| `LsSectorApiClient` | `sector-url` | `getThemeConstituentsByName(String themeName)`→t8425(테마명→코드 프로세스 수명 캐시) 후 t1537, `getThemesForStock(String stockCode)`→t1532, `getHotThemes()`→t1533 |
+| `LsEtfApiClient` | `etf-url` | `getCurrentPrice(String stockCode)`→t1901, `getConstituents(String stockCode)`→t1904(최대 10건) |
+| `LsProgramApiClient` | `program-url` | `getTopProgramTradingStocks()`→t1636(최대 10건), `getMarketSnapshot()`→t1640(gubun=`11` 거래소 전체) |
+| `LsInvestorApiClient` | `investor-url` | `getInvestorTypeSummary()`→t1601, `getMarketComparison()`→t1615 |
+| `LsEtcApiClient` | `etc-url` | `getCollateralLoanEligibility(String stockCode)`→`CLNAQ00100`(예탁담보융자가능종목현황조회), `getMarginRequirement(String stockCode)`→t1411(증거금율별종목조회), `getMarginTradingTrend(String stockCode)`→t1921(신용거래동향, 최근 5일 — LS API 자체에 기간 파라미터가 없어 확장 불가, 2026-08-13 전수조사로 확인), `getSecuritiesLendingTrend(String stockCode)`/`getSecuritiesLendingTrend(String stockCode, Integer periodMonths)`→t1941(종목별대차거래일간추이, periodMonths 없으면 최근 7일·최대 5건, 있으면 최대 24개월=2년, 2026-08-13 추가), `getNewListings()`/`getNewListings(Integer periodMonths)`→t1403(신규상장종목조회, periodMonths 없으면 최근 6개월·최대 10건, 있으면 최대 24개월=2년·최대 50건, 2026-08-13 추가), `getRecentShortSellingTrend(String stockCode)`/`getShortSellingTrend(String stockCode, Integer periodMonths)`→t1927(공매도일별추이, periodMonths 없으면 최근 7일·최대 5건, 있으면 최대 24개월=2년, 2026-08-13 추가), `getStockMasterInfo(String stockCode)`→t8436(주식종목조회API용) |
+| `LsIndustryApiClient` | `industry-url`(`/indtp/market-data`, 기존에 전혀 구현 안 돼 있던 업종 카테고리) | `getCurrentPrice(String marketName)`→t1511(업종현재가), `getRecentTrend(String marketName)`/`getTrend(String marketName, Integer periodMonths)`→t1514(업종기간별추이, periodMonths 없으면 일봉 최근 5건, 있으면 월봉(gubun2=3)으로 전환해 최대 24개월=2년, 2026-08-13 추가), `getExpectedIndex(String marketName, String callAuctionSession)`→t1485(예상지수, 시간대 게이트는 호출부 책임). `marketName`은 `코스피`→`001`/`코스닥`→`301`로 매핑 |
+
+**`infra/ls/dto` 신규 DTO 26개** (기존 실시간 계열의 `LsTickData`/`LsHogaData`/`LsTokenResponse`와는 별개)
+
+| DTO | 필드 |
+|---|---|
+| `LsCurrentPriceDetailDto` | stockCode, stockName, currentPrice, changeAmount, changeRate, volume, per, pbr, high52w, high52wDate, low52w, low52wDate, listingShares, foreignExhaustionRate, updatedAt |
+| `LsMultiStockPriceDto` | stockCode, stockName, price, changeAmount, changeRate, volume |
+| `LsPivotLevelDto` | stockCode, pivot, resistance1, support1, resistance2, support2 |
+| `LsHistoricalPriceDto` | date, open, high, low(2026-08-13 추가 — 기간 내 최고가/최저가 계산용), close, changeRate, volume, marketCap, foreignNetBuy, individualNetBuy |
+| `LsCallAuctionPriceDto` | time, price, changeRate, expectedVolume |
+| `LsStockRiskFlagDto` | flagType, reasonCode, date |
+| `LsForeignInstitutionalTrendDto` | date, closePrice, individualNetBuyKrx, institutionNetBuyKrx, foreignNetBuyKrx, programTradingVolume, foreignHoldingShares, foreignExhaustionRate, shortSellingVolume, shortSellingValue |
+| `LsInvestmentOpinionDto` | date, securitiesFirm, opinionBefore, opinionAfter, targetPriceBefore, targetPriceAfter, closePriceOnDate |
+| `LsShareholderMeetingDto` | date, eventName |
+| `LsRankingItemDto` | rank, stockCode, stockName, price, changeAmount, changeRate, volume, extraInfo |
+| `LsThemeDto` | themeCode, themeName, stats(핫테마 조회에서만 채워짐) |
+| `LsThemeConstituentDto` | stockCode, stockName, price, changeAmount, changeRate, volume |
+| `LsFinancialRankingDto` | rank, stockCode, stockName, roe, per, pbr, salesGrowthRate |
+| `LsOverseasIndexDto` | symbol, name, price, changeAmount, changeRate, date |
+| `LsMarketLiquidityDto` | date, customerDepositAmount, marginLoanAmount |
+| `LsEtfConstituentDto` | stockCode, stockName, price, changeRate, weight |
+| `LsProgramTradingRankDto` | rank, stockCode, stockName, price, changeRate, netBuyValue |
+| `LsProgramTradingSnapshotDto` | offerValue, bidValue, netValue |
+| `LsInvestorTypeSummaryDto` | individualNetBuy, foreignNetBuy, institutionNetBuy, securitiesNetBuy, insuranceNetBuy, investmentTrustNetBuy |
+| `LsMarketInvestorComparisonDto` | marketName, individualNetBuy, foreignNetBuy, institutionNetBuy |
+| `LsStockCreditInfoDto` | stockCode, detail |
+| `LsNewListingDto` | stockCode, stockName, listedDate, price |
+| `LsShortSellingTrendDto` | date, shortSellingVolume, shortSellingValue, shortSellingRatio |
+| `LsStockMasterInfoDto` | stockCode, stockName, upperLimitPrice, lowerLimitPrice, isSpac |
+| `LsIndustryPriceDto` | industryCode, industryName, indexValue, changeRate |
+| `LsIndustryTrendDto` | date, indexValue, changeRate, foreignNetBuy |
+| `LsExpectedIndexDto` | expectedIndexValue, changeRate, upperLimitStockCount, lowerLimitStockCount |
+
+**네이버 뉴스 검색 (`infra/naver`, 2026-08-05 Tavily 대체)**
+- `NaverNewsApiClient.search(NaverNewsSearchRequest request)` — 엔드포인트 `app.naver.api-url`, 인증은
+  NCP API Gateway 방식 헤더(`X-NCP-APIGW-API-KEY-ID`/`X-NCP-APIGW-API-KEY`, 옛 `X-Naver-Client-Id`
+  방식이 아님). Naver가 `format=json`을 줘도 실제로는 `text/plain;charset=UTF-8`로 응답해서
+  `MappingJackson2HttpMessageConverter`가 `text/plain`도 처리하도록 별도 등록.
+- 회사명은 항상 단독으로만 검색하고(topic과 합쳐서 검색하면 네이버 자체 정확도 정렬이 깨짐,
+  라이브 테스트로 확인) topic은 응답을 받은 뒤 필터링 단계에서만 사용. 정렬은 topic이 있으면
+  `date`(최신순), 없으면 `sim`(정확도순, 2026-08-05 확정 트레이드오프 유지).
+  기간 필터는 Naver API 파라미터가 아니라 응답을 받은 뒤 `pubDate` 기준으로 클라이언트에서
+  직접 거른다(`NewsRelevanceMatcher.resolvePeriodDays()` 기준).
+  신뢰 도메인 필터(`NewsRelevanceMatcher.SECURITIES_NEWS_DOMAINS`, 정확 일치/서브도메인만 허용 —
+  "fakesedaily.com" 같은 유사 도메인 차단)와 관련성 필터(제목/본문 요약 중 하나에 회사명 매칭 +
+  topic 있으면 `NewsRelevanceMatcher.topicMatchesAnyToken()`까지 통과)를 모두 거친 뒤 최대 5건 반환.
+- `NaverNewsSearchRequest`(companyName, topic, periodDays), `NaverNewsSearchResponse`(results: `NaverNewsResult`(title, description, link, pubDate, outlet) 리스트)
+
+**global 신규/변경 유틸리티**
+- `RedisAiToolCacheService`(§7 redis-service에도 등록) — `getCachedResult(Long sessionId, String toolKey)`,
+  `cacheResult(Long sessionId, String toolKey, String result)`. 키 `ai:tool:{sessionId}:{toolKey}`, TTL 30분.
+- `ExternalApiInvoker` — `static <T> T call(Supplier<T> apiCall, String logMessage, Object... logArgs)`.
+  `GeminiApiClient`/`DartApiClient`/`NaverNewsApiClient`/LS REST 클라이언트 전체가 반복하던
+  try-catch(`RestClientException`→로그→`CustomException(ErrorCode.EXTERNAL_API_ERROR, e)`) 패턴을 공용화.
+- `NewsRelevanceMatcher` — `SECURITIES_NEWS_DOMAINS`(신뢰 언론사 도메인 29개), `KNOWN_ALIASES`(현재
+  `삼성전자`→`삼전`만 등록, 필요시 확장), `MAX_PERIOD_DAYS`(730일=2년, 2026-08-11에 90일에서 확장),
+  `titleMatchesToken()`, `topicMatchesAnyToken()`(topic을 공백 기준 토큰으로 쪼개 하나만 일치해도 인정,
+  "및"/"관련" 등 `TOPIC_STOPWORDS` 제외), `resolvePeriodDays(Integer periodDays)`
+- `DateUtil` — `isCallAuctionTime()`(08:30~09:00, 15:20~15:30 KST 평일), `isAfterHoursTradingTime()`(15:30~18:00
+  KST 평일). 시간대가 아닐 때 해당 LS 도구 호출 자체를 막고 안내 문구로 대체하는 "시간대 게이트"용 —
+  둘 다 `Asia/Seoul` 고정, 테스트 주입용 `ZonedDateTime` 오버로드 있음
+- `RestClientConfig` — `RestClient.Builder` 빈 하나(연결 5초/응답 30초 타임아웃 고정). Gemini/DART/Naver/LS
+  REST 클라이언트 전부가 이 빈을 주입받아 각자 `.build()`(Naver만 `.clone()...build()`)로 독립 인스턴스 생성
 
 ### 8-10. feature/ai-news
 
