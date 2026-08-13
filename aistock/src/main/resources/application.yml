@@ -26,10 +26,15 @@ cors:
 # 실행 환경변수(LS_APP_KEY, LS_APP_SECRET)로만 주입한다(.env는 gitignore 대상).
 # 접근토큰 발급 엔드포인트는 실서버/모의투자 서버 공통이며, appkey/appsecret 자체가 모의/실 계정을 구분한다.
 # 실시간시세 WebSocket 접속 URL은 모의/실서버 포트가 달라 프로필별(application-dev.yml/application-prod.yml)로 분리한다.
+# LsAccessTokenProvider(AI 상담용 REST 클라이언트 공용 토큰 발급기)가 ls.mode와 무관하게 항상
+# 등록되는 빈이라, gemini/dart/naver 키와 마찬가지로 빈 문자열 기본값을 둔다 — 값이 없으면
+# LsAccessTokenProvider.issueAccessToken() 호출 시점에 EXTERNAL_API_ERROR로 실패하므로,
+# 코드는 완성된 채로 두고 키만 .env로 나중에 채우면 된다(CI 등 키가 없는 환경에서도 컨텍스트
+# 로딩 자체는 통과해야 하기 때문에 기본값 없는 필수 프로퍼티로 두면 안 된다).
 ls:
   token-url: ${LS_TOKEN_URL:https://openapi.ls-sec.co.kr:8080/oauth2/token}
-  app-key: ${LS_APP_KEY}
-  app-secret: ${LS_APP_SECRET}
+  app-key: ${LS_APP_KEY:}
+  app-secret: ${LS_APP_SECRET:}
   # AI 상담의 get_current_price 도구 전용 — LsMarketDataApiClient가 종목 현재가를 그때그때
   # REST로 조회하는 엔드포인트(t1102, 2026-08-07 추가). LsWebSocketClient의 실시간 스트림과
   # 별개로, ls.mode와 무관하게 항상 이 URL로 호출한다.
