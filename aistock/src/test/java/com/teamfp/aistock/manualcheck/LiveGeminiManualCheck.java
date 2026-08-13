@@ -16,6 +16,7 @@ import java.util.Optional;
 import java.util.concurrent.Executor;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
@@ -67,6 +68,7 @@ class LiveGeminiManualCheck {
             "C:\\Users\\jin05\\AppData\\Local\\Temp\\claude\\C--Users-jin05-Desktop-project-AI-STOCK-Backend\\d50592c5-2205-44b0-9770-d983a73dbaaa\\scratchpad\\chat-session-" + SESSION_NUMBER + ".log");
 
     @Test
+    @EnabledIfEnvironmentVariable(named = "RUN_LIVE_GEMINI_TEST", matches = "true")
     void checkRealConversationTurn() throws IOException {
         AiPlanningSessionRepository sessionRepository = mock(AiPlanningSessionRepository.class);
         AiPlanningMessageRepository messageRepository = mock(AiPlanningMessageRepository.class);
