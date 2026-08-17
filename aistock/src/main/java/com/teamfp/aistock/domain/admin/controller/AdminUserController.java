@@ -15,6 +15,7 @@ import com.teamfp.aistock.domain.admin.dto.response.AdminUserDetailResponse;
 import com.teamfp.aistock.domain.admin.dto.response.AdminUserListResponse;
 import com.teamfp.aistock.domain.admin.service.AdminUserService;
 import com.teamfp.aistock.global.response.ApiResponse;
+import com.teamfp.aistock.global.util.SecurityUtil;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +46,7 @@ public class AdminUserController {
             @PathVariable Long userId,
             @Valid @RequestBody AdminUserStatusRequest request
     ) {
-        return ApiResponse.success("사용자 상태가 변경되었습니다.", adminUserService.updateUserStatus(userId, request));
+        Long adminUserId = SecurityUtil.getCurrentUserId();
+        return ApiResponse.success("사용자 상태가 변경되었습니다.", adminUserService.updateUserStatus(adminUserId, userId, request));
     }
 }
