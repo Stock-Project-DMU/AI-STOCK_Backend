@@ -19,6 +19,8 @@ public enum ErrorCode {
     INVALID_ADMIN_CODE(HttpStatus.BAD_REQUEST, "INVALID_ADMIN_CODE", "관리자 코드가 일치하지 않습니다."),
     ACCOUNT_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "ACCOUNT_LIMIT_EXCEEDED", "계좌는 최대 3개까지 만들 수 있습니다."),
     CHARGE_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "CHARGE_LIMIT_EXCEEDED", "자동 충전 가능 횟수(3회)를 초과했습니다. 관리자에게 문의해 주세요."),
+    SELF_STATUS_CHANGE_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "SELF_STATUS_CHANGE_NOT_ALLOWED", "본인 계정은 정지할 수 없습니다."),
+    LAST_ADMIN_SUSPEND_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "LAST_ADMIN_SUSPEND_NOT_ALLOWED", "마지막 남은 관리자는 정지할 수 없습니다."),
 
     // 401 Unauthorized
     INVALID_PASSWORD(HttpStatus.UNAUTHORIZED, "INVALID_PASSWORD", "비밀번호가 일치하지 않습니다."),

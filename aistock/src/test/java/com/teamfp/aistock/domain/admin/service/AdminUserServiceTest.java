@@ -32,6 +32,7 @@ import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.entity.UserStatus;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.exception.CustomException;
+import com.teamfp.aistock.global.exception.ErrorCode;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -66,6 +67,7 @@ class AdminUserServiceTest {
     private AdminUserService adminUserService;
 
     private static final Long USER_ID = 1L;
+    private static final Long ADMIN_ID = 2L;
     private static final Long ACCOUNT_ID_A = 10L;
     private static final Long ACCOUNT_ID_B = 20L;
 
@@ -133,8 +135,8 @@ class AdminUserServiceTest {
         when(userRepository.findByUserIdAndIsActiveTrue(USER_ID)).thenReturn(Optional.of(user));
         when(accountRepository.findAllByUserId(USER_ID)).thenReturn(List.of(accountA, accountB));
 
-        HoldingValuationDto holdingA = new HoldingValuationDto("005930", "삼성전자", 10, 50_000L, 60_000L);
-        HoldingValuationDto holdingB = new HoldingValuationDto("000660", "SK하이닉스", 5, 100_000L, 110_000L);
+        HoldingValuationDto holdingA = new HoldingValuationDto(ACCOUNT_ID_A, "005930", "삼성전자", 10, 50_000L, 60_000L);
+        HoldingValuationDto holdingB = new HoldingValuationDto(ACCOUNT_ID_B, "000660", "SK하이닉스", 5, 100_000L, 110_000L);
         when(holdingValuationService.getHoldingValuations(List.of(ACCOUNT_ID_A, ACCOUNT_ID_B)))
                 .thenReturn(List.of(holdingA, holdingB));
 
@@ -148,6 +150,8 @@ class AdminUserServiceTest {
         assertThat(result.accounts()).hasSize(2);
         assertThat(result.holdings()).hasSize(2);
         assertThat(result.orders()).hasSize(2);
+        // 계좌를 여러 개 합쳐서 보여주는 응답이라, 각 항목이 어느 계좌 소속인지 accountId로 구분할 수 있어야 한다.
+        assertThat(result.holdings()).extracting("accountId").containsExactlyInAnyOrder(ACCOUNT_ID_A, ACCOUNT_ID_B);
         // 배치 조회 쿼리가 이미 정렬해서 반환한 순서를 그대로 유지해야 한다(서비스가 재정렬하지 않음).
         assertThat(result.orders().get(0).stockCode()).isEqualTo("000660");
         assertThat(result.orders().get(1).stockCode()).isEqualTo("005930");
@@ -199,7 +203,7 @@ class AdminUserServiceTest {
     void updateUserStatus_deactivatedUser_blocked() {
         when(userRepository.findByUserIdAndIsActiveTrue(USER_ID)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> adminUserService.updateUserStatus(USER_ID, new AdminUserStatusRequest(UserStatus.ACTIVE)))
+        assertThatThrownBy(() -> adminUserService.updateUserStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.ACTIVE)))
                 .isInstanceOf(CustomException.class);
     }
 
@@ -209,7 +213,7 @@ class AdminUserServiceTest {
         when(userRepository.findByUserIdAndIsActiveTrue(USER_ID)).thenReturn(Optional.of(user));
         when(accountRepository.findAllByUserId(USER_ID)).thenReturn(List.of());
 
-        AdminUserDetailResponse result = adminUserService.updateUserStatus(USER_ID, new AdminUserStatusRequest(UserStatus.SUSPENDED));
+        AdminUserDetailResponse result = adminUserService.updateUserStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.SUSPENDED));
 
         assertThat(result.status()).isEqualTo(UserStatus.SUSPENDED);
         assertThat(user.getStatus()).isEqualTo(UserStatus.SUSPENDED);
@@ -222,9 +226,104 @@ class AdminUserServiceTest {
         when(userRepository.findByUserIdAndIsActiveTrue(USER_ID)).thenReturn(Optional.of(user));
         when(accountRepository.findAllByUserId(USER_ID)).thenReturn(List.of());
 
-        AdminUserDetailResponse result = adminUserService.updateUserStatus(USER_ID, new AdminUserStatusRequest(UserStatus.ACTIVE));
+        AdminUserDetailResponse result = adminUserService.updateUserStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.ACTIVE));
 
         assertThat(result.status()).isEqualTo(UserStatus.ACTIVE);
         assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
+    }
+
+    @Test
+    @DisplayName("관리자가 자기 자신을 정지시키려 하면 SELF_STATUS_CHANGE_NOT_ALLOWED 예외를 던진다")
+    void updateUserStatus_self_blocked() {
+        User admin = User.builder()
+                .loginId("admin")
+                .name("관리자")
+                .role(Role.ADMIN)
+                .status(UserStatus.ACTIVE)
+                .isActive(true)
+                .build();
+        ReflectionTestUtils.setField(admin, "userId", ADMIN_ID);
+        when(userRepository.findByUserIdAndIsActiveTrue(ADMIN_ID)).thenReturn(Optional.of(admin));
+
+        assertThatThrownBy(() -> adminUserService.updateUserStatus(ADMIN_ID, ADMIN_ID, new AdminUserStatusRequest(UserStatus.SUSPENDED)))
+                .isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException) e).getErrorCode())
+                .isEqualTo(ErrorCode.SELF_STATUS_CHANGE_NOT_ALLOWED);
+
+        verify(accountRepository, never()).findAllByUserId(anyLong());
+    }
+
+    @Test
+    @DisplayName("활성 상태인 마지막 ADMIN을 정지시키려 하면 LAST_ADMIN_SUSPEND_NOT_ALLOWED 예외를 던진다")
+    void updateUserStatus_lastActiveAdmin_blocked() {
+        User targetAdmin = User.builder()
+                .loginId("target-admin")
+                .name("대상관리자")
+                .role(Role.ADMIN)
+                .status(UserStatus.ACTIVE)
+                .isActive(true)
+                .build();
+        ReflectionTestUtils.setField(targetAdmin, "userId", USER_ID);
+        when(userRepository.findByUserIdAndIsActiveTrue(USER_ID)).thenReturn(Optional.of(targetAdmin));
+        when(userRepository.findAllByRoleAndStatusAndIsActiveTrueForUpdate(Role.ADMIN, UserStatus.ACTIVE))
+                .thenReturn(List.of(targetAdmin));
+
+        assertThatThrownBy(() -> adminUserService.updateUserStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.SUSPENDED)))
+                .isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException) e).getErrorCode())
+                .isEqualTo(ErrorCode.LAST_ADMIN_SUSPEND_NOT_ALLOWED);
+
+        verify(accountRepository, never()).findAllByUserId(anyLong());
+    }
+
+    @Test
+    @DisplayName("정지된 ADMIN이 다른 활성 ADMIN 곁에 있으면 정지시킬 수 있다")
+    void updateUserStatus_adminWithOtherActiveAdmins_allowed() {
+        User targetAdmin = User.builder()
+                .loginId("target-admin")
+                .name("대상관리자")
+                .role(Role.ADMIN)
+                .status(UserStatus.ACTIVE)
+                .isActive(true)
+                .build();
+        ReflectionTestUtils.setField(targetAdmin, "userId", USER_ID);
+        User otherAdmin = User.builder()
+                .loginId("other-admin")
+                .name("다른관리자")
+                .role(Role.ADMIN)
+                .status(UserStatus.ACTIVE)
+                .isActive(true)
+                .build();
+        ReflectionTestUtils.setField(otherAdmin, "userId", 3L);
+        when(userRepository.findByUserIdAndIsActiveTrue(USER_ID)).thenReturn(Optional.of(targetAdmin));
+        when(userRepository.findAllByRoleAndStatusAndIsActiveTrueForUpdate(Role.ADMIN, UserStatus.ACTIVE))
+                .thenReturn(List.of(targetAdmin, otherAdmin));
+        when(accountRepository.findAllByUserId(USER_ID)).thenReturn(List.of());
+
+        AdminUserDetailResponse result = adminUserService.updateUserStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.SUSPENDED));
+
+        assertThat(result.status()).isEqualTo(UserStatus.SUSPENDED);
+    }
+
+    @Test
+    @DisplayName("이미 정지된 유저에게 다시 SUSPENDED를 보내면 lockout 가드 없이 그대로 통과한다(멱등)")
+    void updateUserStatus_alreadySuspended_isIdempotent() {
+        User targetAdmin = User.builder()
+                .loginId("target-admin")
+                .name("대상관리자")
+                .role(Role.ADMIN)
+                .status(UserStatus.ACTIVE)
+                .isActive(true)
+                .build();
+        ReflectionTestUtils.setField(targetAdmin, "userId", USER_ID);
+        targetAdmin.suspend();
+        when(userRepository.findByUserIdAndIsActiveTrue(USER_ID)).thenReturn(Optional.of(targetAdmin));
+        when(accountRepository.findAllByUserId(USER_ID)).thenReturn(List.of());
+
+        AdminUserDetailResponse result = adminUserService.updateUserStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.SUSPENDED));
+
+        assertThat(result.status()).isEqualTo(UserStatus.SUSPENDED);
+        // 이미 SUSPENDED인 경우 lockout 검증(마지막 admin 확인 락 조회)까지 갈 필요가 없다.
+        verify(userRepository, never()).findAllByRoleAndStatusAndIsActiveTrueForUpdate(any(Role.class), any(UserStatus.class));
     }
 }

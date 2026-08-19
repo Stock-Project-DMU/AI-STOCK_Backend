@@ -34,16 +34,7 @@ public class HoldingValuationService {
         List<Holding> holdings = holdingRepository.findAllByAccountId(accountId);
         // holdings.uq_account_stock(account_id, stock_code)이 계좌 하나 안에서 종목코드 중복을
         // 막아주므로 distinct()는 불필요하다(항상 이미 유일함).
-        Map<String, StockPriceDto> prices = redisStockCacheService.getStockPrices(
-                holdings.stream().map(Holding::getStockCode).toList());
-
-        return holdings.stream()
-                .map(holding -> {
-                    StockPriceDto priceDto = prices.get(holding.getStockCode());
-                    Long currentPrice = priceDto != null ? priceDto.getCurrentPrice() : null;
-                    return HoldingValuationDto.of(holding, currentPrice);
-                })
-                .toList();
+        return valuate(holdings, holdings.stream().map(Holding::getStockCode).toList());
     }
 
     /**
@@ -55,8 +46,16 @@ public class HoldingValuationService {
     @Transactional(readOnly = true)
     public List<HoldingValuationDto> getHoldingValuations(List<Long> accountIds) {
         List<Holding> holdings = holdingRepository.findAllByAccountIdIn(accountIds);
-        Map<String, StockPriceDto> prices = redisStockCacheService.getStockPrices(
-                holdings.stream().map(Holding::getStockCode).distinct().toList());
+        return valuate(holdings, holdings.stream().map(Holding::getStockCode).distinct().toList());
+    }
+
+    /**
+     * 시세 배치 조회 + 캐시 미스 시 평단가 폴백 매핑. 두 getHoldingValuations() 오버로드가
+     * 조회 쿼리·시세 조회용 종목코드 목록(distinct 여부)만 다르고 나머지는 동일했던 것을
+     * 이 메서드로 모았다.
+     */
+    private List<HoldingValuationDto> valuate(List<Holding> holdings, List<String> stockCodesForPriceLookup) {
+        Map<String, StockPriceDto> prices = redisStockCacheService.getStockPrices(stockCodesForPriceLookup);
 
         return holdings.stream()
                 .map(holding -> {

@@ -17,6 +17,7 @@ import com.teamfp.aistock.domain.order.dto.response.HoldingResponse;
 import com.teamfp.aistock.domain.order.dto.response.OrderHistoryResponse;
 import com.teamfp.aistock.domain.order.repository.OrderRepository;
 import com.teamfp.aistock.domain.order.service.HoldingValuationService;
+import com.teamfp.aistock.domain.user.entity.Role;
 import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.entity.UserStatus;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
@@ -54,14 +55,50 @@ public class AdminUserService {
     }
 
     @Transactional
-    public AdminUserDetailResponse updateUserStatus(Long userId, AdminUserStatusRequest request) {
+    public AdminUserDetailResponse updateUserStatus(Long adminUserId, Long userId, AdminUserStatusRequest request) {
         User user = findUser(userId);
         if (request.status() == UserStatus.SUSPENDED) {
-            user.suspend();
+            suspend(adminUserId, user);
         } else {
             user.activate();
         }
         return buildDetail(user);
+    }
+
+    /**
+     * 정지 처리. 이미 SUSPENDED인 유저에게 다시 SUSPENDED를 보내는 요청(타임아웃 후 재시도 등)은
+     * 상태 변화가 없는 멱등한 요청이므로, 그대로 통과시키고 아래 lockout 가드도 다시 태우지
+     * 않는다 — "활성 admin이 이 유저 하나뿐이라 정지 못 함" 같은 오해의 소지가 있는 예외를
+     * 이미 정지된 상태에 대해 또 던지지 않기 위함이다.
+     */
+    private void suspend(Long adminUserId, User targetUser) {
+        if (targetUser.getStatus() == UserStatus.SUSPENDED) {
+            return;
+        }
+        validateSuspendable(adminUserId, targetUser);
+        targetUser.suspend();
+    }
+
+    /**
+     * 정지 가능 여부 검증. 다음 두 경우를 막지 않으면 관리자 전원이 /api/admin/** 밖으로
+     * 밀려나 DB를 직접 고치지 않는 한 아무도 되돌릴 수 없는 lockout 상태가 될 수 있다.
+     * 1) 관리자가 자기 자신을 정지시키는 경우 — 요청을 보낸 본인이 다음 요청부터 바로 막힌다.
+     * 2) 활성 상태인 마지막 ADMIN을 정지시키는 경우 — 남은 관리자가 0명이 되어 아무도
+     *    /api/admin/users/{userId}/status로 되돌릴 수 없다. 두 번째 검사는 활성 ADMIN 행들에
+     *    비관적 락을 걸어(UserRepository.findAllByRoleAndStatusAndIsActiveTrueForUpdate) 서로
+     *    다른 admin을 동시에 정지시키는 두 요청이 락 없이 각자 "정지 전 카운트"를 보고 둘 다
+     *    통과해버리는 경쟁 상태를 막는다.
+     */
+    private void validateSuspendable(Long adminUserId, User targetUser) {
+        if (targetUser.getUserId().equals(adminUserId)) {
+            throw new CustomException(ErrorCode.SELF_STATUS_CHANGE_NOT_ALLOWED);
+        }
+        if (targetUser.getRole() == Role.ADMIN) {
+            List<User> activeAdmins = userRepository.findAllByRoleAndStatusAndIsActiveTrueForUpdate(Role.ADMIN, UserStatus.ACTIVE);
+            if (activeAdmins.size() <= 1) {
+                throw new CustomException(ErrorCode.LAST_ADMIN_SUSPEND_NOT_ALLOWED);
+            }
+        }
     }
 
     /**

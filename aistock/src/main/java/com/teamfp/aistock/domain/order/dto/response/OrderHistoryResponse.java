@@ -15,6 +15,7 @@ import com.teamfp.aistock.domain.order.entity.PriceType;
  * 재사용하므로 order-limit 단계에서는 Order 엔티티 → 이 DTO로 변환하는 from()만 준비해둔다.
  */
 public record OrderHistoryResponse(
+        Long accountId,
         Long orderId,
         String stockCode,
         String stockName,
@@ -30,6 +31,7 @@ public record OrderHistoryResponse(
 
     public static OrderHistoryResponse from(Order order) {
         return new OrderHistoryResponse(
+                order.getAccount().getAccountId(),
                 order.getOrderId(),
                 order.getStockCode(),
                 order.getStockName(),
