@@ -758,6 +758,15 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 > `answerInquiry`는 내부에서 `Inquiry.answer(String answer, User admin)` 엔티티 메서드를 호출한다
 > (1-1 참고). `feature/inquiry`(사용자 측)와 `feature/admin-inquiry`(관리자 측)는 같은
 > `Inquiry` Entity·`InquiryRepository`를 공유하되 Controller/Service/DTO는 분리한다.
+>
+> `InquiryRepository.findAllByOrderByStatusDescCreatedAtDesc()`(무인자, `List` 반환 —
+> `feature/inquiry`의 `InquiryRepositoryIntegrationTest`가 이미 사용 중이라 그대로 둠)에
+> 같은 정렬 기준의 `Pageable` 오버로드(`Page<Inquiry>` 반환)를 추가해 `getInquiries()`가 쓴다.
+>
+> **재답변(덮어쓰기) 정책**: `answerInquiry`는 대상 문의가 이미 `ANSWERED`여도 소유권/상태
+> 검증 없이 그대로 `Inquiry.answer()`를 호출해 기존 답변을 덮어쓴다 — 오타 정정 등 관리자가
+> 답변을 다시 보내야 하는 상황을 막지 않기 위한 의도적 선택이다(`admin-user`의 `updateUserStatus`
+> 같은 멱등/잠금 가드는 두지 않는다).
 
 ---
 
