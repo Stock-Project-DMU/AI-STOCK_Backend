@@ -52,7 +52,7 @@
 | `Watchlist` | `watchlistId`, `user`, `stockCode`, `stockName`, `addedAt` |
 | `AiPlanningSession` | `sessionId`, `user`, `title`, `status`, `createdAt`, `updatedAt` |
 | `AiPlanningMessage` | `messageId`, `session`, `role`, `content`, `promptTokens`, `createdAt` |
-| `Simulation` | `simulationId`, `user`, `stockCode`, `stockName`, `targetAmount`, `targetMonths`, `scenarioData`, `bestReachDate`, `baseReachDate`, `worstReachDate`, `dartData`, `newsData`, `createdAt` |
+| `Simulation` | `simulationId`, `user`, `stockCode`, `stockName`, `targetAmount`, `investmentAmount`, `targetMonths`, `scenarioData`, `bestReachDate`, `baseReachDate`, `worstReachDate`, `dartData`, `newsData`, `createdAt` |
 | `RecentViewed` | `viewId`, `user`, `stockCode`, `stockName`, `viewedAt` |
 | `Notification` | `notiId`, `user`, `type`, `title`, `content`, `isRead`, `createdAt` |
 | `Inquiry` | `inquiryId`, `user`, `title`, `content`, `status`, `answer`, `answeredBy`, `answeredAt`, `createdAt`, `updatedAt` |
@@ -634,13 +634,27 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 
 ### 8-11. feature/simulation
 
+> **1차 PR(계산 엔진 + 조회 API) 범위 설명**: dev 기준 `GeminiApiClient`/`DartApiClient`/
+> `infra/naver/*` 등 외부 연동 클라이언트가 전부 빈 스텁이거나 아예 없다(실 구현은
+> `feature/ai-planning`에만 있으며 아직 dev에 미병합). 따라서 1차 PR은
+> `POST /api/simulations`(`runSimulation`, Gemini/DART/뉴스 연동)를 아예 포함하지
+> 않고, 순수 계산 로직(`ScenarioCalculator`)과 조회 API(`GET`)만 구현한다.
+> `runSimulation`은 `feature/ai-planning` 병합 후 별도 브랜치(예:
+> `feature/simulation-integration`)에서 이어간다. 아래 표의 `runSimulation`/
+> `SimulationRequest` 항목은 다음 PR에서 그대로 쓸 수 있도록 지금 정의만 해두는
+> 것이며 컨트롤러에 실제로 연결되지 않는다.
+
 | 구분 | 이름 |
 |---|---|
 | Controller | `SimulationController` |
-| 엔드포인트 | `POST /api/simulations`, `GET /api/simulations`, `GET /api/simulations/{simulationId}` |
-| Service | `SimulationService` — `runSimulation(Long userId, SimulationRequest request)`, `getMySimulations(Long userId)`, `getSimulation(Long userId, Long simulationId)` |
-| Request DTO | `SimulationRequest`(stockCode, targetAmount, targetMonths) |
-| Response DTO | `SimulationResponse`(simulationId, stockCode, bestScenario, baseScenario, worstScenario, bestReachDate, baseReachDate, worstReachDate) |
+| 엔드포인트 | `GET /api/simulations`, `GET /api/simulations/{simulationId}` (`POST /api/simulations`는 다음 PR) |
+| Service | `SimulationService` — `getMySimulations(Long userId)`, `getSimulation(Long userId, Long simulationId)` (`runSimulation(Long userId, SimulationRequest request)`는 다음 PR에서 구현) |
+| Request DTO | `SimulationRequest`(stockCode, investmentAmount, targetAmount, targetMonths) — targetMonths는 1~12 (`@Min(1) @Max(12)`) |
+| Response DTO | `SimulationResponse`(simulationId, stockCode, stockName, investmentAmount, targetAmount, targetMonths, bestScenario, baseScenario, worstScenario, bestReachDate, baseReachDate, worstReachDate, createdAt) — 정적 팩토리 `of(Simulation, List<ScenarioPointDto> best, List<ScenarioPointDto> base, List<ScenarioPointDto> worst)` |
+| 내부 DTO | `ScenarioPointDto`(date: `LocalDate`, value: `long`) — 시나리오 곡선 한 포인트. `date`는 매월 1일로 정규화. `value`는 `investmentAmount` 복리 계산 결과인 포트폴리오 평가금액(원 단위, `Math.round()` 반올림)이며 종목 주당가(`price`)가 아니므로 필드명을 `price`가 아닌 `value`로 둔다(코드베이스 전역에서 `price`는 이미 "주당 시장가" 의미로 쓰이고 있어 혼동 방지). 위치는 `domain/stock/dto/StockPriceDto.java`와 동일하게 `domain/ai/dto/` 바로 아래. |
+| 내부 DTO | `ScenarioDataJson`(best: `List<ScenarioPointDto>`, base: `List<ScenarioPointDto>`, worst: `List<ScenarioPointDto>`) — `simulations.scenario_data` JSON 컬럼의 저장 형태를 그대로 미러링하는 Jackson 매핑 전용 record. `SimulationService`가 조회 시 이 타입으로 역직렬화한다. `domain/ai/dto/` |
+| 계산 엔진 | `ScenarioCalculator`(`domain/ai/service`, 정적 유틸리티 클래스 — Spring 빈 아님) — `public static ScenarioSetDto calculate(long investmentAmount, double bestMonthlyGrowthRate, double baseMonthlyGrowthRate, double worstMonthlyGrowthRate, long targetAmount, int targetMonths, LocalDate startDate)`. 순서: ① best/worst는 `[-0.08, 0.08]`, base는 `[-0.02, 0.02]`로 각각 clamp(상수 `MAX_MONTHLY_GROWTH_RATE_WIDE`/`MAX_MONTHLY_GROWTH_RATE_NARROW`) → ② clamp된 세 값을 원래 라벨과 무관하게 내림차순 정렬해 큰 값부터 best/base/worst로 재배정(넓은 clamp 폭 때문에 라벨 순서가 뒤집힐 수 있어 라벨을 신뢰하지 않음, best≥base≥worst 보장) → ③ 재배정된 값으로 각각 month 0~targetMonths 곡선 생성(`value = investmentAmount * (1+rate)^month`, 반올림) → ④ 곡선에서 `value >= targetAmount`를 처음 만족하는 date를 reachDate로 산출(`investmentAmount >= targetAmount`면 month 0, 못 도달하면 null). `startDate`는 순수 함수 보장을 위한 외부 주입 파라미터(내부에서 `LocalDate.now()` 호출 금지) — 호출 측(다음 PR의 `runSimulation`)이 `LocalDate.now()`를 넘긴다. |
+| 내부 DTO | `ScenarioSetDto`(bestPoints/basePoints/worstPoints: `List<ScenarioPointDto>`, bestReachDate/baseReachDate/worstReachDate: `LocalDate`) — `ScenarioCalculator.calculate()`의 반환 타입. `domain/ai/dto/` |
 
 ### 8-12. feature/notification
 

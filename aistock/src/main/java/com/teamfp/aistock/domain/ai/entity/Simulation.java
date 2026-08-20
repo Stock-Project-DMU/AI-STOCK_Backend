@@ -51,6 +51,9 @@ public class Simulation {
     @Column(name = "target_amount", nullable = false)
     private long targetAmount;
 
+    @Column(name = "investment_amount", nullable = false)
+    private long investmentAmount;
+
     @Column(name = "target_months", nullable = false)
     private int targetMonths;
 
@@ -77,13 +80,14 @@ public class Simulation {
     private LocalDateTime createdAt;
 
     @Builder
-    private Simulation(User user, String stockCode, String stockName, long targetAmount, int targetMonths,
-                        String scenarioData, LocalDate bestReachDate, LocalDate baseReachDate,
+    private Simulation(User user, String stockCode, String stockName, long targetAmount, long investmentAmount,
+                        int targetMonths, String scenarioData, LocalDate bestReachDate, LocalDate baseReachDate,
                         LocalDate worstReachDate, String dartData, String newsData) {
         this.user = user;
         this.stockCode = stockCode;
         this.stockName = stockName;
         this.targetAmount = targetAmount;
+        this.investmentAmount = investmentAmount;
         this.targetMonths = targetMonths;
         this.scenarioData = scenarioData;
         this.bestReachDate = bestReachDate;
