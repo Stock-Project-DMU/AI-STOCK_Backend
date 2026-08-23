@@ -52,7 +52,7 @@
 | `Watchlist` | `watchlistId`, `user`, `stockCode`, `stockName`, `addedAt` |
 | `AiPlanningSession` | `sessionId`, `user`, `title`, `status`, `createdAt`, `updatedAt` |
 | `AiPlanningMessage` | `messageId`, `session`, `role`, `content`, `promptTokens`, `createdAt` |
-| `Simulation` | `simulationId`, `user`, `stockCode`, `stockName`, `targetAmount`, `targetMonths`, `scenarioData`, `bestReachDate`, `baseReachDate`, `worstReachDate`, `dartData`, `newsData`, `createdAt` |
+| `Simulation` | `simulationId`, `user`, `stockCode`, `stockName`, `targetAmount`, `investmentAmount`, `targetMonths`, `scenarioData`, `bestReachDate`, `baseReachDate`, `worstReachDate`, `dartData`, `newsData`, `createdAt` |
 | `RecentViewed` | `viewId`, `user`, `stockCode`, `stockName`, `viewedAt` |
 | `Notification` | `notiId`, `user`, `type`, `title`, `content`, `isRead`, `createdAt` |
 | `Inquiry` | `inquiryId`, `user`, `title`, `content`, `status`, `answer`, `answeredBy`, `answeredAt`, `createdAt`, `updatedAt` |
@@ -100,7 +100,7 @@
 
 | Repository | 메서드 |
 |---|---|
-| `UserRepository` | `findByLoginId(String loginId)`, `findByEmail(String email)`, `existsByLoginId(String loginId)`, `existsByEmail(String email)`, `findByUserIdAndIsActiveTrue(Long userId)`, `countByIsActiveTrue()`(관리자 대시보드 — 총 사용자 수), `findAllByIsActiveTrue(Pageable pageable)`(feature/admin-user 코드리뷰 반영 — 관리자 사용자 목록에서 탈퇴 유저 제외, 8-17 참고) |
+| `UserRepository` | `findByLoginId(String loginId)`, `findByEmail(String email)`, `existsByLoginId(String loginId)`, `existsByEmail(String email)`, `findByUserIdAndIsActiveTrue(Long userId)`, `countByIsActiveTrue()`(관리자 대시보드 — 총 사용자 수), `findAllByIsActiveTrue(Pageable pageable)`(feature/admin-user 코드리뷰 반영 — 관리자 사용자 목록에서 탈퇴 유저 제외, 8-17 참고), `findAllByRoleAndStatusAndIsActiveTrueForUpdate(Role role, UserStatus status)`(feature/admin-user 코드리뷰 반영 — 마지막 남은 ADMIN 정지 방지, 비관적 락으로 동시 정지 요청 경쟁 상태까지 막음, 8-17 참고) |
 | `SocialAccountRepository` | `findByProviderAndProviderId(SocialProvider provider, String providerId)`, `deleteByUserId(Long userId)` |
 | `InvestmentProfileRepository` | `findByUserId(Long userId)`, `deleteByUserId(Long userId)` |
 | `AccountRepository` | `findAllByUserId(Long userId)`(내 계좌 목록, 최대 3건 — `ORDER BY accountId asc` 고정, feature/ai-planning 추가: `AiPlanningService.findPrimaryHolding()`이 "첫 번째 계좌"를 가정하고 `accounts.get(0)`을 쓰는데 ORDER BY가 없으면 호출마다 다른 계좌가 나올 수 있어 생성 순서로 고정), `findAllByUserIdForUpdate(Long userId)`(mypage-account 추가 — `@Lock(PESSIMISTIC_WRITE)`, `AccountService.createAccount()`가 계좌 개수 확인과 저장 사이의 동시 개설 경합을 막는 데 사용. 처음에는 `UserRepository.findByIdForUpdate`로 User 행 전체를 잠갔는데, User는 계좌와 무관한 다른 기능도 앞으로 잠글 수 있는 공용 자원이라 Account 쪽만 잠그는 이 메서드로 좁혔다 — 매칭 행이 0개여도 idx_account_user 인덱스로 갭 락이 걸려 동시 삽입을 막는다), `findByAccountIdAndUserId(Long accountId, Long userId)`(mypage-account 추가 — 계좌 소유권 검증 겸 조회. order-market/order-limit의 `findByUserId(Long userId)`를 대체 — 유저가 계좌를 여러 개 가질 수 있어 단일 계좌를 가정한 조회는 더 이상 쓰지 않는다), `findByAccountIdAndUserIdForUpdate(Long accountId, Long userId)`(mypage-account 추가 — `@Lock(PESSIMISTIC_WRITE)`, `AccountService.chargeBalance()`가 chargeCount 확인과 반영 사이의 동시 충전 경합을 막는 데 사용. `findByAccountIdAndUserId`와 WHERE 절이 동일해 `FIND_BY_ACCOUNT_ID_AND_USER_ID` 상수로 공유), `findByAccountNumber(String accountNumber)`, `deleteByUserId(Long userId)` |
@@ -173,6 +173,8 @@
 | `ORDER_ALREADY_PROCESSED` | 409 (order-limit 추가 — 이미 `EXECUTED`/`CANCELLED` 상태인 주문을 다시 취소(`DELETE /api/orders/{orderId}`)하려는 경우) |
 | `ACCOUNT_LIMIT_EXCEEDED` | 400 (mypage-account 추가 — 유저가 이미 계좌 3개를 보유한 상태에서 추가 개설을 시도하는 경우) |
 | `CHARGE_LIMIT_EXCEEDED` | 400 (mypage-account 추가 — 계좌의 `chargeCount`가 이미 3회에 도달한 상태에서 추가 충전을 시도하는 경우. 문의(inquiries) 기능으로 관리자에게 요청하도록 안내) |
+| `SELF_STATUS_CHANGE_NOT_ALLOWED` | 400 (feature/admin-user 코드리뷰 추가 — 관리자가 `PATCH /api/admin/users/{userId}/status`로 본인 계정을 SUSPENDED로 정지시키려는 경우) |
+| `LAST_ADMIN_SUSPEND_NOT_ALLOWED` | 400 (feature/admin-user 코드리뷰 추가 — 활성 상태인 ADMIN이 본인 하나만 남은 상태에서 그 ADMIN을 정지시키려는 경우. 관리자 전원이 `/api/admin/**`에서 잠기는 lockout을 막기 위함) |
 
 ### 2-3. 예외/핸들러
 - `CustomException(ErrorCode errorCode)`, `CustomException(ErrorCode errorCode, Throwable cause)`
@@ -462,7 +464,7 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 | 엔드포인트 (OrderController 추가) | `POST /api/orders` (priceType=LIMIT 공용), `DELETE /api/orders/{orderId}` |
 | Service (OrderService 추가) | `createLimitOrder(Long userId, CreateOrderRequest request)`, `cancelOrder(Long userId, Long orderId)` |
 | Execution Service | `OrderExecutionService` — `execute(PendingOrderDto pendingOrder, long currentPrice)`, `checkAndExecute(String stockCode, long currentPrice)` |
-| Response DTO | `OrderHistoryResponse`(orderId, stockCode, stockName, orderType, priceType, orderPrice, execPrice, quantity, status, orderedAt, executedAt) |
+| Response DTO | `OrderHistoryResponse`(accountId, orderId, stockCode, stockName, orderType, priceType, orderPrice, execPrice, quantity, status, orderedAt, executedAt) |
 | Holding 공용 서비스 | `HoldingSettlementService`(domain/order/service) — `increaseOrCreate(Account account, String stockCode, String stockName, int quantity, long execPrice)`, `decrease(Holding holding, int quantity)`. `OrderService.executeBuy()`/`executeSell()`(시장가)와 `OrderExecutionService.executeBuy()`/`executeSell()`(지정가)가 각자 갖고 있던 동일한 보유종목 갱신 로직을 하나로 합친 것 |
 
 > feature/order-limit 정리: `createMarketOrder()`/`createLimitOrder()`의 매수·매도 체결이 각자
@@ -536,7 +538,7 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 |---|---|
 | 엔드포인트 (AccountController, OrderController, UserController 추가) | `GET /api/accounts/{accountId}/profit`, `GET /api/orders?accountId={accountId}`, `GET /api/orders/holdings?accountId={accountId}`, `GET /api/users/me`, `PATCH /api/users/me`, `POST /api/users/me/survey` |
 | Service | `AccountService.getProfit(Long userId, Long accountId)`, `AccountService.getOwnedAccount(Long userId, Long accountId)`(계좌 소유권 검증 공용 메서드) / `OrderService.getMyOrderHistory(Long userId, Long accountId)`, `OrderService.getMyHoldings(Long userId, Long accountId)` / `HoldingValuationService.getHoldingValuations(Long accountId)`(보유종목+시세 평가 공용 메서드, domain.order.service 소속) / `UserService` — `getMyInfo(Long userId)`, `updateMyInfo(Long userId, UpdateUserRequest request)`, `saveSurvey(Long userId, SurveyRequest request)` |
-| Response DTO | `ProfitResponse`(totalAsset, profitAmount, profitRate), `HoldingResponse`(stockCode, stockName, quantity, avgPrice, currentPrice, evaluationProfit), `UserInfoResponse`(userId, loginId, name, email, role, `status`), `InvestmentProfileResponse`(investmentTendency, fundTendency, investmentLevel) |
+| Response DTO | `ProfitResponse`(totalAsset, profitAmount, profitRate), `HoldingResponse`(accountId, stockCode, stockName, quantity, avgPrice, currentPrice, evaluationProfit), `UserInfoResponse`(userId, loginId, name, email, role, `status`), `InvestmentProfileResponse`(investmentTendency, fundTendency, investmentLevel) |
 | Request DTO | `UpdateUserRequest`(name, email — 둘 다 `@NotBlank` 필수), `SurveyRequest`(answers: `List<Integer>`, investmentTendency, fundTendency) |
 
 > **계좌 다중화 반영(원래 문서 초안은 계좌 1개 시절 기준이었음)**: `feature/mypage-account`부터
@@ -572,8 +574,8 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 > 참조했는데, 코드리뷰에서 CLAUDE.md 5번 규칙("도메인 간 직접 참조 대신 서비스 계층을 통해
 > 호출")과 어긋난다는 지적을 받아 정리했다.
 >
-> **`HoldingValuationDto`(코드리뷰 반영, `domain.order.dto`)**: `stockCode, stockName, quantity,
-> avgPrice, currentPrice` 필드를 갖는 레코드. 처음엔 이름이 `HoldingValuation`(Dto 접미사
+> **`HoldingValuationDto`(코드리뷰 반영, `domain.order.dto`)**: `accountId, stockCode, stockName,
+> quantity, avgPrice, currentPrice` 필드를 갖는 레코드. 처음엔 이름이 `HoldingValuation`(Dto 접미사
 > 없음)이었고 `Holding` 엔티티를 통째로 담고 있었는데, 코드리뷰에서 두 가지가 지적됐다 —
 > ① CLAUDE.md 5번 규칙의 "내부 DTO는 XxxDto" 이름 규칙 위반, ② account 도메인이
 > `HoldingValuationService`를 거치고도 여전히 `Holding` 엔티티의 메서드(`getQuantity()` 등)를
@@ -581,6 +583,17 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 > of(Holding holding, Long currentPrice)`로 엔티티에서 필요한 값만 꺼내 담도록 정리했고,
 > `HoldingResponse.of(Holding, long)`도 `HoldingResponse.of(HoldingValuationDto)`로 바꿔
 > 같은 라운드에 추가된 두 DTO가 동일하게 정적 팩토리 메서드를 쓰도록 맞췄다.
+>
+> **`accountId` 필드 추가 (feature/admin-user 코드리뷰 반영, v8)**: `AdminUserDetailResponse`가
+> 유저의 여러 계좌(최대 3개) holdings/orders를 하나의 flat list로 합치면서, 같은 종목을
+> 계좌 A/B에 각각 보유 중이면 관리자 화면에서 어느 계좌 소속인지 구분할 수 없는 문제가 있었다.
+> `HoldingValuationDto`/`HoldingResponse`/`OrderHistoryResponse`에 `accountId`를 추가해
+> (각각 `holding.getAccount().getAccountId()` / `order.getAccount().getAccountId()`에서 꺼냄)
+> 해결했다. 이 DTO들은 마이페이지(`GET /api/accounts/{accountId}/...`, `feature/mypage-*`)에서도
+> 재사용되는데, 마이페이지 쪽은 이미 accountId를 알고 있는 컨텍스트라 새 필드가 있어도 무해하다.
+> `HoldingValuationService`의 두 오버로드(`getHoldingValuations(Long)` / `getHoldingValuations(List<Long>)`)가
+> 갖고 있던 "시세 배치 조회 + 캐시 미스 시 평단가 폴백 매핑" 중복 로직도 이 라운드에 `valuate()`
+> private 메서드로 합쳤다(공개 시그니처·distinct() 여부 차이는 그대로 유지).
 >
 > **엔티티 메서드 추가**: `User.updateInfo(String name, String email)`(1-1 항목),
 > `InvestmentProfile.updateSurvey(int investmentTendency, int fundTendency, String surveyAnswers)`
@@ -784,13 +797,27 @@ confirmedCurrentPrices`(`executeTool()`이 `aiToolTaskExecutor`로 동시 실행
 
 ### 8-11. feature/simulation
 
+> **1차 PR(계산 엔진 + 조회 API) 범위 설명**: dev 기준 `GeminiApiClient`/`DartApiClient`/
+> `infra/naver/*` 등 외부 연동 클라이언트가 전부 빈 스텁이거나 아예 없다(실 구현은
+> `feature/ai-planning`에만 있으며 아직 dev에 미병합). 따라서 1차 PR은
+> `POST /api/simulations`(`runSimulation`, Gemini/DART/뉴스 연동)를 아예 포함하지
+> 않고, 순수 계산 로직(`ScenarioCalculator`)과 조회 API(`GET`)만 구현한다.
+> `runSimulation`은 `feature/ai-planning` 병합 후 별도 브랜치(예:
+> `feature/simulation-integration`)에서 이어간다. 아래 표의 `runSimulation`/
+> `SimulationRequest` 항목은 다음 PR에서 그대로 쓸 수 있도록 지금 정의만 해두는
+> 것이며 컨트롤러에 실제로 연결되지 않는다.
+
 | 구분 | 이름 |
 |---|---|
 | Controller | `SimulationController` |
-| 엔드포인트 | `POST /api/simulations`, `GET /api/simulations`, `GET /api/simulations/{simulationId}` |
-| Service | `SimulationService` — `runSimulation(Long userId, SimulationRequest request)`, `getMySimulations(Long userId)`, `getSimulation(Long userId, Long simulationId)` |
-| Request DTO | `SimulationRequest`(stockCode, targetAmount, targetMonths) |
-| Response DTO | `SimulationResponse`(simulationId, stockCode, bestScenario, baseScenario, worstScenario, bestReachDate, baseReachDate, worstReachDate) |
+| 엔드포인트 | `GET /api/simulations`, `GET /api/simulations/{simulationId}` (`POST /api/simulations`는 다음 PR) |
+| Service | `SimulationService` — `getMySimulations(Long userId)`, `getSimulation(Long userId, Long simulationId)` (`runSimulation(Long userId, SimulationRequest request)`는 다음 PR에서 구현) |
+| Request DTO | `SimulationRequest`(stockCode, investmentAmount, targetAmount, targetMonths) — targetMonths는 1~12 (`@Min(1) @Max(12)`) |
+| Response DTO | `SimulationResponse`(simulationId, stockCode, stockName, investmentAmount, targetAmount, targetMonths, bestScenario, baseScenario, worstScenario, bestReachDate, baseReachDate, worstReachDate, createdAt) — 정적 팩토리 `of(Simulation, List<ScenarioPointDto> best, List<ScenarioPointDto> base, List<ScenarioPointDto> worst)` |
+| 내부 DTO | `ScenarioPointDto`(date: `LocalDate`, value: `long`) — 시나리오 곡선 한 포인트. `date`는 매월 1일로 정규화. `value`는 `investmentAmount` 복리 계산 결과인 포트폴리오 평가금액(원 단위, `Math.round()` 반올림)이며 종목 주당가(`price`)가 아니므로 필드명을 `price`가 아닌 `value`로 둔다(코드베이스 전역에서 `price`는 이미 "주당 시장가" 의미로 쓰이고 있어 혼동 방지). 위치는 `domain/stock/dto/StockPriceDto.java`와 동일하게 `domain/ai/dto/` 바로 아래. |
+| 내부 DTO | `ScenarioDataJson`(best: `List<ScenarioPointDto>`, base: `List<ScenarioPointDto>`, worst: `List<ScenarioPointDto>`) — `simulations.scenario_data` JSON 컬럼의 저장 형태를 그대로 미러링하는 Jackson 매핑 전용 record. `SimulationService`가 조회 시 이 타입으로 역직렬화한다. `domain/ai/dto/` |
+| 계산 엔진 | `ScenarioCalculator`(`domain/ai/service`, 정적 유틸리티 클래스 — Spring 빈 아님) — `public static ScenarioSetDto calculate(long investmentAmount, double bestMonthlyGrowthRate, double baseMonthlyGrowthRate, double worstMonthlyGrowthRate, long targetAmount, int targetMonths, LocalDate startDate)`. 순서: ① best/worst는 `[-0.08, 0.08]`, base는 `[-0.02, 0.02]`로 각각 clamp(상수 `MAX_MONTHLY_GROWTH_RATE_WIDE`/`MAX_MONTHLY_GROWTH_RATE_NARROW`) → ② clamp된 세 값을 원래 라벨과 무관하게 내림차순 정렬해 큰 값부터 best/base/worst로 재배정(넓은 clamp 폭 때문에 라벨 순서가 뒤집힐 수 있어 라벨을 신뢰하지 않음, best≥base≥worst 보장) → ③ 재배정된 값으로 각각 month 0~targetMonths 곡선 생성(`value = investmentAmount * (1+rate)^month`, 반올림) → ④ 곡선에서 `value >= targetAmount`를 처음 만족하는 date를 reachDate로 산출(`investmentAmount >= targetAmount`면 month 0, 못 도달하면 null). `startDate`는 순수 함수 보장을 위한 외부 주입 파라미터(내부에서 `LocalDate.now()` 호출 금지) — 호출 측(다음 PR의 `runSimulation`)이 `LocalDate.now()`를 넘긴다. |
+| 내부 DTO | `ScenarioSetDto`(bestPoints/basePoints/worstPoints: `List<ScenarioPointDto>`, bestReachDate/baseReachDate/worstReachDate: `LocalDate`) — `ScenarioCalculator.calculate()`의 반환 타입. `domain/ai/dto/` |
 
 ### 8-12. feature/notification
 
@@ -864,7 +891,7 @@ confirmedCurrentPrices`(`executeTool()`이 `aiToolTaskExecutor`로 동시 실행
 |---|---|
 | Controller | `AdminUserController` |
 | 엔드포인트 | `GET /api/admin/users`, `GET /api/admin/users/{userId}`, `PATCH /api/admin/users/{userId}/status` |
-| Service | `AdminUserService` — `getUsers(Pageable pageable)`, `getUserDetail(Long userId)`, `updateUserStatus(Long userId, AdminUserStatusRequest request)` |
+| Service | `AdminUserService` — `getUsers(Pageable pageable)`, `getUserDetail(Long userId)`, `updateUserStatus(Long adminUserId, Long userId, AdminUserStatusRequest request)` |
 | Request DTO | `AdminUserStatusRequest`(status) |
 | Response DTO | `AdminUserListResponse`(userId, loginId, name, email, role, status, createdAt), `AdminUserDetailResponse`(기본정보 필드 + `accounts`: `List<AccountInfoResponse>` 재사용 + `holdings`: `List<HoldingResponse>` 재사용 + `orders`: `List<OrderHistoryResponse>` 재사용) |
 
@@ -892,6 +919,37 @@ confirmedCurrentPrices`(`executeTool()`이 `aiToolTaskExecutor`로 동시 실행
 > 목록에는 안 보이는데 userId를 직접 넣으면 상세 조회·상태변경이 되는 불일치를 없애기 위해서다.
 > 탈퇴 유저에 대해서는 존재 여부를 굳이 구분해서 알려주지 않고 미가입 userId와 동일하게
 > `USER_NOT_FOUND`(404)로 응답한다.
+>
+> **정지(SUSPENDED) 가드 (코드리뷰 반영, v8)**: `updateUserStatus()`가 검증 없이 아무 유저나
+> SUSPENDED로 바꿀 수 있으면, 관리자가 (1) 본인 계정을 정지시키거나 (2) 활성 상태인 마지막
+> ADMIN을 정지시키는 경우 관리자 전원이 `/api/admin/**`에서 즉시 잠기고(다음 요청부터
+> `CustomUserDetailsService`가 `USER_SUSPENDED`로 막음) DB를 직접 고치지 않는 한 되돌릴 방법이
+> 없다. 이를 막기 위해 `AdminUserController`가 `SecurityUtil.getCurrentUserId()`로 요청을 보낸
+> 관리자의 userId를 꺼내 `adminUserId`로 넘기도록 시그니처를 `updateUserStatus(Long userId,
+> AdminUserStatusRequest request)`에서 `updateUserStatus(Long adminUserId, Long userId,
+> AdminUserStatusRequest request)`로 바꿨다(`AdminInquiryService.answerInquiry(Long adminUserId,
+> Long inquiryId, AdminInquiryAnswerRequest request)`, 8-18과 동일한 패턴 — 서비스가
+> `SecurityContext`에 직접 의존하지 않도록 컨트롤러에서 꺼내 파라미터로 넘긴다).
+>
+> `updateUserStatus()`는 SUSPENDED 요청을 내부 `suspend(Long adminUserId, User targetUser)`로
+> 위임하는데, `targetUser.getStatus()`가 이미 `SUSPENDED`면 곧바로 반환한다 — 같은 요청이
+> 재시도(타임아웃 후 재전송 등)로 두 번 들어와도 두 번째 호출이 "활성 admin이 이거 하나뿐이라
+> 정지 못 함" 같은 엉뚱한 예외를 던지지 않고 멱등하게 통과하도록 하기 위함이다. 아직 ACTIVE인
+> 경우에만 `validateSuspendable(Long adminUserId, User targetUser)`를 거쳐 ①
+> `targetUser.getUserId().equals(adminUserId)`면 `ErrorCode.SELF_STATUS_CHANGE_NOT_ALLOWED`,
+> ② `targetUser.getRole() == Role.ADMIN`이면 `UserRepository.
+> findAllByRoleAndStatusAndIsActiveTrueForUpdate(Role.ADMIN, UserStatus.ACTIVE)`로 활성 ADMIN
+> 행들에 비관적 락을 건 뒤 그 목록 크기가 1 이하면 `ErrorCode.LAST_ADMIN_SUSPEND_NOT_ALLOWED`를
+> 던진다. 락 없이 단순 `count` 쿼리만 썼다면, 활성 ADMIN이 정확히 2명일 때 서로 다른 admin을
+> 동시에 정지시키는 두 요청이 각자 "정지 전 카운트=2"를 보고 둘 다 통과해버려 활성 admin이
+> 0명이 되는 경쟁 상태가 가능했다 — `AccountRepository.findAllByUserIdForUpdate`와 동일한
+> 패턴(잠금 대상 행 목록을 그대로 개수 확인에도 재사용)으로 해결했다. ACTIVE로 되돌리는
+> 요청(`activate()`)은 위험하지 않으므로 이 검증을 거치지 않는다.
+>
+> `User.deactivate()`(본인 탈퇴, 아직 어디서도 호출되지 않음)에는 향후 본인 탈퇴 기능을 구현할
+> 때 활성 상태인 마지막 ADMIN 자기 탈퇴로 동일한 lockout이 재현되지 않도록, 호출 전 같은 검증을
+> 거쳐야 한다는 주의 주석만 남겨뒀다 — 아직 존재하지 않는 호출부를 위한 재사용 가능한 가드
+> 컴포넌트를 미리 만들지는 않는다(CLAUDE.md — 가상의 미래 요구사항을 위해 설계하지 않음).
 
 ### 8-18. feature/admin-inquiry (v8 신규 — 관리자 측 문의 확인/답변)
 

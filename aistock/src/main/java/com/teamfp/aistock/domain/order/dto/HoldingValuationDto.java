@@ -10,6 +10,7 @@ import com.teamfp.aistock.domain.order.entity.Holding;
  * HoldingResponse 목록)로 가공해 쓴다.
  */
 public record HoldingValuationDto(
+        Long accountId,
         String stockCode,
         String stockName,
         int quantity,
@@ -25,6 +26,7 @@ public record HoldingValuationDto(
     public static HoldingValuationDto of(Holding holding, Long currentPrice) {
         long resolvedPrice = holding.resolveValuationPrice(currentPrice);
         return new HoldingValuationDto(
+                holding.getAccount().getAccountId(),
                 holding.getStockCode(),
                 holding.getStockName(),
                 holding.getQuantity(),

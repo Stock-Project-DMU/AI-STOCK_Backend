@@ -19,6 +19,8 @@ public enum ErrorCode {
     INVALID_ADMIN_CODE(HttpStatus.BAD_REQUEST, "INVALID_ADMIN_CODE", "관리자 코드가 일치하지 않습니다."),
     ACCOUNT_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "ACCOUNT_LIMIT_EXCEEDED", "계좌는 최대 3개까지 만들 수 있습니다."),
     CHARGE_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "CHARGE_LIMIT_EXCEEDED", "자동 충전 가능 횟수(3회)를 초과했습니다. 관리자에게 문의해 주세요."),
+    SELF_STATUS_CHANGE_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "SELF_STATUS_CHANGE_NOT_ALLOWED", "본인 계정은 정지할 수 없습니다."),
+    LAST_ADMIN_SUSPEND_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "LAST_ADMIN_SUSPEND_NOT_ALLOWED", "마지막 남은 관리자는 정지할 수 없습니다."),
 
     // 401 Unauthorized
     INVALID_PASSWORD(HttpStatus.UNAUTHORIZED, "INVALID_PASSWORD", "비밀번호가 일치하지 않습니다."),
@@ -38,6 +40,7 @@ public enum ErrorCode {
     INQUIRY_NOT_FOUND(HttpStatus.NOT_FOUND, "INQUIRY_NOT_FOUND", "문의를 찾을 수 없습니다."),
     NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "NOTIFICATION_NOT_FOUND", "알림을 찾을 수 없습니다."),
     AI_SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "AI_SESSION_NOT_FOUND", "AI 상담 세션을 찾을 수 없습니다."),
+    SIMULATION_NOT_FOUND(HttpStatus.NOT_FOUND, "SIMULATION_NOT_FOUND", "시뮬레이션을 찾을 수 없습니다."),
 
     // 409 Conflict
     DUPLICATE_LOGIN_ID(HttpStatus.CONFLICT, "DUPLICATE_LOGIN_ID", "이미 존재하는 아이디입니다."),
@@ -54,6 +57,7 @@ public enum ErrorCode {
 
     // 500 Internal Server Error
     REDIS_SERIALIZATION_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "REDIS_SERIALIZATION_ERROR", "Redis 데이터 직렬화 에러가 발생했습니다."),
+    SCENARIO_DATA_PARSE_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "SCENARIO_DATA_PARSE_ERROR", "시나리오 데이터 파싱 중 오류가 발생했습니다."),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_SERVER_ERROR", "서버 내부 에러가 발생했습니다."),
 
     // 502 Bad Gateway

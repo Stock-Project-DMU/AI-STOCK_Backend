@@ -87,6 +87,11 @@ public class User {
      * social_accounts/investment_profile/accounts 등 자식 테이블 삭제와 Redis 정리(1·2단계)는
      * 여러 도메인의 Repository를 조합해야 하는 탈퇴 서비스 로직(예: feature/user-withdrawal)에서
      * 이 메서드 호출 "이후"에 순서대로 처리해야 한다 — 이 메서드 하나로 탈퇴가 완결되지 않는다.
+     *
+     * 주의: 활성 상태인 마지막 ADMIN이 자기 자신을 탈퇴시키면 AdminUserService.
+     * validateSuspendable()이 관리자 정지(suspend)에 대해 막아주는 lockout(관리자 전원이
+     * /api/admin/** 밖으로 밀려나는 상황)이 이 경로로는 그대로 재현될 수 있다. 본인 탈퇴 기능을
+     * 구현할 때는 이 메서드를 호출하기 전에 반드시 동일한 마지막-admin 검증을 거쳐야 한다.
      */
     public void deactivate() {
         this.loginId = "deleted_" + this.userId;

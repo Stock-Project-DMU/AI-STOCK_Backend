@@ -7,6 +7,7 @@ import com.teamfp.aistock.domain.order.dto.HoldingValuationDto;
  * avgPrice로 대체를 마친 값이다 — 캐시가 비어있었던 경우 evaluationProfit이 0으로 표시된다.
  */
 public record HoldingResponse(
+        Long accountId,
         String stockCode,
         String stockName,
         int quantity,
@@ -18,6 +19,7 @@ public record HoldingResponse(
     public static HoldingResponse of(HoldingValuationDto valuation) {
         long evaluationProfit = (valuation.currentPrice() - valuation.avgPrice()) * valuation.quantity();
         return new HoldingResponse(
+                valuation.accountId(),
                 valuation.stockCode(),
                 valuation.stockName(),
                 valuation.quantity(),
