@@ -61,6 +61,8 @@ jwt:
 ls:
   mode: real
   websocket-url: ${LS_WEBSOCKET_URL}
+  app-key: ${LS_APP_KEY}
+  app-secret: ${LS_APP_SECRET}
 
 admin:
   signup-code: ${ADMIN_SIGNUP_CODE}

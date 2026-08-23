@@ -159,8 +159,9 @@ public class LsSectorApiClient {
             Object outBlockObj = response != null ? response.get("t8425OutBlock") : null;
             if (!(outBlockObj instanceof List)) {
                 log.warn("LS 전체테마 응답에서 t8425OutBlock을 찾지 못함 - 응답: {}", response);
-                themeCodeCache = Map.of();
-                return themeCodeCache;
+                // 캐시 필드 자체는 채우지 않아 다음 요청에서 다시 시도할 수 있게 한다
+                // (아래 catch 블록과 동일한 방어 원칙 — 일시적 응답 이상으로 영구 오염 방지).
+                return Map.of();
             }
             List<Map<String, Object>> rows = (List<Map<String, Object>>) outBlockObj;
             Map<String, String> cache = new java.util.LinkedHashMap<>();

@@ -64,8 +64,9 @@ class LiveGeminiManualCheck {
     private static final String NEW_QUESTION = "근데 내 의도는 이게아니라 다른 대기업의 인수합병사례 를 물어본거긴해";
 
     private static final Long SESSION_ID = (long) (10 + SESSION_NUMBER);
-    private static final Path TRANSCRIPT_PATH = Path.of(
-            "C:\\Users\\jin05\\AppData\\Local\\Temp\\claude\\C--Users-jin05-Desktop-project-AI-STOCK-Backend\\d50592c5-2205-44b0-9770-d983a73dbaaa\\scratchpad\\chat-session-" + SESSION_NUMBER + ".log");
+    // 개인 PC 경로 대신 OS 임시 디렉터리를 사용 — 실행하는 사람의 환경에 상관없이 동작한다.
+    private static final Path TRANSCRIPT_PATH = Path.of(System.getProperty("java.io.tmpdir"),
+            "ai-stock-live-gemini-check", "chat-session-" + SESSION_NUMBER + ".log");
 
     @Test
     @EnabledIfEnvironmentVariable(named = "RUN_LIVE_GEMINI_TEST", matches = "true")
@@ -209,6 +210,7 @@ class LiveGeminiManualCheck {
         for (AiPlanningMessage message : storedMessages) {
             outLines.add(message.getRole() + "|" + message.getContent().replace("\n", "\\n"));
         }
+        Files.createDirectories(TRANSCRIPT_PATH.getParent());
         Files.write(TRANSCRIPT_PATH, outLines, StandardCharsets.UTF_8);
     }
 }

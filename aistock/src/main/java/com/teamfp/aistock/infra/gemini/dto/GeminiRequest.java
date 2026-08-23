@@ -37,8 +37,8 @@ public record GeminiRequest(String systemInstruction, String prompt, List<Histor
      * 강제하는 마지막 라운드에는 ANSWER를 골라 넘긴다.
      */
     public enum GeminiModel {
-        JUDGE,  // gemini-2.5-flash-lite — 도구 필요 여부 판단, 단순 대화(잡담·되묻기 등)
-        ANSWER  // gemini-2.5-flash — 여러 도구 실행 결과+포트폴리오+투자성향을 종합한 최종 답변
+        JUDGE,  // gemini-3.1-flash-lite — 도구 필요 여부 판단, 단순 대화(잡담·되묻기 등)
+        ANSWER  // gemini-3.1-flash-lite — 여러 도구 실행 결과+포트폴리오+투자성향을 종합한 최종 답변
     }
 
     public record HistoryTurn(String role, String content) {

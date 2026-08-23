@@ -54,13 +54,15 @@ public class LsEtfApiClient {
             if (price == null) {
                 return Optional.empty();
             }
+            Long changeAmount = parseLong(outBlock.get("change"));
+            Long volume = parseLong(outBlock.get("volume"));
             return Optional.of(LsCurrentPriceDetailDto.builder()
                     .stockCode(stockCode)
                     .stockName(stringOf(outBlock.get("hname")))
                     .currentPrice(price)
-                    .changeAmount(parseLong(outBlock.get("change")))
+                    .changeAmount(changeAmount != null ? changeAmount : 0L)
                     .changeRate(parseDouble(outBlock.get("diff")))
-                    .volume(parseLong(outBlock.get("volume")))
+                    .volume(volume != null ? volume : 0L)
                     .high52w(parseLong(outBlock.get("high52w")))
                     .low52w(parseLong(outBlock.get("low52w")))
                     .updatedAt(java.time.LocalDateTime.now())
