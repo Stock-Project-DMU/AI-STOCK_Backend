@@ -16,6 +16,7 @@ import com.teamfp.aistock.domain.account.entity.AccountStatus;
 import com.teamfp.aistock.domain.account.repository.AccountRepository;
 import com.teamfp.aistock.domain.admin.dto.request.AdminAccountStatusRequest;
 import com.teamfp.aistock.domain.admin.dto.response.AdminAccountDetailResponse;
+import com.teamfp.aistock.domain.order.service.OrderService;
 import com.teamfp.aistock.domain.user.entity.Role;
 import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.entity.UserStatus;
@@ -24,6 +25,8 @@ import com.teamfp.aistock.global.exception.ErrorCode;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -31,6 +34,9 @@ class AdminAccountServiceTest {
 
     @Mock
     private AccountRepository accountRepository;
+
+    @Mock
+    private OrderService orderService;
 
     private AdminAccountService adminAccountService;
 
@@ -40,7 +46,7 @@ class AdminAccountServiceTest {
 
     @BeforeEach
     void setUp() {
-        adminAccountService = new AdminAccountService(accountRepository);
+        adminAccountService = new AdminAccountService(accountRepository, orderService);
 
         User user = User.builder()
                 .loginId("tester")
@@ -86,7 +92,7 @@ class AdminAccountServiceTest {
     }
 
     @Test
-    @DisplayName("updateAccountStatus()에 SUSPENDED를 보내면 계좌 status가 SUSPENDED로 바뀐다")
+    @DisplayName("updateAccountStatus()에 SUSPENDED를 보내면 계좌 status가 SUSPENDED로 바뀌고 기존 PENDING 주문을 함께 취소한다")
     void updateAccountStatus_suspend() {
         when(accountRepository.findAccountWithUserById(ACCOUNT_ID)).thenReturn(Optional.of(account));
 
@@ -95,10 +101,11 @@ class AdminAccountServiceTest {
 
         assertThat(result.status()).isEqualTo(AccountStatus.SUSPENDED);
         assertThat(account.getStatus()).isEqualTo(AccountStatus.SUSPENDED);
+        verify(orderService).cancelAllPendingOrdersForSuspension(account);
     }
 
     @Test
-    @DisplayName("updateAccountStatus()에 ACTIVE를 보내면 계좌 status가 ACTIVE로 되돌아온다")
+    @DisplayName("updateAccountStatus()에 ACTIVE를 보내면 계좌 status가 ACTIVE로 되돌아오고 주문 취소는 호출하지 않는다")
     void updateAccountStatus_activate() {
         account.suspend();
         when(accountRepository.findAccountWithUserById(ACCOUNT_ID)).thenReturn(Optional.of(account));
@@ -108,6 +115,7 @@ class AdminAccountServiceTest {
 
         assertThat(result.status()).isEqualTo(AccountStatus.ACTIVE);
         assertThat(account.getStatus()).isEqualTo(AccountStatus.ACTIVE);
+        verify(orderService, never()).cancelAllPendingOrdersForSuspension(account);
     }
 
     @Test

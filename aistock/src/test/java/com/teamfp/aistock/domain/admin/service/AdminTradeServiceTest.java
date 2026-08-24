@@ -96,7 +96,7 @@ class AdminTradeServiceTest {
 
         assertThat(result.getContent()).hasSize(1);
         AdminTradeResponse response = result.getContent().get(0);
-        assertThat(response.orderId()).isEqualTo(ORDER_ID);
+        assertThat(response.order().orderId()).isEqualTo(ORDER_ID);
         assertThat(response.userName()).isEqualTo("테스터");
         assertThat(response.loginId()).isEqualTo("tester");
     }
@@ -109,8 +109,8 @@ class AdminTradeServiceTest {
 
         AdminTradeResponse result = adminTradeService.getTradeDetail(ORDER_ID);
 
-        assertThat(result.orderId()).isEqualTo(ORDER_ID);
-        assertThat(result.stockCode()).isEqualTo("005930");
+        assertThat(result.order().orderId()).isEqualTo(ORDER_ID);
+        assertThat(result.order().stockCode()).isEqualTo("005930");
     }
 
     @Test

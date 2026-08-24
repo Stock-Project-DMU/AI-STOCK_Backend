@@ -289,6 +289,30 @@ public class OrderService {
     }
 
     /**
+     * 관리자가 계좌를 SUSPENDED로 정지시킬 때 함께 호출된다(AdminAccountService.
+     * updateAccountStatus()). cancelOrder()와 달리 여기서는 이미 계좌가 SUSPENDED로 바뀐
+     * 뒤이므로 SUSPENDED 차단 검증을 하지 않는다 — 이 메서드 자체가 정지 처리의 일부다.
+     *
+     * 정지 시점에 기존 PENDING 지정가 주문을 그대로 두면 두 가지 문제가 있다: (1) tick이
+     * 들어올 때마다 OrderExecutionService.execute()가 계좌 상태와 무관하게 그대로 체결시켜
+     * "정지 중에는 매수·매도를 막는다"는 CLAUDE.md 8번 정책이 깨지고, (2) cancelOrder()는
+     * SUSPENDED 계좌의 취소 요청 자체를 막아버려 사용자가 그 주문을 스스로 취소할 방법도
+     * 없어진다. 그래서 정지 시점에 관리자가 대신 일괄 취소해 두 문제를 한 번에 없앤다.
+     */
+    @Transactional
+    public void cancelAllPendingOrdersForSuspension(Account account) {
+        List<Order> pendingOrders = orderRepository.findAllPendingByAccountIdForUpdate(account.getAccountId());
+
+        for (Order order : pendingOrders) {
+            if (order.getOrderType() == OrderType.BUY) {
+                account.unfreezeForOrder(order.getOrderPrice() * order.getQuantity());
+            }
+            order.cancel();
+            registerAfterCommit(() -> redisPendingOrderService.removePendingOrder(order.getStockCode(), order.getOrderId()));
+        }
+    }
+
+    /**
      * 현재 진행 중인 트랜잭션이 실제로 커밋된 뒤에만 Redis 반영 작업을 실행하도록 등록한다.
      * createLimitOrder()/cancelOrder()가 실제 서비스에서 호출될 때는 항상 Spring이 관리하는
      * @Transactional 안이라 트랜잭션 동기화가 활성화돼 있다. 다만 단위 테스트처럼 실제 트랜잭션
