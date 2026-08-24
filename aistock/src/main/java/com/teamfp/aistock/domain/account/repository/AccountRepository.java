@@ -54,6 +54,12 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
 
     Optional<Account> findByAccountNumber(String accountNumber);
 
+    // 관리자 계좌 상세 조회 — account.user까지 fetch join으로 한 번에 즉시 로딩한다
+    // (AdminAccountService가 userName을 채워야 하는데, admin은 userId를 모르는 상태로
+    // accountId만 갖고 조회하므로 findByAccountIdAndUserId를 쓸 수 없다).
+    @Query("select a from Account a join fetch a.user where a.accountId = :accountId")
+    Optional<Account> findAccountWithUserById(@Param("accountId") Long accountId);
+
     @Modifying
     @Query("delete from Account a where a.user.userId = :userId")
     void deleteByUserId(@Param("userId") Long userId);
