@@ -760,8 +760,11 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 > `Inquiry` Entity·`InquiryRepository`를 공유하되 Controller/Service/DTO는 분리한다.
 >
 > `InquiryRepository.findAllByOrderByStatusDescCreatedAtDesc()`(무인자, `List` 반환 —
-> `feature/inquiry`의 `InquiryRepositoryIntegrationTest`가 이미 사용 중이라 그대로 둠)에
-> 같은 정렬 기준의 `Pageable` 오버로드(`Page<Inquiry>` 반환)를 추가해 `getInquiries()`가 쓴다.
+> `feature/inquiry`의 `InquiryRepositoryIntegrationTest`가 이미 사용 중이라 그대로 둠)와 별도로,
+> 같은 정렬 기준의 `Pageable` 오버로드는 `findAllWithUserOrderByStatusDescCreatedAtDesc(Pageable)`
+> (`Page<Inquiry>` 반환)로 이름을 분리한다. `AdminInquiryResponse.from()`이 `inquiry.getUser()`를
+> 참조하므로 파생 쿼리 대신 `left join fetch i.user`를 쓰는 `@Query`로 작성해 `getInquiries()`
+> 목록 조회 시 페이지당 N+1 SELECT가 발생하지 않도록 한다.
 >
 > **재답변(덮어쓰기) 정책**: `answerInquiry`는 대상 문의가 이미 `ANSWERED`여도 소유권/상태
 > 검증 없이 그대로 `Inquiry.answer()`를 호출해 기존 답변을 덮어쓴다 — 오타 정정 등 관리자가

@@ -30,7 +30,7 @@ public class AdminInquiryService {
 
     @Transactional(readOnly = true)
     public Page<AdminInquiryResponse> getInquiries(Pageable pageable) {
-        return inquiryRepository.findAllByOrderByStatusDescCreatedAtDesc(pageable)
+        return inquiryRepository.findAllWithUserOrderByStatusDescCreatedAtDesc(pageable)
                 .map(AdminInquiryResponse::from);
     }
 
