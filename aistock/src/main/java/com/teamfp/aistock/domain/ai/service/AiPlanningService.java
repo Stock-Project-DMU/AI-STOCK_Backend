@@ -1203,13 +1203,26 @@ public class AiPlanningService {
             // 동시에 맡겨 가장 느린 도구 하나만큼만 기다리게 한다. join()은 리스트 순서대로
             // 부르지만 그 시점엔 이미 전부 백그라운드에서 실행 중이라 결과 순서(=요청 순서)는
             // 그대로 유지된다.
-            List<CompletableFuture<GeminiRequest.FunctionExchange>> exchangeFutures = response.functionCalls().stream()
-                    .map(functionCall -> CompletableFuture.supplyAsync(
-                            () -> new GeminiRequest.FunctionExchange(
-                                    functionCall.name(), functionCall.args(), functionCall.thoughtSignature(),
-                                    executeTool(sessionId, functionCall, confirmedCurrentPrices)),
-                            aiToolTaskExecutor))
-                    .toList();
+            //
+            // aiToolTaskExecutor(코어10/최대20/큐200)가 포화되면 supplyAsync()가
+            // RejectedExecutionException을 즉시 던진다(코드리뷰 반영) — 이 시점엔 이미
+            // sendMessage()에서 rateLimiterService.increment()로 이번 턴 할당량이 소모된
+            // 뒤라, 여기서 예외가 그대로 위로 새어나가면 사용자는 500만 받고 대화 기록도 안
+            // 남는다(위 "tools 없이 보낸 마지막 라운드" 방어와 같은 원칙). 잡아서 다른
+            // 도구 실패와 동일하게 안내 문구로 이번 턴을 끝낸다.
+            List<CompletableFuture<GeminiRequest.FunctionExchange>> exchangeFutures;
+            try {
+                exchangeFutures = response.functionCalls().stream()
+                        .map(functionCall -> CompletableFuture.supplyAsync(
+                                () -> new GeminiRequest.FunctionExchange(
+                                        functionCall.name(), functionCall.args(), functionCall.thoughtSignature(),
+                                        executeTool(sessionId, functionCall, confirmedCurrentPrices)),
+                                aiToolTaskExecutor))
+                        .toList();
+            } catch (java.util.concurrent.RejectedExecutionException e) {
+                log.warn("도구 실행 스레드풀 포화로 요청 거부 - userId: {}, sessionId: {}", userId, sessionId);
+                return new GeminiResponse("죄송합니다, 지금 요청이 많이 몰려 처리하지 못했습니다 — 잠시 후 다시 시도해 주시겠어요?", null);
+            }
             List<GeminiRequest.FunctionExchange> thisRoundExchanges = exchangeFutures.stream()
                     .map(CompletableFuture::join)
                     .toList();
@@ -1246,17 +1259,27 @@ public class AiPlanningService {
             List<ConfirmedPrice> confirmedCurrentPrices) {
         // 실시간 시세는 5초마다 바뀌는 값이라, 나머지 도구(재무제표/공시/뉴스 등 세션 내내
         // 크게 안 바뀌는 데이터)와 같은 30분짜리 세션 캐시에 태우면 낡은 가격을 계속 재사용하게
-        // 된다 — 그래서 공용 캐시 경로를 타지 않고 매번 새로 조회한다. get_current_price와
-        // get_multi_stock_price 둘 다 시세 조회 도구라 여기서 함께 처리한다 — get_multi_stock_price가
-        // 이 분기에서 빠진 채 공용 캐시 경로만 타면, 캐시 히트 시 executeMultiStockPriceLookup()이
-        // 아예 호출되지 않아 confirmedCurrentPrices가 채워지지 않고 Gemini 환각 방지 안전장치(아래
-        // ConfirmedPrice 참고)가 캐시 유효시간(30분) 동안 조용히 꺼진 상태가 된다(코드리뷰 반영).
-        if (CURRENT_PRICE_TOOL_NAME.equals(functionCall.name())
-                || MULTI_STOCK_PRICE_TOOL_NAME.equals(functionCall.name())) {
+        // 된다 — 그래서 공용 캐시 경로를 타지 않고 매번 새로 조회한다. get_current_price/
+        // get_multi_stock_price(ConfirmedPrice 확정 패턴 적용 대상)뿐 아니라 get_call_auction_price
+        // (동시호가 예상체결가 — 그 순간에만 유효)와 get_etf_info의 PRICE 모드(ETF 현재가. 반면
+        // CONSTITUENTS 모드는 구성종목 비중이라 자주 안 바뀌므로 캐시 대상으로 남겨둔다)도 같은
+        // 이유로 캐시를 우회해야 한다 — 이 중 하나라도 여기서 빠진 채 공용 캐시 경로만 타면, 캐시
+        // 히트 시 해당 도구의 실제 조회가 아예 호출되지 않아 낡은 값이 캐시 유효시간(30분) 동안
+        // 조용히 재사용된다(get_multi_stock_price에서 실제로 있었던 버그, 코드리뷰로 발견돼
+        // get_etf_info/get_call_auction_price에도 같은 유형이 남아있는 걸 함께 확인해 반영).
+        boolean isLivePriceTool = CURRENT_PRICE_TOOL_NAME.equals(functionCall.name())
+                || MULTI_STOCK_PRICE_TOOL_NAME.equals(functionCall.name())
+                || CALL_AUCTION_PRICE_TOOL_NAME.equals(functionCall.name())
+                || (ETF_INFO_TOOL_NAME.equals(functionCall.name())
+                        && !"CONSTITUENTS".equals(stringArg(functionCall.args(), "infoType")));
+        if (isLivePriceTool) {
             try {
-                return CURRENT_PRICE_TOOL_NAME.equals(functionCall.name())
-                        ? executeCurrentPriceLookup(functionCall, confirmedCurrentPrices)
-                        : executeMultiStockPriceLookup(functionCall, confirmedCurrentPrices);
+                return switch (functionCall.name()) {
+                    case CURRENT_PRICE_TOOL_NAME -> executeCurrentPriceLookup(functionCall, confirmedCurrentPrices);
+                    case MULTI_STOCK_PRICE_TOOL_NAME -> executeMultiStockPriceLookup(functionCall, confirmedCurrentPrices);
+                    case CALL_AUCTION_PRICE_TOOL_NAME -> executeCallAuctionPriceLookup(functionCall);
+                    default -> executeEtfInfoLookup(functionCall);
+                };
             } catch (RuntimeException e) {
                 log.warn("도구 실행 중 예상치 못한 오류 - name: {}, args: {}, 사유: {}",
                         functionCall.name(), functionCall.args(), e.getMessage());
@@ -1292,9 +1315,7 @@ public class AiPlanningService {
                 case TECHNICAL_SIGNAL_TOOL_NAME -> executeTechnicalSignalLookup(functionCall);
                 case HISTORICAL_PRICE_TOOL_NAME -> executeHistoricalPriceLookup(functionCall);
                 case RISK_FLAG_TOOL_NAME -> executeRiskFlagLookup(functionCall);
-                case CALL_AUCTION_PRICE_TOOL_NAME -> executeCallAuctionPriceLookup(functionCall);
                 case STOCK_CREDIT_INFO_TOOL_NAME -> executeStockCreditInfoLookup(functionCall);
-                case ETF_INFO_TOOL_NAME -> executeEtfInfoLookup(functionCall);
                 case PROGRAM_TRADING_SUMMARY_TOOL_NAME -> executeProgramTradingSummaryLookup(functionCall);
                 case INVESTOR_TREND_SUMMARY_TOOL_NAME -> executeInvestorTrendSummaryLookup(functionCall);
                 case NEW_LISTING_STOCKS_TOOL_NAME -> executeNewListingStocksLookup(functionCall);
@@ -1718,7 +1739,17 @@ public class AiPlanningService {
             return Map.of("result", "'%s'의 종목코드를 찾지 못해 %s 국내(코스피/코스닥) 상장 종목이 아니거나(해외 상장 종목 등) 회사명이 정확하지 않을 수 있습니다."
                     .formatted(companyName, notFoundMessage));
         }
-        return lookup.apply(stockCode.get());
+        // withResolvedCorpCode()와 동일한 이유로 lookup 실행을 try로 감싼다 — LS 조회 자체는
+        // 실패해도 예외 없이 빈 결과를 주는 경우가 많지만, 모든 LS 호출이 거치는
+        // LsAccessTokenProvider는 인증 실패 시 CustomException을 던진다(코드리뷰 반영). 감싸지
+        // 않으면 이 예외가 executeTool()의 최상위 catch까지 그대로 올라가 도구별 안내 문구
+        // 대신 뭉뚱그린 "요청을 처리하는 중 오류가 발생했습니다"만 반환된다.
+        try {
+            return lookup.apply(stockCode.get());
+        } catch (CustomException e) {
+            log.warn("LS 조회 실패 - companyName: {}, 사유: {}", companyName, e.getMessage());
+            return errorResult(notFoundMessage);
+        }
     }
 
     // 최근 10일간 외국인/기관 순매수 동향(t1716)을 조회한다. LsInvestorTrendApiClient는 실패해도
