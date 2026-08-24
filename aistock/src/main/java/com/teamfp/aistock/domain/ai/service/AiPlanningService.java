@@ -1244,19 +1244,12 @@ public class AiPlanningService {
     private Map<String, Object> executeTool(
             Long sessionId, GeminiResponse.FunctionCall functionCall,
             List<ConfirmedPrice> confirmedCurrentPrices) {
-        // 실시간 시세는 5초마다 바뀌는 값이라, 나머지 도구(재무제표/공시/뉴스 등 세션 내내
+        // 실시간 시세는 5초마다 바뀌는 값이라, 나머지 다섯 도구(재무제표/공시/뉴스 등 세션 내내
         // 크게 안 바뀌는 데이터)와 같은 30분짜리 세션 캐시에 태우면 낡은 가격을 계속 재사용하게
-        // 된다 — 그래서 공용 캐시 경로를 타지 않고 매번 새로 조회한다. get_current_price와
-        // get_multi_stock_price 둘 다 시세 조회 도구라 여기서 함께 처리한다 — get_multi_stock_price가
-        // 이 분기에서 빠진 채 공용 캐시 경로만 타면, 캐시 히트 시 executeMultiStockPriceLookup()이
-        // 아예 호출되지 않아 confirmedCurrentPrices가 채워지지 않고 Gemini 환각 방지 안전장치(아래
-        // ConfirmedPrice 참고)가 캐시 유효시간(30분) 동안 조용히 꺼진 상태가 된다(코드리뷰 반영).
-        if (CURRENT_PRICE_TOOL_NAME.equals(functionCall.name())
-                || MULTI_STOCK_PRICE_TOOL_NAME.equals(functionCall.name())) {
+        // 된다 — 그래서 공용 캐시 경로를 타지 않고 매번 새로 조회한다.
+        if (CURRENT_PRICE_TOOL_NAME.equals(functionCall.name())) {
             try {
-                return CURRENT_PRICE_TOOL_NAME.equals(functionCall.name())
-                        ? executeCurrentPriceLookup(functionCall, confirmedCurrentPrices)
-                        : executeMultiStockPriceLookup(functionCall, confirmedCurrentPrices);
+                return executeCurrentPriceLookup(functionCall, confirmedCurrentPrices);
             } catch (RuntimeException e) {
                 log.warn("도구 실행 중 예상치 못한 오류 - name: {}, args: {}, 사유: {}",
                         functionCall.name(), functionCall.args(), e.getMessage());
@@ -1291,6 +1284,7 @@ public class AiPlanningService {
                 case MARKET_LIQUIDITY_TOOL_NAME -> executeMarketLiquidityLookup(functionCall);
                 case TECHNICAL_SIGNAL_TOOL_NAME -> executeTechnicalSignalLookup(functionCall);
                 case HISTORICAL_PRICE_TOOL_NAME -> executeHistoricalPriceLookup(functionCall);
+                case MULTI_STOCK_PRICE_TOOL_NAME -> executeMultiStockPriceLookup(functionCall, confirmedCurrentPrices);
                 case RISK_FLAG_TOOL_NAME -> executeRiskFlagLookup(functionCall);
                 case CALL_AUCTION_PRICE_TOOL_NAME -> executeCallAuctionPriceLookup(functionCall);
                 case STOCK_CREDIT_INFO_TOOL_NAME -> executeStockCreditInfoLookup(functionCall);
