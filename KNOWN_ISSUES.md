@@ -28,33 +28,7 @@
 
 ---
 
-## 2. RedisOnlineStatusService / SessionDisconnectEvent 리스너 — 문서와 코드 불일치
-
-- **등록**: 4주차 `feature/stock-price` 작업 중 발견
-- **현상**: `CLAUDE.md` 8번과 `NAMING.md` 7번은 `RedisOnlineStatusService`
-  (`addOnline`/`removeOnline`/`countOnline`/`isOnline`)와 `StompAuthInterceptor`의
-  CONNECT/DISCONNECT 온라인 사용자 추적이 이미 구현된 것으로 기술하고 있다
-  (`NAMING.md` 238번째 줄: "v8 추가: CONNECT 커맨드 검증 통과 시
-  `RedisOnlineStatusService.addOnline(userId)` 호출").
-- **실제 코드 상태**: `global/redis` 패키지에는 `RedisTokenService`,
-  `RedisAuthCodeService`, `RedisStockCacheService`, `RedisPendingOrderService`,
-  `RedisRateLimiterService` 5개만 존재하고 `RedisOnlineStatusService`는 없다.
-  `StompAuthInterceptor`도 CONNECT 시 JWT 인증만 처리할 뿐 온라인 상태 갱신 호출이
-  없고, `SessionDisconnectEvent`를 구독하는 리스너도 저장소 전체에 없다.
-- **영향**: 관리자 대시보드의 "온라인 사용자" 집계 기능이 문서상으로는 완료된
-  것처럼 보이지만 실제로는 동작하지 않는다.
-- **이번 브랜치(feature/stock-price) 처리**: 직접 구현하지 않는다(범위 밖). 다만
-  이 브랜치에서 추가하는 `StockViewSubscriptionListener`(global/stomp)가 저장소
-  최초의 `SessionSubscribeEvent`/`SessionUnsubscribeEvent`/`SessionDisconnectEvent`
-  리스너가 되므로, 나중에 `RedisOnlineStatusService`를 실제로 구현할 때 이 리스너의
-  세션 정리 패턴을 참고할 수 있다.
-- **후속 조치**: 온라인 사용자 추적 기능이 실제로 필요한 시점에 별도 브랜치(예:
-  `feature/admin-online-status` 또는 관련 관리자 기능 브랜치)에서 구현하고, 그 전까지는
-  관리자 대시보드 문서/화면에서 이 지표가 아직 미구현임을 명시하는 것을 권장한다.
-
----
-
-## 3. StockSubscriptionManager의 mock 모드 처리 — MockLsDataGenerator 도입 시 재설계 필요
+## 2. StockSubscriptionManager의 mock 모드 처리 — MockLsDataGenerator 도입 시 재설계 필요
 
 - **등록**: 4주차 `feature/stock-price`
 - **현상**: `LsWebSocketClient`는 `ls.mode=real`일 때만 스프링 빈으로 생성된다
@@ -71,7 +45,7 @@
 
 ---
 
-## 4. WatchlistService 트랜잭션 안에서 LS 소켓 I/O 호출
+## 3. WatchlistService 트랜잭션 안에서 LS 소켓 I/O 호출
 
 - **등록**: 4주차 `feature/stock-price`
 - **현상**: `WatchlistService.addWatchlist()`/`removeWatchlist()`는 `@Transactional`

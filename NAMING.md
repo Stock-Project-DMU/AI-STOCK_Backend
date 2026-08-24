@@ -103,16 +103,16 @@
 | `UserRepository` | `findByLoginId(String loginId)`, `findByEmail(String email)`, `existsByLoginId(String loginId)`, `existsByEmail(String email)`, `findByUserIdAndIsActiveTrue(Long userId)`, `countByIsActiveTrue()`(관리자 대시보드 — 총 사용자 수), `findAllByIsActiveTrue(Pageable pageable)`(feature/admin-user 코드리뷰 반영 — 관리자 사용자 목록에서 탈퇴 유저 제외, 8-17 참고), `findAllByRoleAndStatusAndIsActiveTrueForUpdate(Role role, UserStatus status)`(feature/admin-user 코드리뷰 반영 — 마지막 남은 ADMIN 정지 방지, 비관적 락으로 동시 정지 요청 경쟁 상태까지 막음, 8-17 참고) |
 | `SocialAccountRepository` | `findByProviderAndProviderId(SocialProvider provider, String providerId)`, `deleteByUserId(Long userId)` |
 | `InvestmentProfileRepository` | `findByUserId(Long userId)`, `deleteByUserId(Long userId)` |
-| `AccountRepository` | `findAllByUserId(Long userId)`(내 계좌 목록, 최대 3건 — `ORDER BY accountId asc` 고정, feature/ai-planning 추가: `AiPlanningService.findPrimaryHolding()`이 "첫 번째 계좌"를 가정하고 `accounts.get(0)`을 쓰는데 ORDER BY가 없으면 호출마다 다른 계좌가 나올 수 있어 생성 순서로 고정), `findAllByUserIdForUpdate(Long userId)`(mypage-account 추가 — `@Lock(PESSIMISTIC_WRITE)`, `AccountService.createAccount()`가 계좌 개수 확인과 저장 사이의 동시 개설 경합을 막는 데 사용. 처음에는 `UserRepository.findByIdForUpdate`로 User 행 전체를 잠갔는데, User는 계좌와 무관한 다른 기능도 앞으로 잠글 수 있는 공용 자원이라 Account 쪽만 잠그는 이 메서드로 좁혔다 — 매칭 행이 0개여도 idx_account_user 인덱스로 갭 락이 걸려 동시 삽입을 막는다), `findByAccountIdAndUserId(Long accountId, Long userId)`(mypage-account 추가 — 계좌 소유권 검증 겸 조회. order-market/order-limit의 `findByUserId(Long userId)`를 대체 — 유저가 계좌를 여러 개 가질 수 있어 단일 계좌를 가정한 조회는 더 이상 쓰지 않는다), `findByAccountIdAndUserIdForUpdate(Long accountId, Long userId)`(mypage-account 추가 — `@Lock(PESSIMISTIC_WRITE)`, `AccountService.chargeBalance()`가 chargeCount 확인과 반영 사이의 동시 충전 경합을 막는 데 사용. `findByAccountIdAndUserId`와 WHERE 절이 동일해 `FIND_BY_ACCOUNT_ID_AND_USER_ID` 상수로 공유), `findByAccountNumber(String accountNumber)`, `deleteByUserId(Long userId)` |
+| `AccountRepository` | `findAllByUserId(Long userId)`(내 계좌 목록, 최대 3건 — `ORDER BY accountId asc` 고정, feature/ai-planning 추가: `AiPlanningService.findPrimaryHolding()`이 "첫 번째 계좌"를 가정하고 `accounts.get(0)`을 쓰는데 ORDER BY가 없으면 호출마다 다른 계좌가 나올 수 있어 생성 순서로 고정), `findAllByUserIdForUpdate(Long userId)`(mypage-account 추가 — `@Lock(PESSIMISTIC_WRITE)`, `AccountService.createAccount()`가 계좌 개수 확인과 저장 사이의 동시 개설 경합을 막는 데 사용. 처음에는 `UserRepository.findByIdForUpdate`로 User 행 전체를 잠갔는데, User는 계좌와 무관한 다른 기능도 앞으로 잠글 수 있는 공용 자원이라 Account 쪽만 잠그는 이 메서드로 좁혔다 — 매칭 행이 0개여도 idx_account_user 인덱스로 갭 락이 걸려 동시 삽입을 막는다), `findByAccountIdAndUserId(Long accountId, Long userId)`(mypage-account 추가 — 계좌 소유권 검증 겸 조회. order-market/order-limit의 `findByUserId(Long userId)`를 대체 — 유저가 계좌를 여러 개 가질 수 있어 단일 계좌를 가정한 조회는 더 이상 쓰지 않는다), `findByAccountIdAndUserIdForUpdate(Long accountId, Long userId)`(mypage-account 추가 — `@Lock(PESSIMISTIC_WRITE)`, `AccountService.chargeBalance()`가 chargeCount 확인과 반영 사이의 동시 충전 경합을 막는 데 사용. `findByAccountIdAndUserId`와 WHERE 절이 동일해 `FIND_BY_ACCOUNT_ID_AND_USER_ID` 상수로 공유), `findByAccountNumber(String accountNumber)`, `findAccountWithUserById(Long accountId)`(feature/admin-account 추가 — `@Query` JOIN FETCH account.user, `AdminAccountService`가 accountId만 갖고 조회할 때 userName을 함께 채우는 데 사용, 8-16 참고), `deleteByUserId(Long userId)` |
 | `HoldingRepository` | `findAllByAccountId(Long accountId)`, `findByAccountIdAndStockCode(Long accountId, String stockCode)`, `findFirstByStockCode(String stockCode)`(4주차 `feature/stock-price` 추가 — `StockNameResolver`가 종목명 조회 시 사용, 8-4 참고), `findAllByAccountIdIn(List<Long> accountIds)`(feature/admin-user 코드리뷰 반영 — 계좌별 N+1 조회 대신 배치 조회, 8-17 참고) |
-| `OrderRepository` | `findAllByStockCodeAndStatus(String stockCode, OrderStatus status)`, `findAllByAccountIdOrderByOrderedAtDesc(Long accountId)`, `findByOrderIdAndAccountId(Long orderId, Long accountId)`, `findAllByStatusWithAccountAndUser(OrderStatus status)`, `countByStatus(OrderStatus status)`(관리자 대시보드 — 총 거래건수), `findTop20ByStatusOrderByExecutedAtDesc(OrderStatus status)`(관리자 대시보드 — 최근 거래 20건), `findAllOrdersWithUser(Pageable pageable)`(관리자 전체 거래 목록, `@Query` JOIN FETCH account.user), `findOrderWithUserById(Long orderId)`(관리자 거래 상세, `@Query` JOIN FETCH), `sumExecutedAmount()`(관리자 대시보드 — 총 거래대금, `@Query SUM(execPrice*quantity)`), `findByIdForUpdate(Long orderId)`(feature/order-limit 추가 — `@Lock(PESSIMISTIC_WRITE)`, `OrderExecutionService.execute()`용), `findByOrderIdAndUserIdForUpdate(Long orderId, Long userId)`(mypage-account 추가 — `@Lock(PESSIMISTIC_WRITE)`, `OrderService.cancelOrder()`용. 계좌가 여러 개가 되면서 한때 `findByIdForUpdate(orderId)`로 먼저 잠근 뒤 소유자를 나중에 검증하는 방식을 썼는데, 그러면 남의 orderId로도 락이 먼저 걸려버려(락 경합 + 존재 여부를 응답 시간으로 구분당하는 사이드채널) 과거 `findByOrderIdAndAccountIdForUpdate(Long orderId, Long accountId)`처럼 소유권을 WHERE 절(이번엔 accountId 대신 userId로 조인)에 넣어 조회와 동시에 걸러내는 방식으로 되돌렸다), `sumPendingSellQuantity(Long accountId, String stockCode)`(feature/order-limit 추가 — 같은 계좌·종목으로 이미 등록된 PENDING 지정가 매도 주문 수량 합계. `createLimitOrder()`가 매도 등록 시 `보유수량 - 이미 대기 중인 매도 수량`으로 검증해, 같은 종목을 초과해서 중복 매도 등록하는 것을 등록 시점에 막는다. 이 조회는 일반 SELECT라 MySQL 기본 격리수준(REPEATABLE READ)에서는 트랜잭션 시작 시점 스냅샷을 볼 수 있어, `createLimitOrder()` 자체를 `@Transactional(isolation = READ_COMMITTED)`로 지정해 항상 최신 커밋 데이터를 보게 한다), `findFirstByStockCode(String stockCode)`(4주차 `feature/stock-price` 추가 — `StockNameResolver`용, 8-4 참고), `findAllByAccountIdInOrderByOrderedAtDesc(List<Long> accountIds)`(feature/admin-user 코드리뷰 반영 — 계좌별 N+1 조회 대신 배치 조회, `@Query` ORDER BY까지 DB에서 처리, 8-17 참고) |
+| `OrderRepository` | `findAllByStockCodeAndStatus(String stockCode, OrderStatus status)`, `findAllByAccountIdOrderByOrderedAtDesc(Long accountId)`, `findByOrderIdAndAccountId(Long orderId, Long accountId)`, `findAllByStatusWithAccountAndUser(OrderStatus status)`, `countByStatus(OrderStatus status)`(관리자 대시보드 — 총 거래건수), `findTop20ByStatusOrderByExecutedAtDesc(OrderStatus status)`(관리자 대시보드 — 최근 거래 20건), `findAllOrdersWithUser(Pageable pageable)`(관리자 전체 거래 목록, `@Query` JOIN FETCH account.user), `findOrderWithUserById(Long orderId)`(관리자 거래 상세, `@Query` JOIN FETCH), `sumExecutedAmount()`(관리자 대시보드 — 총 거래대금, `@Query SUM(execPrice*quantity)`), `findByIdForUpdate(Long orderId)`(feature/order-limit 추가 — `@Lock(PESSIMISTIC_WRITE)`, `OrderExecutionService.execute()`용), `findByOrderIdAndUserIdForUpdate(Long orderId, Long userId)`(mypage-account 추가 — `@Lock(PESSIMISTIC_WRITE)`, `OrderService.cancelOrder()`용. 계좌가 여러 개가 되면서 한때 `findByIdForUpdate(orderId)`로 먼저 잠근 뒤 소유자를 나중에 검증하는 방식을 썼는데, 그러면 남의 orderId로도 락이 먼저 걸려버려(락 경합 + 존재 여부를 응답 시간으로 구분당하는 사이드채널) 과거 `findByOrderIdAndAccountIdForUpdate(Long orderId, Long accountId)`처럼 소유권을 WHERE 절(이번엔 accountId 대신 userId로 조인)에 넣어 조회와 동시에 걸러내는 방식으로 되돌렸다), `sumPendingSellQuantity(Long accountId, String stockCode)`(feature/order-limit 추가 — 같은 계좌·종목으로 이미 등록된 PENDING 지정가 매도 주문 수량 합계. `createLimitOrder()`가 매도 등록 시 `보유수량 - 이미 대기 중인 매도 수량`으로 검증해, 같은 종목을 초과해서 중복 매도 등록하는 것을 등록 시점에 막는다. 이 조회는 일반 SELECT라 MySQL 기본 격리수준(REPEATABLE READ)에서는 트랜잭션 시작 시점 스냅샷을 볼 수 있어, `createLimitOrder()` 자체를 `@Transactional(isolation = READ_COMMITTED)`로 지정해 항상 최신 커밋 데이터를 보게 한다), `findFirstByStockCode(String stockCode)`(4주차 `feature/stock-price` 추가 — `StockNameResolver`용, 8-4 참고), `findAllByAccountIdInOrderByOrderedAtDesc(List<Long> accountIds)`(feature/admin-user 코드리뷰 반영 — 계좌별 N+1 조회 대신 배치 조회, `@Query` ORDER BY까지 DB에서 처리, 8-17 참고), `findAllPendingByAccountIdForUpdate(Long accountId)`(feature/admin-account 코드리뷰 반영 — `@Lock(PESSIMISTIC_WRITE)`, `OrderService.cancelAllPendingOrdersForSuspension()`용. 관리자가 계좌를 정지시킬 때 그 계좌의 PENDING 지정가 주문을 일괄 취소하며, `findByIdForUpdate`와 동일한 이유로 `OrderExecutionService.execute()`의 tick 체결과 경합하지 않도록 비관적 락을 건다, 8-16 참고) |
 | `WatchlistRepository` | `findAllByUserId(Long userId)`, `existsByUserIdAndStockCode(Long userId, String stockCode)`, `deleteByUserIdAndStockCode(Long userId, String stockCode)`(v14, 4주차 `feature/stock-price`에서 반환 타입 `void`→`int`로 변경 — `WatchlistService.removeWatchlist()`가 실제로 삭제된 행이 있었는지 알아야 `StockSubscriptionManager.decreaseWatchlistSubscription()`을 호출할지 판단할 수 있어서다. `RecentViewedRepository.touchViewedAt()`과 동일한 이유), `deleteByUserId(Long userId)`, `findFirstByStockCode(String stockCode)`(4주차 `feature/stock-price` 추가 — `StockNameResolver`용, 8-4 참고) |
 | `AiPlanningSessionRepository` | `findAllByUserIdOrderByUpdatedAtDesc(Long userId)`, `findByUserIdAndSessionId(Long userId, Long sessionId)`, `deleteByUserId(Long userId)` |
 | `AiPlanningMessageRepository` | `findAllBySessionIdOrderByCreatedAtAsc(Long sessionId)`, `findRecentBySessionId(Long sessionId, Pageable pageable)`(feature/ai-planning 추가 — 내림차순 + `Pageable`로 최근 N건만 DB 레벨에서 가져온 뒤 `AiPlanningService.buildHistory()`가 다시 뒤집어서 씀. `createdAt`이 초 단위 정밀도라 같은 초에 USER/AI가 저장되는 경우를 대비해 `messageId`를 2차 정렬 키로 사용) |
 | `SimulationRepository` | `findAllByUserIdOrderByCreatedAtDesc(Long userId)`, `findByUserIdAndSimulationId(Long userId, Long simulationId)`, `deleteByUserId(Long userId)` |
 | `RecentViewedRepository` | `findAllByUserIdOrderByViewedAtDesc(Long userId)`, `findByUserIdAndStockCode(Long userId, String stockCode)`, `touchViewedAt(Long userId, String stockCode)`(mypage-account 추가 — `@Modifying`, 이미 본 종목을 다시 볼 때 새 행 대신 viewedAt만 UPDATE. delete 후 재삽입 방식은 `RecentViewed`가 `@GeneratedValue(IDENTITY)`라 save()가 즉시 INSERT를 실행해버려 아직 flush 안 된 DELETE와 충돌해 `uq_user_stock_view` 위반이 나는 버그가 있어 이 방식으로 교체했다), `deleteByUserId(Long userId)`, `findFirstByStockCode(String stockCode)`(4주차 `feature/stock-price` 추가 — `StockNameResolver`용, 8-4 참고) |
 | `NotificationRepository` | `findAllByUserIdOrderByCreatedAtDesc(Long userId)`, `countByUserIdAndIsReadFalse(Long userId)`, `findByNotiIdAndUserId(Long notiId, Long userId)` |
-| `InquiryRepository` | `findAllByUserIdOrderByCreatedAtDesc(Long userId)`(사용자 본인 문의 목록), `findByInquiryIdAndUserId(Long inquiryId, Long userId)`(본인 문의 상세, 소유권 검증), `findAllByOrderByStatusDescCreatedAtDesc()`(관리자 전체 목록 — "PENDING"이 "ANSWERED"보다 알파벳순 뒤(P > A)라 status 내림차순 정렬해야 미답변 우선 노출), `deleteByUserId(Long userId)`(탈퇴 처리용) |
+| `InquiryRepository` | `findAllByUserIdOrderByCreatedAtDesc(Long userId)`(사용자 본인 문의 목록), `findByInquiryIdAndUserId(Long inquiryId, Long userId)`(본인 문의 상세, 소유권 검증), `findAllByOrderByStatusDescCreatedAtDesc()`(관리자 전체 목록, 무인자 `List` 버전 — "PENDING"이 "ANSWERED"보다 알파벳순 뒤(P > A)라 status 내림차순 정렬해야 미답변 우선 노출), `findAllByOrderByStatusDescCreatedAtDesc(Pageable pageable)`(같은 정렬 기준의 `Page` 오버로드 — `AdminInquiryService.getInquiries()`용. feature/admin-inquiry 코드리뷰 반영: `@Query` JOIN FETCH user로 N+1 방지, 8-18 참고), `deleteByUserId(Long userId)`(탈퇴 처리용) |
 
 > `deleteByUserId`는 탈퇴 로직(문서 하단 8-3 참고)에서 공통으로 쓰인다. v8부터 `InquiryRepository.deleteByUserId`도 동일하게 탈퇴 처리 순서에 포함한다.
 
@@ -236,12 +236,20 @@ STOMP 엔드포인트: `/ws-stomp`
 토픽: `/topic/stock/{stockCode}` (브로드캐스팅), `/queue`(유니캐스팅 prefix), `/app`(publish prefix)
 
 ### `StompAuthInterceptor`
-메서드: `preSend(Message<?> message, MessageChannel channel)`
+메서드: `preSend(Message<?> message, MessageChannel channel)`, `onSessionDisconnect(SessionDisconnectEvent event)`
 
-> v8 추가: CONNECT 커맨드 검증 통과 시 `RedisOnlineStatusService.addOnline(userId)` 호출,
-> DISCONNECT 커맨드 수신 시 `RedisOnlineStatusService.removeOnline(userId)` 호출.
-> 클라이언트 비정상 종료(DISCONNECT 프레임 없이 연결만 끊김) 대비 `SessionDisconnectEvent`를
-> `@EventListener`로 별도 처리하는 보완 로직 필요 (구현 시 별도 메서드 `onSessionDisconnect(SessionDisconnectEvent event)`로 추가).
+> v8 추가: CONNECT 커맨드 검증 통과 시 `RedisOnlineStatusService.addOnline(userId)` 호출.
+>
+> **DISCONNECT 처리는 `onSessionDisconnect(SessionDisconnectEvent event)` 하나로만 한다 (v9,
+> feature/admin-dashboard 코드리뷰 반영 — 최초 구현 때는 `preSend()`의 STOMP DISCONNECT 커맨드
+> 분기와 `onSessionDisconnect` 둘 다에서 `removeOnline()`을 불렀다)**: 정상 종료라도 클라이언트가
+> DISCONNECT 프레임을 보낸 뒤 소켓이 실제로 닫히면 `SessionDisconnectEvent`도 함께 발행되므로,
+> 두 경로 모두 `removeOnline()`을 부르면 세션 하나가 끝났는데 두 번 호출된다. `admin:online:users`가
+> 처음엔 Set(SADD/SREM)이라 SREM 중복 호출이 멱등해 무해했는데, 아래 `RedisOnlineStatusService`
+> 항목처럼 "유저별 활성 세션 수" Hash로 바뀌면서 중복 호출이 실제 버그가 됐다 — 같은 유저가 탭을
+> 여러 개 열어놨을 때 하나만 닫아도 카운트가 2 줄어들어, 나머지 탭이 멀쩡히 연결돼 있는데도
+> 온라인 목록에서 빠져버린다. `SessionDisconnectEvent`는 정상/비정상 종료 상관없이 세션 하나당
+> 정확히 한 번만 발행되므로, 세션 종료를 세는 지점을 이거 하나로 통일해 해결했다.
 
 ### `AsyncConfig`
 빈: `tickTaskExecutor()` — 스레드풀 이름 prefix `tick-executor-`
@@ -301,6 +309,21 @@ redis-logic.md(수정본) 기준 확정된 이름 그대로 사용:
 | `RedisRateLimiterService` | `isAllowed`, `increment`, `getRemainingDaily` |
 | `RedisOnlineStatusService` (v8 추가) | `clearOnlineStatus()`(서버 재시작 시 `@PostConstruct` 초기화, v9), `addOnline(Long userId)`, `removeOnline(Long userId)`, `countOnline()`, `isOnline(Long userId)` |
 | `RedisAiToolCacheService` (feature/ai-planning 추가) | `getCachedResult(Long sessionId, String toolKey)`, `cacheResult(Long sessionId, String toolKey, String result)` — 키 `ai:tool:{sessionId}:{toolKey}`(TTL 30분), AI 상담 세션 내 DART/LS/네이버 도구 실행 결과 캐시(같은 조건 재조회 시 재사용). 8-9 참고 |
+
+> **`admin:online:users`를 Set → Hash로 변경 (v9, feature/admin-dashboard 코드리뷰 반영)**:
+> 원래 Set(SADD/SREM, 값=userId)이었는데, 같은 유저가 탭을 여러 개 열어 세션이 여러 개 생긴
+> 상태에서 그중 하나만 닫혀도 `removeOnline()`(SREM)이 그 유저를 통째로 지워버려, 나머지 탭이
+> 여전히 연결돼 있는데도 관리자 화면엔 즉시 오프라인으로 보이는 문제가 있었다. Set이 막아주는
+> 건 "같은 유저를 여러 번 세는 중복 카운트" 문제뿐이지 "세션 중 하나만 끊겨도 전체가 꺼지는"
+> 문제는 막지 못한다. 그래서 `admin:online:users`를 Hash(field=userId, value=그 유저의 활성
+> WebSocket 세션 수)로 바꿔, `addOnline()`은 HINCRBY(+1), `removeOnline()`은 HINCRBY(-1) 후
+> 결과가 0 이하면 그 필드를 HDEL하는 방식으로 세션 수를 센다. 감소+정리를 자바 쪽에서
+> "감소 후 조회해서 0이면 삭제"로 따로 하면 그 사이 다른 세션의 CONNECT(증가)가 끼어들 때
+> 방금 새로 생긴 세션까지 같이 지워버릴 수 있어, Lua 스크립트로 원자적으로 묶었다.
+> `countOnline()`은 HLEN(활성 세션이 1개 이상인 유저 수), `isOnline()`은 HEXISTS로 바뀌었고
+> 둘 다 여전히 O(1)이라 Set일 때의 성능 특성은 그대로 유지된다. 이 변경은 `removeOnline()`이
+> 세션 하나당 정확히 한 번만 호출된다는 전제가 필요해, `StompAuthInterceptor` 쪽도 함께
+> 정리했다(위 `StompAuthInterceptor` 항목 참고).
 
 DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRate, volume, updatedAt), `HogaDto`(stockCode, askPrices, askVolumes, bidPrices, bidVolumes, updatedAt), `PendingOrderDto`(redis-logic.md 확정본과 동일)
 
@@ -421,11 +444,14 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 >    512개 이상이면 `subscribe()` 호출 자체는 그대로 진행하되 warn 로그만 남긴다(실제 초과 여부·
 >    거부 응답은 `LsWebSocketHandler`의 기존 ACK 로깅으로 확인 — 본격적인 대응은 범위 밖).
 >
-> **주의 (v14 발견, 이번 브랜치 범위 아님)**: CLAUDE.md 8번/NAMING.md 7번은 `RedisOnlineStatusService`와
-> `StompAuthInterceptor`의 CONNECT/DISCONNECT 온라인 추적이 이미 구현된 것처럼 기술하지만, 실제
-> 코드에는 `RedisOnlineStatusService`도 `SessionDisconnectEvent` 리스너도 없다(`StompAuthInterceptor`는
-> CONNECT 인증만 처리). `StockViewSubscriptionListener`가 이 저장소 최초의 STOMP 세션 이벤트
-> 리스너가 된다. 문서-코드 불일치는 `KNOWN_ISSUES.md` 2번에 별도로 남긴다.
+> **(v14 발견, feature/admin-dashboard에서 해소)**: 이 브랜치(feature/stock-price) 시점에는
+> CLAUDE.md 8번/NAMING.md 7번이 기술한 `RedisOnlineStatusService`/`StompAuthInterceptor`의
+> CONNECT/DISCONNECT 온라인 추적이 실제로는 구현되어 있지 않았다(`StompAuthInterceptor`는 CONNECT
+> 인증만 처리, `SessionDisconnectEvent` 리스너도 저장소에 없었음). `StockViewSubscriptionListener`가
+> 그 시점 저장소 최초의 STOMP 세션 이벤트 리스너였다. 이 불일치는 `KNOWN_ISSUES.md` 2번에 남겨뒀다가
+> `feature/admin-dashboard`가 온라인 사용자 수 집계를 실제로 필요로 하면서 `RedisOnlineStatusService`
+> 구현 + `StompAuthInterceptor.onSessionDisconnect(SessionDisconnectEvent)` 추가로 해소했다
+> (8-14 참고). `KNOWN_ISSUES.md` 2번도 그때 함께 제거했다.
 
 ### 8-5. feature/order-market
 
@@ -462,7 +488,7 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 | 구분 | 이름 |
 |---|---|
 | 엔드포인트 (OrderController 추가) | `POST /api/orders` (priceType=LIMIT 공용), `DELETE /api/orders/{orderId}` |
-| Service (OrderService 추가) | `createLimitOrder(Long userId, CreateOrderRequest request)`, `cancelOrder(Long userId, Long orderId)` |
+| Service (OrderService 추가) | `createLimitOrder(Long userId, CreateOrderRequest request)`, `cancelOrder(Long userId, Long orderId)`, `cancelAllPendingOrdersForSuspension(Account account)`(feature/admin-account 코드리뷰 반영, v8 — `AdminAccountService.updateAccountStatus()`가 계좌를 SUSPENDED로 바꿀 때 함께 호출. `cancelOrder()`와 달리 소유권 검증·SUSPENDED 차단을 하지 않는다(정지 처리 자체의 일부이므로). `OrderRepository.findAllPendingByAccountIdForUpdate(accountId)`로 그 계좌의 PENDING 지정가 주문 전부를 비관적 락으로 조회해, 매수 주문이면 `account.unfreezeForOrder()`로 동결 해제 후 `order.cancel()`, 커밋 후 Redis `pending:orders`에서도 제거한다 — 정지 후에도 tick 체결이 계속되거나 사용자가 취소도 못 하는 상태로 남는 것을 막는다, 8-16 참고) |
 | Execution Service | `OrderExecutionService` — `execute(PendingOrderDto pendingOrder, long currentPrice)`, `checkAndExecute(String stockCode, long currentPrice)` |
 | Response DTO | `OrderHistoryResponse`(accountId, orderId, stockCode, stockName, orderType, priceType, orderPrice, execPrice, quantity, status, orderedAt, executedAt) |
 | Holding 공용 서비스 | `HoldingSettlementService`(domain/order/service) — `increaseOrCreate(Account account, String stockCode, String stockName, int quantity, long execPrice)`, `decrease(Holding holding, int quantity)`. `OrderService.executeBuy()`/`executeSell()`(시장가)와 `OrderExecutionService.executeBuy()`/`executeSell()`(지정가)가 각자 갖고 있던 동일한 보유종목 갱신 로직을 하나로 합친 것 |
@@ -884,7 +910,13 @@ call(String url, String trCd, Map<String, Object> requestBody, String token, Str
 | Controller | `AdminTradeController` |
 | 엔드포인트 | `GET /api/admin/trades`, `GET /api/admin/trades/{orderId}` |
 | Service | `AdminTradeService` — `getTrades(Pageable pageable)`, `getTradeDetail(Long orderId)` |
-| Response DTO | `AdminTradeResponse`(orderId, userName, loginId, stockCode, stockName, orderType, priceType, orderPrice, execPrice, quantity, status, orderedAt, executedAt) |
+| Response DTO | `AdminTradeResponse`(userName, loginId, `order`: `OrderHistoryResponse` 재사용) |
+
+> **코드리뷰 반영**: 처음에는 `AdminTradeResponse`가 `OrderHistoryResponse`와 거의 같은 필드
+> (stockCode/orderType/priceType/orderPrice/execPrice/quantity/status/orderedAt/executedAt)를
+> 중복 정의했다. `AdminUserDetailResponse`(8-17)가 이미 `OrderHistoryResponse`를 내부 필드로
+> 재사용하고 있어 동일한 패턴으로 통일 — 주문 자체의 필드는 `order: OrderHistoryResponse`로
+> 위임하고, 관리자 화면에만 필요한 `userName`/`loginId`만 이 레코드가 따로 갖는다.
 
 ### 8-16. feature/admin-account (v8 신규)
 
@@ -895,6 +927,18 @@ call(String url, String trCd, Map<String, Object> requestBody, String token, Str
 | Service | `AdminAccountService` — `getAccountDetail(Long accountId)`, `updateAccountStatus(Long accountId, AdminAccountStatusRequest request)` |
 | Request DTO | `AdminAccountStatusRequest`(status) |
 | Response DTO | `AdminAccountDetailResponse`(accountId, userName, accountNumber, balance, frozenBalance, baseBalance, status) |
+
+> **정지 시 PENDING 주문 일괄 취소 (코드리뷰 반영, v8)**: `updateAccountStatus()`가
+> `account.suspend()`만 하고 그 계좌의 기존 PENDING 지정가 주문을 그대로 두면, `accounts.status`가
+> `SUSPENDED`인지 확인하지 않는 `OrderExecutionService.execute()`가 tick마다 그대로 체결시켜
+> CLAUDE.md 8번의 "정지 시 매수·매도 주문 차단"이 지켜지지 않는다. 게다가 `OrderService.
+> cancelOrder()`는 계좌가 `SUSPENDED`면 취소 요청 자체를 막아서 사용자가 그 주문을 스스로
+> 취소할 수도 없다. 그래서 `updateAccountStatus()`가 SUSPENDED로 전환하는 같은 트랜잭션 안에서
+> `OrderService.cancelAllPendingOrdersForSuspension(account)`(8-6 참고)를 호출해 그 계좌의
+> PENDING 주문을 전부 취소한다. `AdminAccountService`는 이제 `AccountRepository`뿐 아니라
+> `OrderService`도 주입받는다 — Repository를 직접 잡아 취소 로직을 복붙하지 않고 order 도메인의
+> 기존 서비스(잔고 동결 해제·Redis `pending:orders` 정리 포함)를 그대로 재사용한다(CLAUDE.md
+> 4번 "도메인 간 직접 참조 대신 서비스 계층을 통해 호출").
 
 ### 8-17. feature/admin-user (v8 신규)
 
@@ -975,6 +1019,22 @@ call(String url, String trCd, Map<String, Object> requestBody, String token, Str
 > `answerInquiry`는 내부에서 `Inquiry.answer(String answer, User admin)` 엔티티 메서드를 호출한다
 > (1-1 참고). `feature/inquiry`(사용자 측)와 `feature/admin-inquiry`(관리자 측)는 같은
 > `Inquiry` Entity·`InquiryRepository`를 공유하되 Controller/Service/DTO는 분리한다.
+>
+> `InquiryRepository.findAllByOrderByStatusDescCreatedAtDesc()`(무인자, `List` 반환 —
+> `feature/inquiry`의 `InquiryRepositoryIntegrationTest`가 이미 사용 중이라 그대로 둠)에
+> 같은 정렬 기준의 `Pageable` 오버로드(`Page<Inquiry>` 반환)를 추가해 `getInquiries()`가 쓴다.
+>
+> **N+1 방지 (코드리뷰 반영, v8)**: `Pageable` 오버로드는 처음에 파생 쿼리(메서드 이름만으로
+> 자동 생성되는 쿼리) 그대로였는데, `AdminInquiryResponse.from()`이 목록의 각 `Inquiry`마다
+> `inquiry.getUser()`(LAZY)를 호출해 페이지 크기만큼 추가 SELECT가 발생했다. `AdminTradeService.
+> findAllOrdersWithUser`와 동일한 패턴으로 `@Query`에 `join fetch i.user`를 추가해 한 번의
+> 쿼리로 즉시 로딩한다 — `@Query`를 쓰면 메서드 이름의 `OrderBy`는 더 이상 자동 파싱되지 않으므로
+> 원래 정렬 기준(`status desc, createdAt desc`)을 JPQL `order by` 절로 명시했다.
+>
+> **재답변(덮어쓰기) 정책**: `answerInquiry`는 대상 문의가 이미 `ANSWERED`여도 소유권/상태
+> 검증 없이 그대로 `Inquiry.answer()`를 호출해 기존 답변을 덮어쓴다 — 오타 정정 등 관리자가
+> 답변을 다시 보내야 하는 상황을 막지 않기 위한 의도적 선택이다(`admin-user`의 `updateUserStatus`
+> 같은 멱등/잠금 가드는 두지 않는다).
 
 ---
 
@@ -986,3 +1046,9 @@ call(String url, String trCd, Map<String, Object> requestBody, String token, Str
 | 경로 변수 | `{stockCode}`, `{orderId}`, `{sessionId}`, `{simulationId}`, `{notiId}`, `{inquiryId}`, `{accountId}` — Controller 파라미터명도 동일하게 맞춤 |
 | 페이지네이션 사용 시 | `page`, `size`, `sort` (쿼리 파라미터), 반환은 `Page<T>` 또는 `List<T>` 중 도메인별 통일 필요 시 별도 협의. 관리자 목록 API(`admin-trade`, `admin-user`, `admin-inquiry`)는 데이터量이 많아질 수 있어 `Page<T>`로 통일한다. |
 | 목록 반환 변수 | 복수형 (`orders`, `holdings`, `notifications`) |
+
+> **페이지 size 상한 (코드리뷰 반영, v8)**: 관리자 목록 API가 전부 `@PageableDefault(size = 20)`만
+> 걸어뒀는데, 이는 요청에 `size`가 없을 때의 기본값일 뿐 상한이 아니라 `?size=999999999` 같은
+> 요청이 그대로 통과해 전체 테이블을 한 번에 긁어올 수 있었다. 컨트롤러마다 검증을 반복하는
+> 대신 `application.yml`의 `spring.data.web.pageable.max-page-size: 100`으로 전역 상한을 건다
+> (Spring Data Web `PageableHandlerMethodArgumentResolver`가 요청 `size`를 이 값으로 clamp).
