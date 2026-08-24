@@ -5,13 +5,10 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import com.teamfp.aistock.global.exception.CustomException;
-import com.teamfp.aistock.global.util.ExternalApiInvoker;
 import com.teamfp.aistock.infra.ls.dto.LsCurrentPriceDetailDto;
 import com.teamfp.aistock.infra.ls.dto.LsEtfConstituentDto;
 
@@ -23,19 +20,18 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Component
-public class LsEtfApiClient {
+public class LsEtfApiClient extends LsApiClientSupport {
 
     private static final int MAX_CONSTITUENT_ITEMS = 10;
 
     private final LsAccessTokenProvider accessTokenProvider;
-    private final RestClient restClient;
 
     @Value("${ls.etf-url}")
     private String etfUrl;
 
     public LsEtfApiClient(LsAccessTokenProvider accessTokenProvider, RestClient.Builder restClientBuilder) {
+        super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
-        this.restClient = restClientBuilder.build();
     }
 
     /** ETF현재가(시세)조회(t1901) — NAV·52주 최고저 포함 현재가. */
@@ -61,7 +57,7 @@ public class LsEtfApiClient {
                     .stockName(stringOf(outBlock.get("hname")))
                     .currentPrice(price)
                     .changeAmount(changeAmount != null ? changeAmount : 0L)
-                    .changeRate(parseDouble(outBlock.get("diff")))
+                    .changeRate(parseDoubleOrZero(outBlock.get("diff")))
                     .volume(volume != null ? volume : 0L)
                     .high52w(parseLong(outBlock.get("high52w")))
                     .low52w(parseLong(outBlock.get("low52w")))
@@ -92,8 +88,8 @@ public class LsEtfApiClient {
                             .stockCode(stringOf(row.get("shcode")))
                             .stockName(stringOf(row.get("hname")))
                             .price(parseLong(row.get("price")))
-                            .changeRate(parseDouble(row.get("diff")))
-                            .weight(parseDouble(row.get("weight")))
+                            .changeRate(parseDoubleOrZero(row.get("diff")))
+                            .weight(parseDoubleOrZero(row.get("weight")))
                             .build())
                     .toList();
         } catch (CustomException e) {
@@ -103,41 +99,6 @@ public class LsEtfApiClient {
     }
 
     private Map<String, Object> call(String trCd, Map<String, Object> requestBody, String token) {
-        return ExternalApiInvoker.call(() -> restClient.post()
-                        .uri(etfUrl)
-                        .header("Authorization", "Bearer " + token)
-                        .header("tr_cd", trCd)
-                        .header("tr_cont", "N")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .body(requestBody)
-                        .retrieve()
-                        .body(new ParameterizedTypeReference<Map<String, Object>>() { }),
-                "LS ETF(" + trCd + ") 조회 실패");
-    }
-
-    private String stringOf(Object value) {
-        return value != null ? value.toString() : null;
-    }
-
-    private Long parseLong(Object value) {
-        if (value == null) {
-            return null;
-        }
-        try {
-            return Long.parseLong(value.toString().trim());
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private double parseDouble(Object value) {
-        if (value == null) {
-            return 0.0;
-        }
-        try {
-            return Double.parseDouble(value.toString().trim());
-        } catch (NumberFormatException e) {
-            return 0.0;
-        }
+        return call(etfUrl, trCd, requestBody, token, "LS ETF(" + trCd + ") 조회 실패");
     }
 }

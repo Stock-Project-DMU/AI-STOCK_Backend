@@ -722,6 +722,17 @@ confirmedCurrentPrices`(`executeTool()`이 `aiToolTaskExecutor`로 동시 실행
 | `LsEtcApiClient` | `etc-url` | `getCollateralLoanEligibility(String stockCode)`→`CLNAQ00100`(예탁담보융자가능종목현황조회), `getMarginRequirement(String stockCode)`→t1411(증거금율별종목조회), `getMarginTradingTrend(String stockCode)`→t1921(신용거래동향, 최근 5일 — LS API 자체에 기간 파라미터가 없어 확장 불가, 2026-08-13 전수조사로 확인), `getSecuritiesLendingTrend(String stockCode)`/`getSecuritiesLendingTrend(String stockCode, Integer periodMonths)`→t1941(종목별대차거래일간추이, periodMonths 없으면 최근 7일·최대 5건, 있으면 최대 24개월=2년, 2026-08-13 추가), `getNewListings()`/`getNewListings(Integer periodMonths)`→t1403(신규상장종목조회, periodMonths 없으면 최근 6개월·최대 10건, 있으면 최대 24개월=2년·최대 50건, 2026-08-13 추가), `getRecentShortSellingTrend(String stockCode)`/`getShortSellingTrend(String stockCode, Integer periodMonths)`→t1927(공매도일별추이, periodMonths 없으면 최근 7일·최대 5건, 있으면 최대 24개월=2년, 2026-08-13 추가), `getStockMasterInfo(String stockCode)`→t8436(주식종목조회API용) |
 | `LsIndustryApiClient` | `industry-url`(`/indtp/market-data`, 기존에 전혀 구현 안 돼 있던 업종 카테고리) | `getCurrentPrice(String marketName)`→t1511(업종현재가), `getRecentTrend(String marketName)`/`getTrend(String marketName, Integer periodMonths)`→t1514(업종기간별추이, periodMonths 없으면 일봉 최근 5건, 있으면 월봉(gubun2=3)으로 전환해 최대 24개월=2년, 2026-08-13 추가), `getExpectedIndex(String marketName, String callAuctionSession)`→t1485(예상지수, 시간대 게이트는 호출부 책임). `marketName`은 `코스피`→`001`/`코스닥`→`301`로 매핑 |
 
+**`LsApiClientSupport`(추상, `infra/ls` 패키지 전용, 코드리뷰 반영)** — 위 10개 클라이언트가
+전부 거의 동일하게 복붙하고 있던 요청 빌딩(Authorization/tr_cd/tr_cont 헤더 + `ExternalApiInvoker`
+위임)과 응답 필드 파싱을 한 곳으로 모은 베이스 클래스. `protected Map<String, Object>
+call(String url, String trCd, Map<String, Object> requestBody, String token, String errorLabel)`
+(4개 헤더만 필요한 대다수), 그 오버로드로 `extraHeaders` 인자를 받는 5-인자 버전(`LsEtcApiClient`만
+`tr_cont_key` 헤더가 추가로 필요해서 씀), `protected String stringOf(Object)`,
+`protected Long parseLong(Object)`, `protected double parseDoubleOrZero(Object)`(실패/누락 시 0.0)를
+제공한다. 10개 클라이언트 전부 이 클래스를 상속한다. 예외— `LsInvestorTrendApiClient`는 실패/누락
+시 0.0이 아니라 `null`을 돌려주는 자체 `parseDouble(Object): Double`을 그대로 로컬에 유지한다(그
+파일의 호출부가 "값 없음"과 "0"을 구분해야 함) — 이 파일만 `parseDoubleOrZero`를 안 쓴다.
+
 **`infra/ls/dto` 신규 DTO 26개** (기존 실시간 계열의 `LsTickData`/`LsHogaData`/`LsTokenResponse`와는 별개)
 
 | DTO | 필드 |

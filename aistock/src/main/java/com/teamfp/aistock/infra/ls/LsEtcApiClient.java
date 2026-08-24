@@ -6,13 +6,10 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import com.teamfp.aistock.global.exception.CustomException;
-import com.teamfp.aistock.global.util.ExternalApiInvoker;
 import com.teamfp.aistock.infra.ls.dto.LsNewListingDto;
 import com.teamfp.aistock.infra.ls.dto.LsShortSellingTrendDto;
 import com.teamfp.aistock.infra.ls.dto.LsStockCreditInfoDto;
@@ -28,7 +25,7 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Component
-public class LsEtcApiClient {
+public class LsEtcApiClient extends LsApiClientSupport {
 
     private static final int MAX_TREND_ITEMS = 5;
     // 2026-08-13 추가 — 장기간(6개월/1년 등) 공매도 추이를 물으면 최근 며칠치로는 답이 안
@@ -42,14 +39,13 @@ public class LsEtcApiClient {
     private static final int MAX_LISTING_ITEMS = 10;
 
     private final LsAccessTokenProvider accessTokenProvider;
-    private final RestClient restClient;
 
     @Value("${ls.etc-url}")
     private String etcUrl;
 
     public LsEtcApiClient(LsAccessTokenProvider accessTokenProvider, RestClient.Builder restClientBuilder) {
+        super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
-        this.restClient = restClientBuilder.build();
     }
 
     /** 예탁담보융자가능종목현황조회(CLNAQ00100) — 이 종목을 담보로 대출 가능한지. */
@@ -285,7 +281,7 @@ public class LsEtcApiClient {
                             .date(stringOf(row.get("date")))
                             .shortSellingVolume(parseLong(row.get("gm_vo")))
                             .shortSellingValue(parseLong(row.get("gm_va")))
-                            .shortSellingRatio(parseDouble(row.get("gm_per")))
+                            .shortSellingRatio(parseDoubleOrZero(row.get("gm_per")))
                             .build())
                     .toList();
         } catch (CustomException e) {
@@ -323,42 +319,6 @@ public class LsEtcApiClient {
     }
 
     private Map<String, Object> call(String trCd, Map<String, Object> requestBody, String token) {
-        return ExternalApiInvoker.call(() -> restClient.post()
-                        .uri(etcUrl)
-                        .header("Authorization", "Bearer " + token)
-                        .header("tr_cd", trCd)
-                        .header("tr_cont", "N")
-                        .header("tr_cont_key", "")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .body(requestBody)
-                        .retrieve()
-                        .body(new ParameterizedTypeReference<Map<String, Object>>() { }),
-                "LS 기타(" + trCd + ") 조회 실패");
-    }
-
-    private String stringOf(Object value) {
-        return value != null ? value.toString() : null;
-    }
-
-    private Long parseLong(Object value) {
-        if (value == null) {
-            return null;
-        }
-        try {
-            return Long.parseLong(value.toString().trim());
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private double parseDouble(Object value) {
-        if (value == null) {
-            return 0.0;
-        }
-        try {
-            return Double.parseDouble(value.toString().trim());
-        } catch (NumberFormatException e) {
-            return 0.0;
-        }
+        return call(etcUrl, trCd, requestBody, token, "LS 기타(" + trCd + ") 조회 실패", Map.of("tr_cont_key", ""));
     }
 }

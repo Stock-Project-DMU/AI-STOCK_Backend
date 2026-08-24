@@ -6,13 +6,10 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import com.teamfp.aistock.global.exception.CustomException;
-import com.teamfp.aistock.global.util.ExternalApiInvoker;
 import com.teamfp.aistock.infra.ls.dto.LsForeignInstitutionalTrendDto;
 
 import lombok.extern.slf4j.Slf4j;
@@ -31,7 +28,7 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Component
-public class LsInvestorTrendApiClient {
+public class LsInvestorTrendApiClient extends LsApiClientSupport {
 
     private static final String FOREIGN_INSTITUTIONAL_TREND_TR_CD = "t1716";
     private static final String OUT_BLOCK_KEY = "t1716OutBlock";
@@ -54,14 +51,13 @@ public class LsInvestorTrendApiClient {
     private static final int MAX_LONG_PERIOD_ITEMS = 500;
 
     private final LsAccessTokenProvider accessTokenProvider;
-    private final RestClient restClient;
 
     @Value("${ls.frgr-itt-url}")
     private String frgrIttUrl;
 
     public LsInvestorTrendApiClient(LsAccessTokenProvider accessTokenProvider, RestClient.Builder restClientBuilder) {
+        super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
-        this.restClient = restClientBuilder.build();
     }
 
     /**
@@ -89,16 +85,7 @@ public class LsInvestorTrendApiClient {
                     : today.minusDays(LOOKBACK_DAYS);
             Map<String, Object> requestBody = Map.of("t1716InBlock", buildT1716RequestBody(stockCode, fromDate, today));
 
-            Map<String, Object> response = ExternalApiInvoker.call(() -> restClient.post()
-                            .uri(frgrIttUrl)
-                            .header("Authorization", "Bearer " + token)
-                            .header("tr_cd", FOREIGN_INSTITUTIONAL_TREND_TR_CD)
-                            .header("tr_cont", "N")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .body(requestBody)
-                            .retrieve()
-                            .body(new ParameterizedTypeReference<Map<String, Object>>() { }),
-                    "LS 외국인/기관 매매동향 조회 실패");
+            Map<String, Object> response = call(frgrIttUrl, FOREIGN_INSTITUTIONAL_TREND_TR_CD, requestBody, token, "LS 외국인/기관 매매동향 조회 실패");
 
             return parseTrend(stockCode, response, longPeriod);
         } catch (CustomException e) {
@@ -155,26 +142,15 @@ public class LsInvestorTrendApiClient {
                 .build();
     }
 
-    private String stringOf(Object value) {
-        return value != null ? value.toString() : null;
-    }
-
     private long parseLongOrZero(Object value) {
         Long parsed = parseLong(value);
         return parsed != null ? parsed : 0L;
     }
 
-    private Long parseLong(Object value) {
-        if (value == null) {
-            return null;
-        }
-        try {
-            return Long.parseLong(value.toString().trim());
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
+    // 이 파일만 실패/누락 시 null을 돌려주는 버전을 쓴다(다른 9개 LsApiClientSupport 상속
+    // 클라이언트는 실패 시 0.0을 돌려주는 parseDoubleOrZero를 씀) — 이 파일의 호출부가
+    // "값 없음"과 "0"을 구분해야 해서, 이름과 계약이 다른 이 로컬 버전을 그대로 남겨둔다
+    // (코드리뷰 반영 — LsApiClientSupport로 통합하지 않은 유일한 예외).
     private Double parseDouble(Object value) {
         if (value == null) {
             return null;

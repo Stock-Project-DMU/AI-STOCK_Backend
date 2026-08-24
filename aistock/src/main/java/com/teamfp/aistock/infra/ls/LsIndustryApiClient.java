@@ -5,13 +5,10 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import com.teamfp.aistock.global.exception.CustomException;
-import com.teamfp.aistock.global.util.ExternalApiInvoker;
 import com.teamfp.aistock.infra.ls.dto.LsExpectedIndexDto;
 import com.teamfp.aistock.infra.ls.dto.LsIndustryPriceDto;
 import com.teamfp.aistock.infra.ls.dto.LsIndustryTrendDto;
@@ -29,7 +26,7 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Component
-public class LsIndustryApiClient {
+public class LsIndustryApiClient extends LsApiClientSupport {
 
     // 가장 일반적으로 쓰이는 업종코드 — 코스피(종합)를 기본값으로 삼는다. 개별 업종코드가
     // 필요한 세부 조회(예: "코스닥 지수 어때요?")는 향후 전체업종(t8424) 캐시를 활용해
@@ -44,14 +41,13 @@ public class LsIndustryApiClient {
     private static final String GUBUN2_MONTH = "3";
 
     private final LsAccessTokenProvider accessTokenProvider;
-    private final RestClient restClient;
 
     @Value("${ls.industry-url}")
     private String industryUrl;
 
     public LsIndustryApiClient(LsAccessTokenProvider accessTokenProvider, RestClient.Builder restClientBuilder) {
+        super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
-        this.restClient = restClientBuilder.build();
     }
 
     /** 업종현재가(t1511) — 업종지수 현재가 스냅샷. marketName은 "코스피" 또는 "코스닥". */
@@ -70,8 +66,8 @@ public class LsIndustryApiClient {
             return Optional.of(LsIndustryPriceDto.builder()
                     .industryCode(upcode)
                     .industryName(stringOf(outBlock.get("hname")))
-                    .indexValue(parseDouble(outBlock.get("pricejisu")))
-                    .changeRate(parseDouble(outBlock.get("diffjisu")))
+                    .indexValue(parseDoubleOrZero(outBlock.get("pricejisu")))
+                    .changeRate(parseDoubleOrZero(outBlock.get("diffjisu")))
                     .build());
         } catch (CustomException e) {
             log.warn("LS 업종현재가 조회 중 오류 - marketName: {}, 사유: {}", marketName, e.getMessage());
@@ -115,8 +111,8 @@ public class LsIndustryApiClient {
                     .limit(cnt)
                     .map(row -> LsIndustryTrendDto.builder()
                             .date(stringOf(row.get("date")))
-                            .indexValue(parseDouble(row.get("jisu")))
-                            .changeRate(parseDouble(row.get("diff")))
+                            .indexValue(parseDoubleOrZero(row.get("jisu")))
+                            .changeRate(parseDoubleOrZero(row.get("diff")))
                             .foreignNetBuy(parseLong(row.get("frgsvolume")))
                             .build())
                     .toList();
@@ -143,8 +139,8 @@ public class LsIndustryApiClient {
             @SuppressWarnings("unchecked")
             Map<String, Object> outBlock = (Map<String, Object>) response.get("t1485OutBlock");
             return Optional.of(LsExpectedIndexDto.builder()
-                    .expectedIndexValue(parseDouble(outBlock.get("pricejisu")))
-                    .changeRate(parseDouble(outBlock.get("change")))
+                    .expectedIndexValue(parseDoubleOrZero(outBlock.get("pricejisu")))
+                    .changeRate(parseDoubleOrZero(outBlock.get("change")))
                     .upperLimitStockCount(parseLongPrimitive(outBlock.get("yupjo")))
                     .lowerLimitStockCount(parseLongPrimitive(outBlock.get("ydownjo")))
                     .build());
@@ -155,46 +151,11 @@ public class LsIndustryApiClient {
     }
 
     private Map<String, Object> call(String trCd, Map<String, Object> requestBody, String token) {
-        return ExternalApiInvoker.call(() -> restClient.post()
-                        .uri(industryUrl)
-                        .header("Authorization", "Bearer " + token)
-                        .header("tr_cd", trCd)
-                        .header("tr_cont", "N")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .body(requestBody)
-                        .retrieve()
-                        .body(new ParameterizedTypeReference<Map<String, Object>>() { }),
-                "LS 업종(" + trCd + ") 조회 실패");
-    }
-
-    private String stringOf(Object value) {
-        return value != null ? value.toString() : null;
-    }
-
-    private Long parseLong(Object value) {
-        if (value == null) {
-            return null;
-        }
-        try {
-            return Long.parseLong(value.toString().trim());
-        } catch (NumberFormatException e) {
-            return null;
-        }
+        return call(industryUrl, trCd, requestBody, token, "LS 업종(" + trCd + ") 조회 실패");
     }
 
     private long parseLongPrimitive(Object value) {
         Long parsed = parseLong(value);
         return parsed != null ? parsed : 0L;
-    }
-
-    private double parseDouble(Object value) {
-        if (value == null) {
-            return 0.0;
-        }
-        try {
-            return Double.parseDouble(value.toString().trim());
-        } catch (NumberFormatException e) {
-            return 0.0;
-        }
     }
 }
