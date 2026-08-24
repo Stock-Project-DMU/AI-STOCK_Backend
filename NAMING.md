@@ -235,12 +235,20 @@ STOMP 엔드포인트: `/ws-stomp`
 토픽: `/topic/stock/{stockCode}` (브로드캐스팅), `/queue`(유니캐스팅 prefix), `/app`(publish prefix)
 
 ### `StompAuthInterceptor`
-메서드: `preSend(Message<?> message, MessageChannel channel)`
+메서드: `preSend(Message<?> message, MessageChannel channel)`, `onSessionDisconnect(SessionDisconnectEvent event)`
 
-> v8 추가: CONNECT 커맨드 검증 통과 시 `RedisOnlineStatusService.addOnline(userId)` 호출,
-> DISCONNECT 커맨드 수신 시 `RedisOnlineStatusService.removeOnline(userId)` 호출.
-> 클라이언트 비정상 종료(DISCONNECT 프레임 없이 연결만 끊김) 대비 `SessionDisconnectEvent`를
-> `@EventListener`로 별도 처리하는 보완 로직 필요 (구현 시 별도 메서드 `onSessionDisconnect(SessionDisconnectEvent event)`로 추가).
+> v8 추가: CONNECT 커맨드 검증 통과 시 `RedisOnlineStatusService.addOnline(userId)` 호출.
+>
+> **DISCONNECT 처리는 `onSessionDisconnect(SessionDisconnectEvent event)` 하나로만 한다 (v9,
+> feature/admin-dashboard 코드리뷰 반영 — 최초 구현 때는 `preSend()`의 STOMP DISCONNECT 커맨드
+> 분기와 `onSessionDisconnect` 둘 다에서 `removeOnline()`을 불렀다)**: 정상 종료라도 클라이언트가
+> DISCONNECT 프레임을 보낸 뒤 소켓이 실제로 닫히면 `SessionDisconnectEvent`도 함께 발행되므로,
+> 두 경로 모두 `removeOnline()`을 부르면 세션 하나가 끝났는데 두 번 호출된다. `admin:online:users`가
+> 처음엔 Set(SADD/SREM)이라 SREM 중복 호출이 멱등해 무해했는데, 아래 `RedisOnlineStatusService`
+> 항목처럼 "유저별 활성 세션 수" Hash로 바뀌면서 중복 호출이 실제 버그가 됐다 — 같은 유저가 탭을
+> 여러 개 열어놨을 때 하나만 닫아도 카운트가 2 줄어들어, 나머지 탭이 멀쩡히 연결돼 있는데도
+> 온라인 목록에서 빠져버린다. `SessionDisconnectEvent`는 정상/비정상 종료 상관없이 세션 하나당
+> 정확히 한 번만 발행되므로, 세션 종료를 세는 지점을 이거 하나로 통일해 해결했다.
 
 ### `AsyncConfig`
 빈: `tickTaskExecutor()` — 스레드풀 이름 prefix `tick-executor-`
@@ -299,6 +307,21 @@ redis-logic.md(수정본) 기준 확정된 이름 그대로 사용:
 | `RedisPendingOrderService` | `initPendingOrders`, `addPendingOrder`, `getPendingOrders`, `removePendingOrder` |
 | `RedisRateLimiterService` | `isAllowed`, `increment`, `getRemainingDaily` |
 | `RedisOnlineStatusService` (v8 추가) | `clearOnlineStatus()`(서버 재시작 시 `@PostConstruct` 초기화, v9), `addOnline(Long userId)`, `removeOnline(Long userId)`, `countOnline()`, `isOnline(Long userId)` |
+
+> **`admin:online:users`를 Set → Hash로 변경 (v9, feature/admin-dashboard 코드리뷰 반영)**:
+> 원래 Set(SADD/SREM, 값=userId)이었는데, 같은 유저가 탭을 여러 개 열어 세션이 여러 개 생긴
+> 상태에서 그중 하나만 닫혀도 `removeOnline()`(SREM)이 그 유저를 통째로 지워버려, 나머지 탭이
+> 여전히 연결돼 있는데도 관리자 화면엔 즉시 오프라인으로 보이는 문제가 있었다. Set이 막아주는
+> 건 "같은 유저를 여러 번 세는 중복 카운트" 문제뿐이지 "세션 중 하나만 끊겨도 전체가 꺼지는"
+> 문제는 막지 못한다. 그래서 `admin:online:users`를 Hash(field=userId, value=그 유저의 활성
+> WebSocket 세션 수)로 바꿔, `addOnline()`은 HINCRBY(+1), `removeOnline()`은 HINCRBY(-1) 후
+> 결과가 0 이하면 그 필드를 HDEL하는 방식으로 세션 수를 센다. 감소+정리를 자바 쪽에서
+> "감소 후 조회해서 0이면 삭제"로 따로 하면 그 사이 다른 세션의 CONNECT(증가)가 끼어들 때
+> 방금 새로 생긴 세션까지 같이 지워버릴 수 있어, Lua 스크립트로 원자적으로 묶었다.
+> `countOnline()`은 HLEN(활성 세션이 1개 이상인 유저 수), `isOnline()`은 HEXISTS로 바뀌었고
+> 둘 다 여전히 O(1)이라 Set일 때의 성능 특성은 그대로 유지된다. 이 변경은 `removeOnline()`이
+> 세션 하나당 정확히 한 번만 호출된다는 전제가 필요해, `StompAuthInterceptor` 쪽도 함께
+> 정리했다(위 `StompAuthInterceptor` 항목 참고).
 
 DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRate, volume, updatedAt), `HogaDto`(stockCode, askPrices, askVolumes, bidPrices, bidVolumes, updatedAt), `PendingOrderDto`(redis-logic.md 확정본과 동일)
 
@@ -400,11 +423,14 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 >    512개 이상이면 `subscribe()` 호출 자체는 그대로 진행하되 warn 로그만 남긴다(실제 초과 여부·
 >    거부 응답은 `LsWebSocketHandler`의 기존 ACK 로깅으로 확인 — 본격적인 대응은 범위 밖).
 >
-> **주의 (v14 발견, 이번 브랜치 범위 아님)**: CLAUDE.md 8번/NAMING.md 7번은 `RedisOnlineStatusService`와
-> `StompAuthInterceptor`의 CONNECT/DISCONNECT 온라인 추적이 이미 구현된 것처럼 기술하지만, 실제
-> 코드에는 `RedisOnlineStatusService`도 `SessionDisconnectEvent` 리스너도 없다(`StompAuthInterceptor`는
-> CONNECT 인증만 처리). `StockViewSubscriptionListener`가 이 저장소 최초의 STOMP 세션 이벤트
-> 리스너가 된다. 문서-코드 불일치는 `KNOWN_ISSUES.md` 2번에 별도로 남긴다.
+> **(v14 발견, feature/admin-dashboard에서 해소)**: 이 브랜치(feature/stock-price) 시점에는
+> CLAUDE.md 8번/NAMING.md 7번이 기술한 `RedisOnlineStatusService`/`StompAuthInterceptor`의
+> CONNECT/DISCONNECT 온라인 추적이 실제로는 구현되어 있지 않았다(`StompAuthInterceptor`는 CONNECT
+> 인증만 처리, `SessionDisconnectEvent` 리스너도 저장소에 없었음). `StockViewSubscriptionListener`가
+> 그 시점 저장소 최초의 STOMP 세션 이벤트 리스너였다. 이 불일치는 `KNOWN_ISSUES.md` 2번에 남겨뒀다가
+> `feature/admin-dashboard`가 온라인 사용자 수 집계를 실제로 필요로 하면서 `RedisOnlineStatusService`
+> 구현 + `StompAuthInterceptor.onSessionDisconnect(SessionDisconnectEvent)` 추가로 해소했다
+> (8-14 참고). `KNOWN_ISSUES.md` 2번도 그때 함께 제거했다.
 
 ### 8-5. feature/order-market
 
