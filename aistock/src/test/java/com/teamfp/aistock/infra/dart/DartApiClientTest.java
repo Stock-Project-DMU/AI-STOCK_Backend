@@ -9,6 +9,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -201,24 +202,33 @@ class DartApiClientTest {
         }
 
         @Test
-        @DisplayName("날짜 기준 분기에 데이터가 없으면 작년 연간 사업보고서로 대체하고, 그 이상은 더 시도하지 않는다")
+        @DisplayName("날짜 기준 분기에 데이터가 없으면 같은 해의 더 이전 분기를 마저 시도한 뒤 작년 연간 사업보고서로 대체한다")
         void fallsBackToLastYearAnnual_whenLikelyQuarterHasNoData() {
+            // 실제 운영 코드(getRecentQuarterlyFinancials)는 날짜로 고른 분기부터 시작해
+            // 3분기→반기→1분기 순서(QUARTERLY_REPORT_CODES_NEWEST_FIRST)를 끝까지 마저 시도한 뒤에야
+            // 작년 연간으로 대체한다. 테스트 실행 시점(LocalDate.now())에 따라 시작 분기가
+            // 반기·1분기 등으로 달라지므로, 시작 분기부터 1분기까지 남은 모든 분기를 동적으로
+            // mock해야 실행 날짜와 무관하게 항상 통과한다.
+            List<String> quarterlyReportCodesNewestFirst = List.of("11014", "11012", "11013");
             DartApiClient.ReportPeriod expected =
                     dartApiClient.mostRecentLikelyAvailableQuarter(LocalDate.now());
             String emptyJson = """
                     {"status":"013","message":"조회된 데이타가 없습니다."}""";
 
-            // 날짜 기준 분기 시도 - CFS/OFS 둘 다 없음
-            mockServer.expect(requestTo(Matchers.startsWith(API_URL)))
-                    .andExpect(queryParam("bsns_year", String.valueOf(expected.year())))
-                    .andExpect(queryParam("reprt_code", expected.reportCode()))
-                    .andExpect(queryParam("fs_div", "CFS"))
-                    .andRespond(withSuccess(emptyJson, MediaType.APPLICATION_JSON));
-            mockServer.expect(requestTo(Matchers.startsWith(API_URL)))
-                    .andExpect(queryParam("bsns_year", String.valueOf(expected.year())))
-                    .andExpect(queryParam("reprt_code", expected.reportCode()))
-                    .andExpect(queryParam("fs_div", "OFS"))
-                    .andRespond(withSuccess(emptyJson, MediaType.APPLICATION_JSON));
+            int startIndex = quarterlyReportCodesNewestFirst.indexOf(expected.reportCode());
+            for (int i = startIndex; i < quarterlyReportCodesNewestFirst.size(); i++) {
+                String reportCode = quarterlyReportCodesNewestFirst.get(i);
+                mockServer.expect(requestTo(Matchers.startsWith(API_URL)))
+                        .andExpect(queryParam("bsns_year", String.valueOf(expected.year())))
+                        .andExpect(queryParam("reprt_code", reportCode))
+                        .andExpect(queryParam("fs_div", "CFS"))
+                        .andRespond(withSuccess(emptyJson, MediaType.APPLICATION_JSON));
+                mockServer.expect(requestTo(Matchers.startsWith(API_URL)))
+                        .andExpect(queryParam("bsns_year", String.valueOf(expected.year())))
+                        .andExpect(queryParam("reprt_code", reportCode))
+                        .andExpect(queryParam("fs_div", "OFS"))
+                        .andRespond(withSuccess(emptyJson, MediaType.APPLICATION_JSON));
+            }
 
             // 작년 연간(11011) 사업보고서 대체 - CFS 성공
             int lastYear = LocalDate.now().getYear() - 1;
@@ -232,7 +242,7 @@ class DartApiClientTest {
 
             assertThat(response.revenue()).isEqualTo(333605938000000L);
             assertThat(response.bizYear()).isEqualTo(lastYear);
-            // 딱 3번(분기 CFS+OFS 실패, 연간 CFS 성공)만 호출되고 더 이상 시도하지 않는다.
+            // 시작 분기부터 1분기까지 전부 실패한 뒤 연간으로 대체되고, 더 이상 시도하지 않는다.
             mockServer.verify();
         }
     }
