@@ -1,5 +1,6 @@
 package com.teamfp.aistock.global.config;
 
+import com.teamfp.aistock.global.redis.RedisTokenService;
 import com.teamfp.aistock.global.security.CustomUserDetailsService;
 import com.teamfp.aistock.global.security.JwtAccessDeniedHandler;
 import com.teamfp.aistock.global.security.JwtAuthenticationEntryPoint;
@@ -42,6 +43,7 @@ public class SecurityConfig {
     // JwtAuthenticationFilter 생성에 필요한 의존성들 (필터 자체는 @Component가 아니라 여기서 직접 생성해서 등록한다)
     private final JwtProvider jwtProvider;
     private final CustomUserDetailsService customUserDetailsService;
+    private final RedisTokenService redisTokenService;
 
     // 인증 실패(401) / 인가 실패(403) 시 ApiResponse 포맷 JSON으로 응답을 내려주는 커스텀 핸들러
     private final JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
@@ -153,7 +155,7 @@ public class SecurityConfig {
                 // Spring Security가 기본으로 등록하는 UsernamePasswordAuthenticationFilter(폼 로그인용) 대신,
                 // 그 앞단에 JwtAuthenticationFilter를 끼워 넣어 매 요청마다 JWT를 검사하도록 한다.
                 .addFilterBefore(
-                        new JwtAuthenticationFilter(jwtProvider, customUserDetailsService),
+                        new JwtAuthenticationFilter(jwtProvider, customUserDetailsService, redisTokenService),
                         UsernamePasswordAuthenticationFilter.class
                 );
 

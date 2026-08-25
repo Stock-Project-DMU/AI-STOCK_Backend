@@ -24,7 +24,10 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
     // 유저 1명이 계좌를 최대 3개까지 가질 수 있어(feature/mypage-account) 단일 계좌를
     // 가정하던 findByUserId(Long)는 더 이상 쓰지 않는다 — 항상 목록 또는 accountId+userId
     // 조합으로 특정 계좌를 골라 조회한다.
-    @Query("select a from Account a where a.user.userId = :userId")
+    // ORDER BY 없이는 반환 순서가 보장되지 않아, "첫 번째 계좌"를 가정하는 호출부
+    // (예: AiPlanningService.findPrimaryHolding())가 호출마다 다른 계좌를 고를 수 있었다.
+    // accountId 오름차순(=생성 순서)으로 고정한다.
+    @Query("select a from Account a where a.user.userId = :userId order by a.accountId asc")
     List<Account> findAllByUserId(@Param("userId") Long userId);
 
     // AccountService.createAccount()용 — 계좌 개수 확인(check)과 신규 계좌 저장(save) 사이에
@@ -53,6 +56,12 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
     Optional<Account> findByAccountIdAndUserIdForUpdate(@Param("accountId") Long accountId, @Param("userId") Long userId);
 
     Optional<Account> findByAccountNumber(String accountNumber);
+
+    // 관리자 계좌 상세 조회 — account.user까지 fetch join으로 한 번에 즉시 로딩한다
+    // (AdminAccountService가 userName을 채워야 하는데, admin은 userId를 모르는 상태로
+    // accountId만 갖고 조회하므로 findByAccountIdAndUserId를 쓸 수 없다).
+    @Query("select a from Account a join fetch a.user where a.accountId = :accountId")
+    Optional<Account> findAccountWithUserById(@Param("accountId") Long accountId);
 
     @Modifying
     @Query("delete from Account a where a.user.userId = :userId")

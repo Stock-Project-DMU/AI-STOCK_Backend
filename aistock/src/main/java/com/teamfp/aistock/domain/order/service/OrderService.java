@@ -12,6 +12,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import com.teamfp.aistock.domain.account.entity.Account;
 import com.teamfp.aistock.domain.account.entity.AccountStatus;
 import com.teamfp.aistock.domain.account.service.AccountService;
+import com.teamfp.aistock.domain.notification.entity.NotificationType;
+import com.teamfp.aistock.domain.notification.service.NotificationService;
 import com.teamfp.aistock.domain.order.dto.PendingOrderDto;
 import com.teamfp.aistock.domain.order.dto.request.CreateOrderRequest;
 import com.teamfp.aistock.domain.order.dto.response.CreateOrderResponse;
@@ -56,6 +58,8 @@ public class OrderService {
     // 지정가 미체결 주문 대기 목록(pending:orders:{stockCode}) 관리도 같은 이유로
     // global/redis 서비스를 직접 주입받아 쓴다.
     private final RedisPendingOrderService redisPendingOrderService;
+    // 주문 체결 시 알림 발송 — 도메인 간 직접 참조 대신 서비스 계층(NotificationService)을 통해 호출한다.
+    private final NotificationService notificationService;
 
     /**
      * 현재가(시장가) 주문 — 잔고/보유수량을 확인한 뒤 실시간 현재가로 즉시 체결한다.
@@ -105,7 +109,17 @@ public class OrderService {
         order.execute(currentPrice);
         orderRepository.save(order);
 
+        notificationService.notify(userId, NotificationType.ORDER, "주문 체결", buildExecutionMessage(order));
+
         return CreateOrderResponse.from(order);
+    }
+
+    private String buildExecutionMessage(Order order) {
+        String action = order.getOrderType() == OrderType.BUY ? "매수" : "매도";
+        return String.format(
+                "%s %s %d주가 %,d원에 체결되었습니다.",
+                order.getStockName(), action, order.getQuantity(), order.getExecPrice()
+        );
     }
 
     private void executeBuy(Account account, CreateOrderRequest request, String stockName, long currentPrice, long totalAmount) {
@@ -286,6 +300,30 @@ public class OrderService {
         // 여기서 바로 지우면 이후 커밋이 실패(롤백)할 때 DB에는 여전히 PENDING인 주문이 Redis
         // pending:orders에서만 사라져 다시는 체결 대상이 되지 못하는 문제가 생긴다.
         registerAfterCommit(() -> redisPendingOrderService.removePendingOrder(order.getStockCode(), order.getOrderId()));
+    }
+
+    /**
+     * 관리자가 계좌를 SUSPENDED로 정지시킬 때 함께 호출된다(AdminAccountService.
+     * updateAccountStatus()). cancelOrder()와 달리 여기서는 이미 계좌가 SUSPENDED로 바뀐
+     * 뒤이므로 SUSPENDED 차단 검증을 하지 않는다 — 이 메서드 자체가 정지 처리의 일부다.
+     *
+     * 정지 시점에 기존 PENDING 지정가 주문을 그대로 두면 두 가지 문제가 있다: (1) tick이
+     * 들어올 때마다 OrderExecutionService.execute()가 계좌 상태와 무관하게 그대로 체결시켜
+     * "정지 중에는 매수·매도를 막는다"는 CLAUDE.md 8번 정책이 깨지고, (2) cancelOrder()는
+     * SUSPENDED 계좌의 취소 요청 자체를 막아버려 사용자가 그 주문을 스스로 취소할 방법도
+     * 없어진다. 그래서 정지 시점에 관리자가 대신 일괄 취소해 두 문제를 한 번에 없앤다.
+     */
+    @Transactional
+    public void cancelAllPendingOrdersForSuspension(Account account) {
+        List<Order> pendingOrders = orderRepository.findAllPendingByAccountIdForUpdate(account.getAccountId());
+
+        for (Order order : pendingOrders) {
+            if (order.getOrderType() == OrderType.BUY) {
+                account.unfreezeForOrder(order.getOrderPrice() * order.getQuantity());
+            }
+            order.cancel();
+            registerAfterCommit(() -> redisPendingOrderService.removePendingOrder(order.getStockCode(), order.getOrderId()));
+        }
     }
 
     /**
