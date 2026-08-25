@@ -1021,15 +1021,21 @@ call(String url, String trCd, Map<String, Object> requestBody, String token, Str
 > `Inquiry` Entity·`InquiryRepository`를 공유하되 Controller/Service/DTO는 분리한다.
 >
 > `InquiryRepository.findAllByOrderByStatusDescCreatedAtDesc()`(무인자, `List` 반환 —
-> `feature/inquiry`의 `InquiryRepositoryIntegrationTest`가 이미 사용 중이라 그대로 둠)에
-> 같은 정렬 기준의 `Pageable` 오버로드(`Page<Inquiry>` 반환)를 추가해 `getInquiries()`가 쓴다.
+> `feature/inquiry`의 `InquiryRepositoryIntegrationTest`가 이미 사용 중이라 그대로 둠)와 같은
+> 정렬 기준의 `Pageable` 오버로드는 이름을 분리하지 않고 `findAllByOrderByStatusDescCreatedAtDesc
+> (Pageable)`(`Page<Inquiry>` 반환)로 오버로드한다. `AdminInquiryResponse.from()`이
+> `inquiry.getUser()`를 참조하므로 파생 쿼리 대신 `join fetch i.user`를 쓰는 `@Query`로 작성해
+> `getInquiries()` 목록 조회 시 페이지당 N+1 SELECT가 발생하지 않도록 한다.
 >
 > **N+1 방지 (코드리뷰 반영, v8)**: `Pageable` 오버로드는 처음에 파생 쿼리(메서드 이름만으로
 > 자동 생성되는 쿼리) 그대로였는데, `AdminInquiryResponse.from()`이 목록의 각 `Inquiry`마다
 > `inquiry.getUser()`(LAZY)를 호출해 페이지 크기만큼 추가 SELECT가 발생했다. `AdminTradeService.
 > findAllOrdersWithUser`와 동일한 패턴으로 `@Query`에 `join fetch i.user`를 추가해 한 번의
 > 쿼리로 즉시 로딩한다 — `@Query`를 쓰면 메서드 이름의 `OrderBy`는 더 이상 자동 파싱되지 않으므로
-> 원래 정렬 기준(`status desc, createdAt desc`)을 JPQL `order by` 절로 명시했다.
+> 원래 정렬 기준(`status desc, createdAt desc`)을 JPQL `order by` 절로 명시했다. `user_id`는
+> `NOT NULL`(FK `ON DELETE CASCADE`)이라 `inquiry`는 항상 `user`를 가지므로 `left join fetch`
+> 대신 `join fetch`(inner)를 쓴다. `@Query`에 `fetch`가 섞이면 `Page` 카운트 쿼리를 자동
+> 유도하기 어려우므로 `countQuery`를 명시적으로 지정한다(`dev` 병합 시 정리, v9).
 >
 > **재답변(덮어쓰기) 정책**: `answerInquiry`는 대상 문의가 이미 `ANSWERED`여도 소유권/상태
 > 검증 없이 그대로 `Inquiry.answer()`를 호출해 기존 답변을 덮어쓴다 — 오타 정정 등 관리자가

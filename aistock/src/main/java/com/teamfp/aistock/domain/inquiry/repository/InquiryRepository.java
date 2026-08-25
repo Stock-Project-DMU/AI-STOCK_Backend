@@ -24,8 +24,6 @@ public interface InquiryRepository extends JpaRepository<Inquiry, Long> {
     // 정렬해야 미답변(PENDING) 문의가 관리자 전체 목록에서 먼저 노출된다.
     List<Inquiry> findAllByOrderByStatusDescCreatedAtDesc();
 
-    // 위 무인자 버전과 같은 정렬 기준의 Pageable 오버로드. feature/admin-inquiry의
-    // 관리자 전체 목록(GET /api/admin/inquiries)이 페이징 조회로 이 메서드를 쓴다.
     // AdminTradeService.findAllOrdersWithUser와 동일한 이유로 user까지 fetch join한다 —
     // 파생 쿼리 그대로 두면 AdminInquiryResponse.from()이 매 건마다 inquiry.getUser()를
     // LAZY 로딩하며 N+1이 발생한다(코드리뷰 반영). @Query를 쓰면 메서드 이름의 OrderBy는 더
