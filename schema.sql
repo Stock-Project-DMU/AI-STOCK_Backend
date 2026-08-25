@@ -401,6 +401,14 @@ CREATE TABLE ai_planning_sessions (
   [토큰 관리]
   prompt_tokens 누적으로 최근 N개 메시지만 전송 결정
   → 컨텍스트 윈도우 초과 방지
+
+  [세션 = 하나의 화제 단위] (2026-08-06 논의 후 확정)
+  한 세션(채팅방) 안에서 화제가 바뀌는 걸 자동으로 감지해 나누는 기능(topic_seq 등)은
+  검토했다가 제거했다 — 사용자는 세션 하나를 "하나의 큰 주제"(예: 삼성그룹 전체) 단위로
+  쓰고, 완전히 다른 주제(SK그룹 등)는 새 세션을 만들어 시작하는 방식이 실제 사용 패턴이라,
+  세션 내 화제 자동 분기 자체가 불필요했다. 화면은 세션 안 메시지를 그냥 시간순으로 보여주면
+  되고(카카오톡 채팅방과 동일한 스크롤 방식), AI가 세션 안 대화를 잊지 않게 하는 것은
+  AiPlanningService.buildHistory()의 히스토리 유지 정책으로 별도 해결한다.
 */
 CREATE TABLE ai_planning_messages (
     message_id    BIGINT        NOT NULL AUTO_INCREMENT,
@@ -420,7 +428,8 @@ CREATE TABLE ai_planning_messages (
 /*
   [데이터 출처]
   dart_data     : Open DART API (재무제표, 공시)
-  news_data     : Tavily API (뉴스, 애널리스트 리포트)
+  news_data     : 네이버 뉴스 검색 API (NCP API Hub) — 원래 Tavily였으나 feature/ai-planning에서
+                  2026-08-05 네이버로 교체(관련 코드는 2026-08-06 완전 삭제), 이 기능도 동일하게 맞춘다
   scenario_data : Gemini는 시나리오별 월 복리 성장률(스칼라) + 근거만 반환하고,
                   실제 date+value 곡선은 서버가 investment_amount를 기점으로
                   복리 계산해서 생성한다(정확성·Best≥Base≥Worst 보장·지연시간
@@ -449,7 +458,7 @@ CREATE TABLE simulations (
     base_reach_date  DATE,                           -- Base 시나리오 목표 도달 예상일
     worst_reach_date DATE,                           -- Worst 시나리오 목표 도달 예상일
     dart_data        JSON,                           -- Open DART 재무 원본
-    news_data        JSON,                           -- Tavily 뉴스 원본
+    news_data        JSON,                           -- 네이버 뉴스 검색 원본
     created_at       DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (simulation_id),
     INDEX idx_user_sim (user_id),

@@ -1,4 +1,19 @@
-# Redis 키 설계 및 로직 (최종본 v6)
+# Redis 키 설계 및 로직 (최종본 v8)
+
+**변경사항 v7 → v8**
+1. 키 구조·TTL 변경 없음. AI 상담(`feature/ai-planning`)의 뉴스 검색 백엔드가 Tavily에서
+   네이버 뉴스 검색 API(NCP API Hub)로 바뀌면서, `ai:tool:{sessionId}:{도구이름}?{인자}`가
+   캐싱하는 도구 실행 결과의 출처만 DART/Tavily → DART/네이버로 바뀌었다. Tavily의
+   AI 자동요약(answer)이 동일한 검색어로 다시 호출해도 결과가 재현되지 않는 비결정성
+   문제(같은 질문이 10분 사이에 결과가 뒤바뀜, 2026-08-05 라이브 테스트로 확인)가 전환 사유.
+
+**변경사항 v6 → v7**
+1. `ai:tool:{sessionId}:{도구이름}?{인자}` 키 추가 (TTL 30분) — `feature/ai-planning`에서
+   AI 상담이 DART/Tavily 도구를 실행한 결과를 세션 단위로 캐싱한다. 같은 세션 안에서
+   "그 회사 순이익은요?"처럼 같은 회사·같은 조회 조건에 대한 후속 질문이 오면 DART/Tavily를
+   다시 호출하지 않고 이전 결과를 그대로 재사용해, 후속 질문 응답 속도를 높이고 외부 API
+   호출 횟수(특히 Gemini 무료 등급의 낮은 일일 한도)를 아낀다. `RedisAiToolCacheService`
+   신규 추가.
 
 **변경사항 v5 → v6**
 1. `auth:email_verified:{email}` 키 추가 (TTL 30분) — `feature/auth-signup`에서 이메일 인증
@@ -25,7 +40,7 @@
 
 **키 네이밍 규칙**: `{서비스}:{목적}:{식별자}`
 
-## TTL 정책 요약 v6 — 10개 키
+## TTL 정책 요약 v8 — 11개 키
 
 | 키 | TTL | 용도 |
 |---|---|---|
@@ -40,6 +55,7 @@
 | `gemini:rate:{userId}:minute` | 1분 | Gemini API 호출 횟수 (분당 3회 제한) |
 | `gemini:rate:{userId}:daily` | 1일 | Gemini API 호출 횟수 (일일 10회 제한) |
 | `admin:online:users` | 없음 (이벤트 기반) | 현재 WebSocket 연결 중인 userId 집합 (관리자 대시보드) |
+| `ai:tool:{sessionId}:{도구이름}?{인자}` | 30분 | AI 상담 세션 내 DART/네이버 도구 실행 결과 캐시 |
 
 **제거된 키**: `briefing:{userId}:{date}` → 시황 브리핑이 Tavily 즉석 검색으로 변경되어 캐싱 불필요
 
@@ -604,7 +620,65 @@ public Message<?> preSend(Message<?> message, MessageChannel channel) {
 
 ---
 
-## 8. PendingOrderDto
+## 8. RedisAiToolCacheService — AI 상담 도구 실행 결과 캐시 (v7 신규, v8에서 뉴스 백엔드 Tavily→네이버 전환)
+
+**설계 배경**
+
+AI 재무설계 상담(`AiPlanningService`)은 사용자 질문마다 Gemini가 필요하다고 판단한
+DART/네이버(뉴스 검색, 2026-08-05 이전엔 Tavily) 도구를 실행한다. 그런데 같은 세션 안에서
+"그럼 순이익은요?"처럼 방금 조회한 회사에 대한 후속 질문이 오면, 이전과 동일한 회사·동일한
+조회 조건으로 DART/네이버를 또 호출하게 된다 — 후속 질문 응답이 느려지고, Gemini 무료
+등급의 낮은 일일 호출 한도(실측 하루 30여 회)와 별개로 DART/네이버 자체의 호출 비용도
+불필요하게 늘어난다.
+
+**세션 단위로 캐싱하는 이유**
+
+전역 캐싱(`stock:price:{stockCode}`처럼 모든 사용자가 공유)을 하지 않고 세션별로 키를
+나눈 이유는, AI 상담 결과는 사용자마다 문맥(투자성향, 보유종목)이 섞여 들어간 조회일 수
+있어 다른 세션과 공유하면 안 되기 때문이다. TTL을 30분으로 짧게 둔 이유는 하나의 대화가
+이어지는 정도의 시간이면 충분하고, 그 이상 지나면 최신 데이터로 다시 조회하는 게 맞기
+때문이다(재무 데이터는 다음 분기·연간 공시로 바뀔 수 있다).
+
+**수정 사항**: 신규 서비스이므로 별도 마이그레이션 없음. `RedisTemplate<String, String>`을
+그대로 재사용하는 단순 문자열 캐시라 `ObjectMapper` 직렬화가 필요 없다.
+
+```java
+@Service
+@RequiredArgsConstructor
+public class RedisAiToolCacheService {
+
+    private final RedisTemplate<String, String> redisTemplate;
+
+    // 키 형태: ai:tool:{sessionId}:{도구이름}?{정렬된 인자 목록}
+    private static final String AI_TOOL_CACHE_KEY = "ai:tool:";
+
+    private static final long TTL_MINUTES = 30;
+
+    // 이전에 캐싱해둔 도구 실행 결과 조회
+    public Optional<String> getCachedResult(Long sessionId, String toolKey) {
+        return Optional.ofNullable(redisTemplate.opsForValue().get(buildKey(sessionId, toolKey)));
+    }
+
+    // 도구 실행 결과 캐싱 (TTL 30분)
+    public void cacheResult(Long sessionId, String toolKey, String result) {
+        redisTemplate.opsForValue().set(buildKey(sessionId, toolKey), result, Duration.ofMinutes(TTL_MINUTES));
+    }
+
+    private String buildKey(Long sessionId, String toolKey) {
+        return AI_TOOL_CACHE_KEY + sessionId + ":" + toolKey;
+    }
+}
+```
+
+**`AiPlanningService` 연동 지점**: `executeTool(Long sessionId, FunctionCall functionCall)`이
+도구 이름 + 인자를 정렬해 캐시 키를 만들고, 실행 전 `getCachedResult()`로 먼저 확인한다.
+캐시가 없으면 실제로 DART/네이버를 호출한 뒤 `cacheResult()`로 저장한다. 단, 예상치 못한
+오류(`RuntimeException`) 응답은 일시적일 수 있으므로 캐싱하지 않고, 정상 실행된 결과("찾지
+못했습니다" 같은 정상적인 빈 결과 포함)만 캐싱한다.
+
+---
+
+## 9. PendingOrderDto
 
 ```java
 @Getter
@@ -625,7 +699,7 @@ public class PendingOrderDto {
 
 ---
 
-## 9. application.yml — Redis 설정
+## 10. application.yml — Redis 설정
 
 ```yaml
 spring:
