@@ -6,13 +6,10 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import com.teamfp.aistock.global.exception.CustomException;
-import com.teamfp.aistock.global.util.ExternalApiInvoker;
 import com.teamfp.aistock.infra.ls.dto.LsCallAuctionPriceDto;
 import com.teamfp.aistock.infra.ls.dto.LsCurrentPriceDetailDto;
 import com.teamfp.aistock.infra.ls.dto.LsHistoricalPriceDto;
@@ -44,20 +41,19 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Component
-public class LsMarketDataApiClient {
+public class LsMarketDataApiClient extends LsApiClientSupport {
 
     private static final String CURRENT_PRICE_TR_CD = "t1102";
     private static final String OUT_BLOCK_KEY = "t1102OutBlock";
 
     private final LsAccessTokenProvider accessTokenProvider;
-    private final RestClient restClient;
 
     @Value("${ls.market-data-url}")
     private String marketDataUrl;
 
     public LsMarketDataApiClient(LsAccessTokenProvider accessTokenProvider, RestClient.Builder restClientBuilder) {
+        super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
-        this.restClient = restClientBuilder.build();
     }
 
     /**
@@ -71,16 +67,7 @@ public class LsMarketDataApiClient {
             String token = accessTokenProvider.issueAccessToken();
             Map<String, Object> requestBody = Map.of("t1102InBlock", Map.of("shcode", stockCode));
 
-            Map<String, Object> response = ExternalApiInvoker.call(() -> restClient.post()
-                    .uri(marketDataUrl)
-                    .header("Authorization", "Bearer " + token)
-                    .header("tr_cd", CURRENT_PRICE_TR_CD)
-                    .header("tr_cont", "N")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(requestBody)
-                    .retrieve()
-                    .body(new ParameterizedTypeReference<Map<String, Object>>() { }),
-                    "LS 현재가 조회 실패");
+            Map<String, Object> response = call(marketDataUrl, CURRENT_PRICE_TR_CD, requestBody, token, "LS 현재가 조회 실패");
 
             return parseCurrentPrice(stockCode, response);
         } catch (CustomException e) {
@@ -114,7 +101,7 @@ public class LsMarketDataApiClient {
                 .stockName(stringOf(outBlock.get("hname")))
                 .currentPrice(currentPrice)
                 .changeAmount(changeAmount != null ? changeAmount : 0L)
-                .changeRate(parseDouble(outBlock.get("diff")))
+                .changeRate(parseDoubleOrZero(outBlock.get("diff")))
                 .volume(volume != null ? volume : 0L)
                 .per(parseNullableDouble(outBlock.get("per")))
                 .pbr(parseNullableDouble(outBlock.get("pbrx")))
@@ -153,16 +140,7 @@ public class LsMarketDataApiClient {
             Map<String, Object> inBlock = Map.of("gubun", "0", "jongchk", "1", "cts_shcode", " ");
             Map<String, Object> requestBody = Map.of(trCd + "InBlock", inBlock);
 
-            Map<String, Object> response = ExternalApiInvoker.call(() -> restClient.post()
-                            .uri(marketDataUrl)
-                            .header("Authorization", "Bearer " + token)
-                            .header("tr_cd", trCd)
-                            .header("tr_cont", "N")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .body(requestBody)
-                            .retrieve()
-                            .body(new ParameterizedTypeReference<Map<String, Object>>() { }),
-                    "LS 위험신호(" + trCd + ") 조회 실패");
+            Map<String, Object> response = call(marketDataUrl, trCd, requestBody, token, "LS 위험신호(" + trCd + ") 조회 실패");
 
             if (response == null || !(response.get(outBlockKey) instanceof List)) {
                 return List.of();
@@ -188,16 +166,7 @@ public class LsMarketDataApiClient {
             String token = accessTokenProvider.issueAccessToken();
             Map<String, Object> requestBody = Map.of("t1105InBlock", Map.of("shcode", stockCode, "exchgubun", "K"));
 
-            Map<String, Object> response = ExternalApiInvoker.call(() -> restClient.post()
-                            .uri(marketDataUrl)
-                            .header("Authorization", "Bearer " + token)
-                            .header("tr_cd", "t1105")
-                            .header("tr_cont", "N")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .body(requestBody)
-                            .retrieve()
-                            .body(new ParameterizedTypeReference<Map<String, Object>>() { }),
-                    "LS 피봇/디마크 조회 실패");
+            Map<String, Object> response = call(marketDataUrl, "t1105", requestBody, token, "LS 피봇/디마크 조회 실패");
 
             if (response == null || !(response.get("t1105OutBlock") instanceof Map)) {
                 return Optional.empty();
@@ -244,16 +213,7 @@ public class LsMarketDataApiClient {
             inBlock.put("cnt", cnt);
             Map<String, Object> requestBody = Map.of("t1305InBlock", inBlock);
 
-            Map<String, Object> response = ExternalApiInvoker.call(() -> restClient.post()
-                            .uri(marketDataUrl)
-                            .header("Authorization", "Bearer " + token)
-                            .header("tr_cd", "t1305")
-                            .header("tr_cont", "N")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .body(requestBody)
-                            .retrieve()
-                            .body(new ParameterizedTypeReference<Map<String, Object>>() { }),
-                    "LS 기간별주가 조회 실패");
+            Map<String, Object> response = call(marketDataUrl, "t1305", requestBody, token, "LS 기간별주가 조회 실패");
 
             if (response == null || !(response.get("t1305OutBlock1") instanceof List)) {
                 return List.of();
@@ -268,7 +228,7 @@ public class LsMarketDataApiClient {
                             .high(parseLong(row.get("high")))
                             .low(parseLong(row.get("low")))
                             .close(parseLong(row.get("close")))
-                            .changeRate(parseDouble(row.get("diff")))
+                            .changeRate(parseDoubleOrZero(row.get("diff")))
                             .volume(parseLong(row.get("volume")))
                             .marketCap(parseLong(row.get("marketcap")))
                             .foreignNetBuy(parseLong(row.get("fpvolume")))
@@ -293,16 +253,7 @@ public class LsMarketDataApiClient {
             Map<String, Object> requestBody = Map.of("t8407InBlock",
                     Map.of("nrec", limited.size(), "shcode", concatenatedCodes));
 
-            Map<String, Object> response = ExternalApiInvoker.call(() -> restClient.post()
-                            .uri(marketDataUrl)
-                            .header("Authorization", "Bearer " + token)
-                            .header("tr_cd", "t8407")
-                            .header("tr_cont", "N")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .body(requestBody)
-                            .retrieve()
-                            .body(new ParameterizedTypeReference<Map<String, Object>>() { }),
-                    "LS 멀티종목현재가 조회 실패");
+            Map<String, Object> response = call(marketDataUrl, "t8407", requestBody, token, "LS 멀티종목현재가 조회 실패");
 
             if (response == null || !(response.get("t8407OutBlock1") instanceof List)) {
                 return List.of();
@@ -315,7 +266,7 @@ public class LsMarketDataApiClient {
                             .stockName(stringOf(row.get("hname")))
                             .price(parseLong(row.get("price")))
                             .changeAmount(parseLong(row.get("change")))
-                            .changeRate(parseDouble(row.get("diff")))
+                            .changeRate(parseDoubleOrZero(row.get("diff")))
                             .volume(parseLong(row.get("volume")))
                             .build())
                     .toList();
@@ -340,16 +291,7 @@ public class LsMarketDataApiClient {
             inBlock.put("exchgubun", "K");
             Map<String, Object> requestBody = Map.of("t1486InBlock", inBlock);
 
-            Map<String, Object> response = ExternalApiInvoker.call(() -> restClient.post()
-                            .uri(marketDataUrl)
-                            .header("Authorization", "Bearer " + token)
-                            .header("tr_cd", "t1486")
-                            .header("tr_cont", "N")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .body(requestBody)
-                            .retrieve()
-                            .body(new ParameterizedTypeReference<Map<String, Object>>() { }),
-                    "LS 동시호가예상체결가 조회 실패");
+            Map<String, Object> response = call(marketDataUrl, "t1486", requestBody, token, "LS 동시호가예상체결가 조회 실패");
 
             if (response == null || !(response.get("t1486OutBlock1") instanceof List)) {
                 return List.of();
@@ -361,7 +303,7 @@ public class LsMarketDataApiClient {
                     .map(row -> LsCallAuctionPriceDto.builder()
                             .time(stringOf(row.get("chetime")))
                             .price(parseLong(row.get("price")))
-                            .changeRate(parseDouble(row.get("diff")))
+                            .changeRate(parseDoubleOrZero(row.get("diff")))
                             .expectedVolume(parseLong(row.get("cvolume")))
                             .build())
                     .toList();
@@ -371,35 +313,9 @@ public class LsMarketDataApiClient {
         }
     }
 
-    private String stringOf(Object value) {
-        return value != null ? value.toString() : null;
-    }
-
-    private Long parseLong(Object value) {
-        if (value == null) {
-            return null;
-        }
-        try {
-            return Long.parseLong(value.toString().trim());
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private double parseDouble(Object value) {
-        if (value == null) {
-            return 0.0;
-        }
-        try {
-            return Double.parseDouble(value.toString().trim());
-        } catch (NumberFormatException e) {
-            return 0.0;
-        }
-    }
-
     // per/pbrx/exhratio는 값이 없으면(비교/우선주 등) 0.0으로 뭉개지 않고 null로 남겨,
     // describe 단계에서 "정보없음"으로 자연스럽게 안내할 수 있게 한다 — changeRate(diff)와
-    // 달리 이 세 필드는 "0"과 "값 없음"을 구분해야 하는 지표라서 parseDouble()과 분리했다.
+    // 달리 이 세 필드는 "0"과 "값 없음"을 구분해야 하는 지표라서 parseDoubleOrZero()와 분리했다.
     private Double parseNullableDouble(Object value) {
         if (value == null) {
             return null;

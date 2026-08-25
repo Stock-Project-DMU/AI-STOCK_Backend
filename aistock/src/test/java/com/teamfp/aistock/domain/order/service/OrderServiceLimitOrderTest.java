@@ -1,6 +1,7 @@
 package com.teamfp.aistock.domain.order.service;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -381,6 +382,70 @@ class OrderServiceLimitOrderTest {
                     .isInstanceOf(CustomException.class)
                     .extracting(e -> ((CustomException) e).getErrorCode())
                     .isEqualTo(ErrorCode.ORDER_ALREADY_PROCESSED);
+
+            verify(redisPendingOrderService, never()).removePendingOrder(anyString(), anyLong());
+        }
+    }
+
+    /**
+     * feature/admin-account 코드리뷰 반영 — 관리자가 계좌를 SUSPENDED로 정지시킬 때
+     * AdminAccountService가 호출하는 cancelAllPendingOrdersForSuspension()의 단위 테스트.
+     * 정지 후에도 tick 체결이 계속되거나(OrderExecutionService.execute가 SUSPENDED를 모름)
+     * 사용자가 취소도 못 하는(cancelOrder가 SUSPENDED를 막음) 상태가 남지 않도록, 정지
+     * 시점에 관리자가 대신 PENDING 주문을 전부 취소해야 한다.
+     */
+    @Nested
+    @DisplayName("관리자 계좌 정지 시 PENDING 주문 일괄 취소")
+    class CancelAllPendingOrdersForSuspension {
+
+        @Test
+        @DisplayName("PENDING 매수 주문은 frozenBalance를 해제하고 CANCELLED로 바꾼 뒤 Redis에서도 제거한다")
+        void success_cancelsPendingBuyOrderAndUnfreezesBalance() {
+            Order buyOrder = pendingBuyOrder(70_000L, 10);
+            ReflectionTestUtils.setField(buyOrder, "orderId", 1L);
+            account.freezeForOrder(700_000L);
+            when(orderRepository.findAllPendingByAccountIdForUpdate(account.getAccountId()))
+                    .thenReturn(List.of(buyOrder));
+
+            orderService.cancelAllPendingOrdersForSuspension(account);
+
+            assertThat(buyOrder.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+            assertThat(account.getFrozenBalance()).isZero();
+            assertThat(account.getBalance()).isEqualTo(1_000_000L);
+            verify(redisPendingOrderService).removePendingOrder(STOCK_CODE, buyOrder.getOrderId());
+        }
+
+        @Test
+        @DisplayName("PENDING 매도 주문은 frozenBalance를 건드리지 않고 CANCELLED로 바꾼 뒤 Redis에서도 제거한다")
+        void success_cancelsPendingSellOrderWithoutTouchingBalance() {
+            Order sellOrder = Order.builder()
+                    .account(account)
+                    .stockCode(STOCK_CODE)
+                    .stockName("삼성전자")
+                    .orderType(OrderType.SELL)
+                    .priceType(PriceType.LIMIT)
+                    .orderPrice(80_000L)
+                    .quantity(5)
+                    .build();
+            ReflectionTestUtils.setField(sellOrder, "orderId", 2L);
+            when(orderRepository.findAllPendingByAccountIdForUpdate(account.getAccountId()))
+                    .thenReturn(List.of(sellOrder));
+
+            orderService.cancelAllPendingOrdersForSuspension(account);
+
+            assertThat(sellOrder.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+            assertThat(account.getBalance()).isEqualTo(1_000_000L);
+            assertThat(account.getFrozenBalance()).isZero();
+            verify(redisPendingOrderService).removePendingOrder(STOCK_CODE, sellOrder.getOrderId());
+        }
+
+        @Test
+        @DisplayName("PENDING 주문이 없으면 아무 것도 취소하거나 Redis를 건드리지 않는다")
+        void success_noPendingOrders_doesNothing() {
+            when(orderRepository.findAllPendingByAccountIdForUpdate(account.getAccountId()))
+                    .thenReturn(List.of());
+
+            orderService.cancelAllPendingOrdersForSuspension(account);
 
             verify(redisPendingOrderService, never()).removePendingOrder(anyString(), anyLong());
         }

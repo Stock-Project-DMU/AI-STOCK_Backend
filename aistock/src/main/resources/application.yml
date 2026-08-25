@@ -3,6 +3,14 @@ spring:
     name: aistock
   profiles:
     active: dev
+  data:
+    web:
+      # 관리자 목록 API(admin-trade/admin-user/admin-inquiry)는 @PageableDefault(size=20)만
+      # 걸어뒀는데, 이는 요청이 없을 때의 기본값일 뿐 상한이 아니라 ?size=999999999 같은 요청이
+      # 그대로 통과해 전체 테이블을 한 번에 긁어올 수 있었다(코드리뷰 반영). 개별 컨트롤러마다
+      # 검증을 반복하는 대신 Spring Data Web의 전역 설정으로 요청 가능한 최대 size를 제한한다.
+      pageable:
+        max-page-size: 100
 
 server:
   port: 8080

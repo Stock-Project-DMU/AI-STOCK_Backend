@@ -5,13 +5,10 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import com.teamfp.aistock.global.exception.CustomException;
-import com.teamfp.aistock.global.util.ExternalApiInvoker;
 import com.teamfp.aistock.infra.ls.dto.LsFinancialRankingDto;
 import com.teamfp.aistock.infra.ls.dto.LsInvestmentOpinionDto;
 import com.teamfp.aistock.infra.ls.dto.LsMarketLiquidityDto;
@@ -29,7 +26,7 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Component
-public class LsInvestInfoApiClient {
+public class LsInvestInfoApiClient extends LsApiClientSupport {
 
     private static final String INVESTMENT_OPINION_TR_CD = "t3401";
     private static final String OPINION_OUT_BLOCK_KEY = "t3401OutBlock1";
@@ -45,14 +42,13 @@ public class LsInvestInfoApiClient {
     private static final int MAX_SCHEDULE_ITEMS = 5;
 
     private final LsAccessTokenProvider accessTokenProvider;
-    private final RestClient restClient;
 
     @Value("${ls.investinfo-url}")
     private String investInfoUrl;
 
     public LsInvestInfoApiClient(LsAccessTokenProvider accessTokenProvider, RestClient.Builder restClientBuilder) {
+        super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
-        this.restClient = restClientBuilder.build();
     }
 
     /**
@@ -69,16 +65,7 @@ public class LsInvestInfoApiClient {
             inBlock.put("cts_date", "");
             Map<String, Object> requestBody = Map.of("t3401InBlock", inBlock);
 
-            Map<String, Object> response = ExternalApiInvoker.call(() -> restClient.post()
-                            .uri(investInfoUrl)
-                            .header("Authorization", "Bearer " + token)
-                            .header("tr_cd", INVESTMENT_OPINION_TR_CD)
-                            .header("tr_cont", "N")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .body(requestBody)
-                            .retrieve()
-                            .body(new ParameterizedTypeReference<Map<String, Object>>() { }),
-                    "LS 투자의견 조회 실패");
+            Map<String, Object> response = call(investInfoUrl, INVESTMENT_OPINION_TR_CD, requestBody, token, "LS 투자의견 조회 실패");
 
             return parseOpinions(stockCode, response);
         } catch (CustomException e) {
@@ -99,16 +86,7 @@ public class LsInvestInfoApiClient {
             inBlock.put("date", "");
             Map<String, Object> requestBody = Map.of("t3202InBlock", inBlock);
 
-            Map<String, Object> response = ExternalApiInvoker.call(() -> restClient.post()
-                            .uri(investInfoUrl)
-                            .header("Authorization", "Bearer " + token)
-                            .header("tr_cd", SCHEDULE_TR_CD)
-                            .header("tr_cont", "N")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .body(requestBody)
-                            .retrieve()
-                            .body(new ParameterizedTypeReference<Map<String, Object>>() { }),
-                    "LS 증시일정 조회 실패");
+            Map<String, Object> response = call(investInfoUrl, SCHEDULE_TR_CD, requestBody, token, "LS 증시일정 조회 실패");
 
             return parseShareholderMeetings(stockCode, response);
         } catch (CustomException e) {
@@ -206,16 +184,7 @@ public class LsInvestInfoApiClient {
             inBlock.put("exchgubun", "K");
             Map<String, Object> requestBody = Map.of("t3341InBlock", inBlock);
 
-            Map<String, Object> response = ExternalApiInvoker.call(() -> restClient.post()
-                            .uri(investInfoUrl)
-                            .header("Authorization", "Bearer " + token)
-                            .header("tr_cd", FINANCIAL_RANKING_TR_CD)
-                            .header("tr_cont", "N")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .body(requestBody)
-                            .retrieve()
-                            .body(new ParameterizedTypeReference<Map<String, Object>>() { }),
-                    "LS 재무순위종합 조회 실패");
+            Map<String, Object> response = call(investInfoUrl, FINANCIAL_RANKING_TR_CD, requestBody, token, "LS 재무순위종합 조회 실패");
 
             return parseFinancialRanking(response);
         } catch (CustomException e) {
@@ -236,16 +205,7 @@ public class LsInvestInfoApiClient {
             inBlock.put("symbol", symbol);
             Map<String, Object> requestBody = Map.of("t3521InBlock", inBlock);
 
-            Map<String, Object> response = ExternalApiInvoker.call(() -> restClient.post()
-                            .uri(investInfoUrl)
-                            .header("Authorization", "Bearer " + token)
-                            .header("tr_cd", OVERSEAS_INDEX_TR_CD)
-                            .header("tr_cont", "N")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .body(requestBody)
-                            .retrieve()
-                            .body(new ParameterizedTypeReference<Map<String, Object>>() { }),
-                    "LS 해외지수 조회 실패");
+            Map<String, Object> response = call(investInfoUrl, OVERSEAS_INDEX_TR_CD, requestBody, token, "LS 해외지수 조회 실패");
 
             return parseOverseasIndex(symbol, response);
         } catch (CustomException e) {
@@ -288,16 +248,7 @@ public class LsInvestInfoApiClient {
             inBlock.put("idx", 0);
             Map<String, Object> requestBody = Map.of("t8428InBlock", inBlock);
 
-            Map<String, Object> response = ExternalApiInvoker.call(() -> restClient.post()
-                            .uri(investInfoUrl)
-                            .header("Authorization", "Bearer " + token)
-                            .header("tr_cd", MARKET_LIQUIDITY_TR_CD)
-                            .header("tr_cont", "N")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .body(requestBody)
-                            .retrieve()
-                            .body(new ParameterizedTypeReference<Map<String, Object>>() { }),
-                    "LS 증시주변자금추이 조회 실패");
+            Map<String, Object> response = call(investInfoUrl, MARKET_LIQUIDITY_TR_CD, requestBody, token, "LS 증시주변자금추이 조회 실패");
 
             return parseMarketLiquidity(response, cap);
         } catch (CustomException e) {
@@ -324,10 +275,10 @@ public class LsInvestInfoApiClient {
                     .rank(rank++)
                     .stockCode(stringOf(row.get("shcode")))
                     .stockName(stringOf(row.get("hname")))
-                    .roe(parseDouble(row.get("roe")))
-                    .per(parseDouble(row.get("per")))
-                    .pbr(parseDouble(row.get("pbr")))
-                    .salesGrowthRate(parseDouble(row.get("salesgrowth")))
+                    .roe(parseDoubleOrZero(row.get("roe")))
+                    .per(parseDoubleOrZero(row.get("per")))
+                    .pbr(parseDoubleOrZero(row.get("pbr")))
+                    .salesGrowthRate(parseDoubleOrZero(row.get("salesgrowth")))
                     .build());
             if (items.size() >= MAX_FINANCIAL_RANKING_ITEMS) {
                 break;
@@ -350,9 +301,9 @@ public class LsInvestInfoApiClient {
         return Optional.of(LsOverseasIndexDto.builder()
                 .symbol(symbol)
                 .name(stringOf(outBlock.get("hname")))
-                .price(parseDouble(outBlock.get("close")))
-                .changeAmount(parseDouble(outBlock.get("change")))
-                .changeRate(parseDouble(outBlock.get("diff")))
+                .price(parseDoubleOrZero(outBlock.get("close")))
+                .changeAmount(parseDoubleOrZero(outBlock.get("change")))
+                .changeRate(parseDoubleOrZero(outBlock.get("diff")))
                 .date(stringOf(outBlock.get("date")))
                 .build());
     }
@@ -383,29 +334,4 @@ public class LsInvestInfoApiClient {
         return items;
     }
 
-    private String stringOf(Object value) {
-        return value != null ? value.toString() : null;
-    }
-
-    private double parseDouble(Object value) {
-        if (value == null) {
-            return 0.0;
-        }
-        try {
-            return Double.parseDouble(value.toString().trim());
-        } catch (NumberFormatException e) {
-            return 0.0;
-        }
-    }
-
-    private Long parseLong(Object value) {
-        if (value == null) {
-            return null;
-        }
-        try {
-            return Long.parseLong(value.toString().trim());
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
 }
