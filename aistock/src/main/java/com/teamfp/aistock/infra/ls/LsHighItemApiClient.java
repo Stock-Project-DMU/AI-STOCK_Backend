@@ -4,13 +4,10 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import com.teamfp.aistock.global.exception.CustomException;
-import com.teamfp.aistock.global.util.ExternalApiInvoker;
 import com.teamfp.aistock.infra.ls.dto.LsRankingItemDto;
 
 import lombok.extern.slf4j.Slf4j;
@@ -31,19 +28,18 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Component
-public class LsHighItemApiClient {
+public class LsHighItemApiClient extends LsApiClientSupport {
 
     private static final int MAX_RANKING_ITEMS = 10;
 
     private final LsAccessTokenProvider accessTokenProvider;
-    private final RestClient restClient;
 
     @Value("${ls.high-item-url}")
     private String highItemUrl;
 
     public LsHighItemApiClient(LsAccessTokenProvider accessTokenProvider, RestClient.Builder restClientBuilder) {
+        super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
-        this.restClient = restClientBuilder.build();
     }
 
     /** 등락율상위(t1441) — 오늘 상승률(gubun1="2") 상위 종목. */
@@ -56,7 +52,7 @@ public class LsHighItemApiClient {
                 .stockName(stringOf(row.get("hname")))
                 .price(parseLong(row.get("price")))
                 .changeAmount(parseLong(row.get("change")))
-                .changeRate(parseDouble(row.get("diff")))
+                .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
                 );
     }
@@ -69,7 +65,7 @@ public class LsHighItemApiClient {
                 .stockName(stringOf(row.get("hname")))
                 .price(parseLong(row.get("price")))
                 .changeAmount(parseLong(row.get("change")))
-                .changeRate(parseDouble(row.get("diff")))
+                .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
                 .extraInfo("시가총액 비중 %s%%".formatted(stringOf(row.get("rate"))))
                 );
@@ -85,7 +81,7 @@ public class LsHighItemApiClient {
                 .stockName(stringOf(row.get("hname")))
                 .price(parseLong(row.get("price")))
                 .changeAmount(parseLong(row.get("change")))
-                .changeRate(parseDouble(row.get("diff")))
+                .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
                 );
     }
@@ -100,7 +96,7 @@ public class LsHighItemApiClient {
                 .stockName(stringOf(row.get("hname")))
                 .price(parseLong(row.get("price")))
                 .changeAmount(parseLong(row.get("change")))
-                .changeRate(parseDouble(row.get("diff")))
+                .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
                 .extraInfo("거래대금 %s백만원".formatted(stringOf(row.get("value"))))
                 );
@@ -116,7 +112,7 @@ public class LsHighItemApiClient {
                 .stockName(stringOf(row.get("hname")))
                 .price(parseLong(row.get("price")))
                 .changeAmount(parseLong(row.get("change")))
-                .changeRate(parseDouble(row.get("diff")))
+                .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
                 .extraInfo("전일 동시각 대비 거래량 %s%% 증가".formatted(stringOf(row.get("voldiff"))))
                 );
@@ -133,7 +129,7 @@ public class LsHighItemApiClient {
                 .stockName(stringOf(row.get("hname")))
                 .price(parseLong(row.get("price")))
                 .changeAmount(parseLong(row.get("change")))
-                .changeRate(parseDouble(row.get("diff")))
+                .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
                 );
     }
@@ -149,7 +145,7 @@ public class LsHighItemApiClient {
                 .stockName(stringOf(row.get("hname")))
                 .price(parseLong(row.get("price")))
                 .changeAmount(parseLong(row.get("change")))
-                .changeRate(parseDouble(row.get("diff")))
+                .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
                 );
     }
@@ -162,16 +158,7 @@ public class LsHighItemApiClient {
             String token = accessTokenProvider.issueAccessToken();
             Map<String, Object> requestBody = Map.of(trCd + "InBlock", inBlock);
 
-            Map<String, Object> response = ExternalApiInvoker.call(() -> restClient.post()
-                            .uri(highItemUrl)
-                            .header("Authorization", "Bearer " + token)
-                            .header("tr_cd", trCd)
-                            .header("tr_cont", "N")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .body(requestBody)
-                            .retrieve()
-                            .body(new ParameterizedTypeReference<Map<String, Object>>() { }),
-                    "LS 상위종목(" + trCd + ") 조회 실패");
+            Map<String, Object> response = call(highItemUrl, trCd, requestBody, token, "LS 상위종목(" + trCd + ") 조회 실패");
 
             if (response == null) {
                 return List.of();
@@ -198,29 +185,4 @@ public class LsHighItemApiClient {
         }
     }
 
-    private String stringOf(Object value) {
-        return value != null ? value.toString() : null;
-    }
-
-    private Long parseLong(Object value) {
-        if (value == null) {
-            return null;
-        }
-        try {
-            return Long.parseLong(value.toString().trim());
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private double parseDouble(Object value) {
-        if (value == null) {
-            return 0.0;
-        }
-        try {
-            return Double.parseDouble(value.toString().trim());
-        } catch (NumberFormatException e) {
-            return 0.0;
-        }
-    }
 }

@@ -5,13 +5,10 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import com.teamfp.aistock.global.exception.CustomException;
-import com.teamfp.aistock.global.util.ExternalApiInvoker;
 import com.teamfp.aistock.infra.ls.dto.LsThemeConstituentDto;
 import com.teamfp.aistock.infra.ls.dto.LsThemeDto;
 
@@ -30,14 +27,13 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Component
-public class LsSectorApiClient {
+public class LsSectorApiClient extends LsApiClientSupport {
 
     private static final int MAX_CONSTITUENT_ITEMS = 10;
     private static final int MAX_HOT_THEME_ITEMS = 5;
     private static final int MAX_STOCK_THEME_ITEMS = 5;
 
     private final LsAccessTokenProvider accessTokenProvider;
-    private final RestClient restClient;
 
     @Value("${ls.sector-url}")
     private String sectorUrl;
@@ -47,8 +43,8 @@ public class LsSectorApiClient {
     private volatile Map<String, String> themeCodeCache;
 
     public LsSectorApiClient(LsAccessTokenProvider accessTokenProvider, RestClient.Builder restClientBuilder) {
+        super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
-        this.restClient = restClientBuilder.build();
     }
 
     /**
@@ -121,7 +117,7 @@ public class LsSectorApiClient {
                             .stockName(stringOf(row.get("hname")))
                             .price(parseLong(row.get("price")))
                             .changeAmount(parseLong(row.get("change")))
-                            .changeRate(parseDouble(row.get("diff")))
+                            .changeRate(parseDoubleOrZero(row.get("diff")))
                             .volume(parseLong(row.get("volume")))
                             .build())
                     .toList();
@@ -184,16 +180,7 @@ public class LsSectorApiClient {
     }
 
     private Map<String, Object> call(String trCd, Map<String, Object> requestBody, String token) {
-        return ExternalApiInvoker.call(() -> restClient.post()
-                        .uri(sectorUrl)
-                        .header("Authorization", "Bearer " + token)
-                        .header("tr_cd", trCd)
-                        .header("tr_cont", "N")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .body(requestBody)
-                        .retrieve()
-                        .body(new ParameterizedTypeReference<Map<String, Object>>() { }),
-                "LS 섹터(" + trCd + ") 조회 실패");
+        return call(sectorUrl, trCd, requestBody, token, "LS 섹터(" + trCd + ") 조회 실패");
     }
 
     @SuppressWarnings("unchecked")
@@ -203,31 +190,5 @@ public class LsSectorApiClient {
         }
         Object obj = response.get(key);
         return obj instanceof List ? (List<Map<String, Object>>) obj : List.of();
-    }
-
-    private String stringOf(Object value) {
-        return value != null ? value.toString() : null;
-    }
-
-    private Long parseLong(Object value) {
-        if (value == null) {
-            return null;
-        }
-        try {
-            return Long.parseLong(value.toString().trim());
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private double parseDouble(Object value) {
-        if (value == null) {
-            return 0.0;
-        }
-        try {
-            return Double.parseDouble(value.toString().trim());
-        } catch (NumberFormatException e) {
-            return 0.0;
-        }
     }
 }

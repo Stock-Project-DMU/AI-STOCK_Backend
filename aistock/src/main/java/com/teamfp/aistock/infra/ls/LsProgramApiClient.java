@@ -5,13 +5,10 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import com.teamfp.aistock.global.exception.CustomException;
-import com.teamfp.aistock.global.util.ExternalApiInvoker;
 import com.teamfp.aistock.infra.ls.dto.LsProgramTradingRankDto;
 import com.teamfp.aistock.infra.ls.dto.LsProgramTradingSnapshotDto;
 
@@ -23,19 +20,18 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Component
-public class LsProgramApiClient {
+public class LsProgramApiClient extends LsApiClientSupport {
 
     private static final int MAX_RANK_ITEMS = 10;
 
     private final LsAccessTokenProvider accessTokenProvider;
-    private final RestClient restClient;
 
     @Value("${ls.program-url}")
     private String programUrl;
 
     public LsProgramApiClient(LsAccessTokenProvider accessTokenProvider, RestClient.Builder restClientBuilder) {
+        super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
-        this.restClient = restClientBuilder.build();
     }
 
     /** 종목별프로그램매매동향(t1636) — 프로그램매매 순매수 상위 종목 랭킹. */
@@ -59,7 +55,7 @@ public class LsProgramApiClient {
                             .stockCode(stringOf(row.get("shcode")))
                             .stockName(stringOf(row.get("hname")))
                             .price(parseLong(row.get("price")))
-                            .changeRate(parseDouble(row.get("diff")))
+                            .changeRate(parseDoubleOrZero(row.get("diff")))
                             .netBuyValue(parseLong(row.get("svalue")))
                             .build())
                     .toList();
@@ -93,20 +89,7 @@ public class LsProgramApiClient {
     }
 
     private Map<String, Object> call(String trCd, Map<String, Object> requestBody, String token) {
-        return ExternalApiInvoker.call(() -> restClient.post()
-                        .uri(programUrl)
-                        .header("Authorization", "Bearer " + token)
-                        .header("tr_cd", trCd)
-                        .header("tr_cont", "N")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .body(requestBody)
-                        .retrieve()
-                        .body(new ParameterizedTypeReference<Map<String, Object>>() { }),
-                "LS 프로그램(" + trCd + ") 조회 실패");
-    }
-
-    private String stringOf(Object value) {
-        return value != null ? value.toString() : null;
+        return call(programUrl, trCd, requestBody, token, "LS 프로그램(" + trCd + ") 조회 실패");
     }
 
     private int parseInt(Object value) {
@@ -117,28 +100,6 @@ public class LsProgramApiClient {
             return Integer.parseInt(value.toString().trim());
         } catch (NumberFormatException e) {
             return 0;
-        }
-    }
-
-    private Long parseLong(Object value) {
-        if (value == null) {
-            return null;
-        }
-        try {
-            return Long.parseLong(value.toString().trim());
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private double parseDouble(Object value) {
-        if (value == null) {
-            return 0.0;
-        }
-        try {
-            return Double.parseDouble(value.toString().trim());
-        } catch (NumberFormatException e) {
-            return 0.0;
         }
     }
 }

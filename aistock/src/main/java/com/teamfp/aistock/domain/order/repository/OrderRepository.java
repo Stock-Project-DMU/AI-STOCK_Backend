@@ -93,4 +93,13 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     // 4주차 feature/stock-price StockNameResolver용 — stockCode만으로 이미 누군가 주문한 적 있는
     // 종목의 stockName을 찾는다(계좌/유저 무관, 어느 주문이든 하나만 있으면 됨).
     Optional<Order> findFirstByStockCode(String stockCode);
+
+    // feature/admin-account 코드리뷰 반영 — 관리자가 계좌를 SUSPENDED로 정지시킬 때
+    // OrderService.cancelAllPendingOrdersForSuspension()이 그 계좌의 PENDING 지정가 주문을
+    // 일괄 취소하는 데 쓴다. findByIdForUpdate와 같은 이유로 비관적 락을 건다 — 잠그지 않으면
+    // 마침 같은 주문을 체결 중인 OrderExecutionService.execute()(tick 처리)와 경합해, 이미
+    // 체결된 주문을 뒤늦게 취소 처리하거나 반대로 취소된 주문이 체결돼버리는 순서 역전이 생길 수 있다.
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select o from Order o where o.account.accountId = :accountId and o.status = 'PENDING'")
+    List<Order> findAllPendingByAccountIdForUpdate(@Param("accountId") Long accountId);
 }
