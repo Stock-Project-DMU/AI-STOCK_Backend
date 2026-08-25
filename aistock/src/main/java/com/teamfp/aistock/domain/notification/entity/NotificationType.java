@@ -4,5 +4,6 @@ public enum NotificationType {
     SYSTEM,
     ORDER,
     AI,
-    SIMULATION
+    SIMULATION,
+    NEWS
 }

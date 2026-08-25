@@ -2,7 +2,10 @@ package com.teamfp.aistock.infra.naver;
 
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
@@ -58,40 +61,28 @@ public class NaverNewsApiClient {
     // 막기 위함이다. 네이버는 include_domains 파라미터가 없어 응답을 받은 뒤 각 기사의
     // originallink 도메인이 NewsRelevanceMatcher.SECURITIES_NEWS_DOMAINS에 있는지 직접 확인한다.
 
-    // NewsRelevanceMatcher.SECURITIES_NEWS_DOMAINS 29곳의 도메인 → 사람이 읽는 한글 언론사명 매핑(2026-08-06 추가,
-    // 축9 "출처/신뢰성 확인 요청" 대응). 사용자가 "이거 어디 기사야?" 하고 물었을 때 Gemini가
-    // 최종 답변에서 실제 매체명을 인용할 수 있게 하려는 것 — 그 전까지는 title/description/
-    // link/pubDate만 넘겨서 링크 URL 말고는 어느 언론사인지 답변에서 밝힐 근거가 없었다.
-    private static final java.util.Map<String, String> OUTLET_NAMES = java.util.Map.ofEntries(
-            java.util.Map.entry("hankyung.com", "한국경제"),
-            java.util.Map.entry("mk.co.kr", "매일경제"),
-            java.util.Map.entry("edaily.co.kr", "이데일리"),
-            java.util.Map.entry("fnnews.com", "파이낸셜뉴스"),
-            java.util.Map.entry("einfomax.co.kr", "연합인포맥스"),
-            java.util.Map.entry("sedaily.com", "서울경제"),
-            java.util.Map.entry("mt.co.kr", "머니투데이"),
-            java.util.Map.entry("biz.chosun.com", "조선비즈"),
-            java.util.Map.entry("heraldcorp.com", "헤럴드경제"),
-            java.util.Map.entry("asiae.co.kr", "아시아경제"),
-            java.util.Map.entry("newspim.com", "뉴스핌"),
-            java.util.Map.entry("yna.co.kr", "연합뉴스"),
-            java.util.Map.entry("newsis.com", "뉴시스"),
-            java.util.Map.entry("news1.kr", "뉴스1"),
-            java.util.Map.entry("wowtv.co.kr", "한국경제TV"),
-            java.util.Map.entry("biz.sbs.co.kr", "SBS Biz"),
-            java.util.Map.entry("imnews.imbc.com", "MBC뉴스"),
-            java.util.Map.entry("news.kbs.co.kr", "KBS뉴스"),
-            java.util.Map.entry("news.sbs.co.kr", "SBS뉴스"),
-            java.util.Map.entry("thelec.kr", "디일렉"),
-            java.util.Map.entry("etnews.com", "전자신문"),
-            java.util.Map.entry("dt.co.kr", "디지털타임스"),
-            java.util.Map.entry("ajunews.com", "아주경제"),
-            java.util.Map.entry("etoday.co.kr", "이투데이"),
-            java.util.Map.entry("businesspost.co.kr", "비즈니스포스트"),
-            java.util.Map.entry("economist.co.kr", "이코노미스트"),
-            java.util.Map.entry("bizwatch.co.kr", "비즈워치"),
-            java.util.Map.entry("biz.newdaily.co.kr", "뉴데일리경제"),
-            java.util.Map.entry("techm.kr", "테크M"));
+    // 언론사 도메인 → 한글명 매핑은 2026-08-24부터 NewsRelevanceMatcher.OUTLET_NAMES로 옮겼다
+    // (feature/ai-news가 "언론사 이름으로 선택 → 도메인 변환"이라는 반대 방향으로도 이 매핑이
+    // 필요해져서, 이 클래스에만 있던 private map을 공용 위치로 승격했다). matchesDomain()도
+    // 같은 이유로 NewsRelevanceMatcher.matchesDomain()으로 이동했다.
+
+    // feature/ai-news(맞춤형 뉴스 브리핑) 전용 — 특정 언론사 하나의 "종합 시황" 기사를 폭넓게
+    // 받아오기 위한 고정 검색어 목록. 사용자가 입력하는 값이 아니라 내부적으로만 쓰는 미끼
+    // 검색어다. 네이버 뉴스 검색 API는 검색어 없이는 호출 자체가 안 되고, 언론사를 직접
+    // 지정하는 파라미터도 없어(클래스 상단 javadoc 참고) 이렇게 넉넉한 후보군을 받아온 뒤
+    // 도메인으로 걸러내는 방식을 쓴다.
+    //
+    // "증시" 하나만 쓰면 놓치는 언론사가 있었다(2026-08-24 실측) — 조선비즈는 "증시"로는 0건이
+    // 나왔지만, 같은 날 "코스피"로 검색하니 "[마켓뷰] 삼성전자 급락에 코스피 6700선 아래로"
+    // 같은 진짜 시황 기사가 나왔다. 검색어별로 네이버가 반환하는 후보 집합 자체가 달라지기
+    // 때문(단순히 더 많이 가져온다고 해결되는 문제가 아니었음). 그래서 여러 동의어로 순서대로
+    // 시도한다 — 앞쪽에서 이미 채워지면 뒤쪽 검색어는 호출되지 않는다(아래 searchByOutlet()의
+    // early-exit 참고).
+    private static final List<String> GENERAL_MARKET_QUERIES = List.of("증시", "코스피", "주가", "코스닥");
+    // 언론사 몫(MAX_RESULTS)을 채울 때까지 최대 몇 페이지(페이지당 100건)까지 추가로 조회할지.
+    // 실측(2026-08-24)으로 5페이지(500건) 안에서는 항상 오늘 날짜 기사만 나오는 것을 확인했다
+    // (그 이상은 날짜가 넘어갈 위험이 있어 시도하지 않음) — 위 searchByOutlet() 주석 참고.
+    private static final int MAX_OUTLET_PAGES = 5;
 
     private final RestClient restClient;
 
@@ -162,6 +153,99 @@ public class NaverNewsApiClient {
         return toSearchResponse(response, request.companyName(), hasTopic ? request.topic() : null, cutoff);
     }
 
+    // feature/ai-news(맞춤형 뉴스 브리핑) 전용 — search()와 달리 회사명이 없으므로 제목 매칭
+    // 관련성 필터(isRelevant())를 아예 적용하지 않는다. 대신 처음부터 "이 언론사인지"만으로
+    // 좁혀서 거른다 — search()처럼 신뢰 도메인 29곳 전체에서 먼저 5건으로 잘라낸 뒤 그중
+    // 특정 언론사만 골라내는 순서로 하면, 사용자가 고른 언론사 기사가 실제로 있어도 그 5건
+    // 안에 못 들어 결과가 0건이 되는 문제가 있다(2026-08-24 설계 논의). 그래서 도메인 필터를
+    // 가장 먼저 적용하고, 그 다음에야 최대 개수로 자른다. outletDomain은 호출 측
+    // (AiNewsService)이 NewsRelevanceMatcher.OUTLET_NAMES에 등록된 값인지 미리 검증해서
+    // 넘긴다고 가정한다.
+    //
+    // 페이지네이션(2026-08-24 추가) — 실측 결과, "증시" 검색은 하루에만 500건 넘게 나올 만큼
+    // 흔한 검색어라 첫 페이지(100건, 최신순) 안에 특정 언론사 기사가 하나도 없는 경우가
+    // 29곳 중 16곳이나 됐다(그 언론사가 그날 기사가 없어서가 아니라, 다른 언론사 기사에
+    // 밀려 100건 밖으로 밀려난 것 — 500건까지 확인해보니 15곳은 실제로 기사가 있었고, 전부
+    // 오늘 날짜였다). 그렇다고 매번 5페이지(500건)를 다 가져오면 네이버 API 호출이 5배로
+    // 늘어 낭비이므로, 이 언론사 몫(MAX_RESULTS)을 채우면 그 즉시 멈추는 방식으로 최소한만
+    // 호출한다 — 이미 첫 페이지에서 다 채워지는 언론사(한국경제 등 대부분)는 종전과 동일하게
+    // 1번만 호출되고, 게재량이 적은 언론사만 필요한 만큼 추가 페이지를 더 가져간다.
+    public NaverNewsSearchResponse searchByOutlet(String outletDomain) {
+        List<NaverNewsResult> collected = new ArrayList<>();
+        Set<String> seenLinks = new HashSet<>();
+        // 통신사(연합뉴스 등)가 같은 기사를 시간대별로 갱신 재배포하면 link는 다른데 제목은
+        // 완전히 동일한 경우가 실측 확인됐다(2026-08-24, "삼전·닉스 동반 하락에 코스피 3%
+        // 하락"이 5건 중 4건). link 중복 제거만으로는 못 잡아서 제목 기준도 추가한다 — 이
+        // Set에 걸려 collected에 못 들어간 기사는 MAX_RESULTS 카운트에도 안 잡히므로, 중복을
+        // 빼는 대신 다른 검색어/페이지를 더 뒤져 진짜 다른 기사로 채운다(아래 early-exit 조건
+        // collected.size() < MAX_RESULTS가 자연스럽게 이를 보장한다).
+        Set<String> seenTitles = new HashSet<>();
+
+        for (String query : GENERAL_MARKET_QUERIES) {
+            for (int page = 0; page < MAX_OUTLET_PAGES && collected.size() < MAX_RESULTS; page++) {
+                int start = 1 + page * RAW_FETCH_COUNT;
+                NaverApiResponse response = ExternalApiInvoker.call(() -> restClient.get()
+                                .uri(uriBuilder -> uriBuilder
+                                        .scheme("https")
+                                        .host(hostOf(apiUrl))
+                                        .path(pathOf(apiUrl))
+                                        .queryParam("query", query)
+                                        .queryParam("display", RAW_FETCH_COUNT)
+                                        .queryParam("start", start)
+                                        .queryParam("sort", SORT_DATE)
+                                        .queryParam("format", FORMAT_JSON)
+                                        .build())
+                                .header("X-NCP-APIGW-API-KEY-ID", clientId)
+                                .header("X-NCP-APIGW-API-KEY", clientSecret)
+                                .retrieve()
+                                .body(NaverApiResponse.class),
+                        "네이버 뉴스 검색 API 호출 실패(언론사별 시황 조회) - outletDomain: {}, query: {}, start: {}", outletDomain, query, start);
+
+                if (response == null || response.items() == null || response.items().isEmpty()) {
+                    break; // 이 검색어로는 네이버가 더 줄 결과가 없음 — 다음 검색어로 넘어간다.
+                }
+
+                response.items().stream()
+                        .filter(item -> matchesOutlet(item, outletDomain))
+                        .map(this::stripHtmlFields)
+                        // 언론사 필터만으로는 진짜 시황 기사인지 보장 못 한다 — 실제로 신뢰 매체에서도
+                        // "증시"와 무관한 기사가 섞여 들어오는 걸 실측 확인해 추가한 관련성 필터
+                        // (2026-08-24). 본문 요약까지 포함해 확인하면 "본문 한 줄에만 증시 얘기가 스친"
+                        // 기사(예: 도핑 스캔들 기사에 "그 회사가 최근 상장했다"는 한 줄만 있는 경우)까지
+                        // 통과해버려, "시황 브리핑이라면 제목부터 증시 얘기여야 한다"는 판단에 따라
+                        // 제목만 확인하도록 좁혔다(2026-08-24 사용자 확정) — search()의 회사명 매칭이
+                        // 제목만 보는 것과 같은 원칙.
+                        .filter(item -> NewsRelevanceMatcher.isMarketRelevant(item.title()))
+                        .map(item -> new NaverNewsResult(item.title(), item.description(), item.link(), item.pubDate(), resolveOutletName(item)))
+                        // 검색어를 여러 개 시도하다 보면 같은 기사가 두 검색어에 걸쳐 다시 나올 수
+                        // 있다(예: "코스피"와 "주가" 둘 다에 걸리는 기사) — link 기준으로 중복 제거.
+                        .filter(item -> seenLinks.add(item.link()))
+                        // link는 다른데 제목이 완전히 같은 재배포 기사도 제외(위 seenTitles 선언부 주석 참고).
+                        .filter(item -> seenTitles.add(item.title()))
+                        .forEach(collected::add);
+            }
+            if (collected.size() >= MAX_RESULTS) {
+                break; // 이 언론사 몫을 채웠으면 나머지 검색어는 시도할 필요 없다.
+            }
+        }
+
+        List<NaverNewsResult> filtered = collected.stream().limit(MAX_RESULTS).toList();
+        return new NaverNewsSearchResponse(filtered);
+    }
+
+    private boolean matchesOutlet(NaverApiItem item, String outletDomain) {
+        String source = item.originallink() != null && !item.originallink().isBlank() ? item.originallink() : item.link();
+        if (source == null) {
+            return false;
+        }
+        try {
+            String host = java.net.URI.create(source).getHost();
+            return host != null && NewsRelevanceMatcher.matchesDomain(host, outletDomain);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
     private String hostOf(String url) {
         java.net.URI uri = java.net.URI.create(url);
         return uri.getHost();
@@ -194,13 +278,6 @@ public class NaverNewsApiClient {
         return new NaverNewsSearchResponse(filtered);
     }
 
-    // host가 domain 자체이거나 domain의 하위 도메인일 때만 true — 단순 endsWith만 쓰면
-    // "fakesedaily.com"이 "sedaily.com"(서울경제)으로 오매칭되는 등, 접미사만 같은 사칭
-    // 도메인까지 신뢰 매체로 잘못 인식하게 된다("." 경계가 있어야 진짜 하위 도메인이다).
-    private boolean matchesDomain(String host, String domain) {
-        return host.equals(domain) || host.endsWith("." + domain);
-    }
-
     private boolean isTrustedDomain(NaverApiItem item) {
         String source = item.originallink() != null && !item.originallink().isBlank() ? item.originallink() : item.link();
         if (source == null) {
@@ -211,7 +288,7 @@ public class NaverNewsApiClient {
             if (host == null) {
                 return false;
             }
-            return NewsRelevanceMatcher.SECURITIES_NEWS_DOMAINS.stream().anyMatch(domain -> matchesDomain(host, domain));
+            return NewsRelevanceMatcher.SECURITIES_NEWS_DOMAINS.stream().anyMatch(domain -> NewsRelevanceMatcher.matchesDomain(host, domain));
         } catch (IllegalArgumentException e) {
             return false;
         }
@@ -224,8 +301,8 @@ public class NaverNewsApiClient {
         String source = item.originallink() != null && !item.originallink().isBlank() ? item.originallink() : item.link();
         try {
             String host = java.net.URI.create(source).getHost();
-            return OUTLET_NAMES.entrySet().stream()
-                    .filter(entry -> matchesDomain(host, entry.getKey()))
+            return NewsRelevanceMatcher.OUTLET_NAMES.entrySet().stream()
+                    .filter(entry -> NewsRelevanceMatcher.matchesDomain(host, entry.getKey()))
                     .map(java.util.Map.Entry::getValue)
                     .findFirst()
                     .orElse("확인된 매체");

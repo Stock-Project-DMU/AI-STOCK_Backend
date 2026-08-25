@@ -3,12 +3,18 @@ package com.teamfp.aistock.global.config;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.concurrent.Executor;
 
+// @EnableScheduling(feature/ai-news 추가) — AiNewsService.generateDailyBriefings()의
+// @Scheduled 매일 배치를 활성화한다. 이 프로젝트에서 스케줄링을 쓰는 곳이 여기가 처음이라
+// 별도 SchedulingConfig를 새로 만드는 대신, 이미 "실행 관련 설정"을 모아두는 이 클래스에
+// 함께 둔다(@EnableAsync와 같은 성격).
 @Configuration
 @EnableAsync
+@EnableScheduling
 public class AsyncConfig {
 
     @Bean

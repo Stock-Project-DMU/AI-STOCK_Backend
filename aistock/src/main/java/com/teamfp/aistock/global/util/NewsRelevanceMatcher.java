@@ -55,6 +55,72 @@ public final class NewsRelevanceMatcher {
             "techm.kr"
     );
 
+    // SECURITIES_NEWS_DOMAINS 29곳의 도메인 → 사람이 읽는 한글 언론사명 매핑(2026-08-06
+    // NaverNewsApiClient에 최초 추가, 2026-08-24 feature/ai-news에서 이 클래스로 이동) — 사용자가
+    // "이거 어디 기사야?" 하고 물었을 때 Gemini가 실제 매체명을 인용할 수 있게 하려는 목적으로
+    // 만들어졌는데, feature/ai-news(맞춤형 뉴스 브리핑)에서 "사용자가 언론사를 이름으로 골라서
+    // 도메인으로 변환"하는 반대 방향 조회에도 그대로 재사용할 수 있어 공용 위치로 옮겼다(다른
+    // 클라이언트가 언론사 이름/도메인을 다시 손으로 베끼는 것을 막기 위함 — 이 파일 상단 설계
+    // 배경과 동일한 이유).
+    public static final Map<String, String> OUTLET_NAMES = Map.ofEntries(
+            Map.entry("hankyung.com", "한국경제"),
+            Map.entry("mk.co.kr", "매일경제"),
+            Map.entry("edaily.co.kr", "이데일리"),
+            Map.entry("fnnews.com", "파이낸셜뉴스"),
+            Map.entry("einfomax.co.kr", "연합인포맥스"),
+            Map.entry("sedaily.com", "서울경제"),
+            Map.entry("mt.co.kr", "머니투데이"),
+            Map.entry("biz.chosun.com", "조선비즈"),
+            Map.entry("heraldcorp.com", "헤럴드경제"),
+            Map.entry("asiae.co.kr", "아시아경제"),
+            Map.entry("newspim.com", "뉴스핌"),
+            Map.entry("yna.co.kr", "연합뉴스"),
+            Map.entry("newsis.com", "뉴시스"),
+            Map.entry("news1.kr", "뉴스1"),
+            Map.entry("wowtv.co.kr", "한국경제TV"),
+            Map.entry("biz.sbs.co.kr", "SBS Biz"),
+            Map.entry("imnews.imbc.com", "MBC뉴스"),
+            Map.entry("news.kbs.co.kr", "KBS뉴스"),
+            Map.entry("news.sbs.co.kr", "SBS뉴스"),
+            Map.entry("thelec.kr", "디일렉"),
+            Map.entry("etnews.com", "전자신문"),
+            Map.entry("dt.co.kr", "디지털타임스"),
+            Map.entry("ajunews.com", "아주경제"),
+            Map.entry("etoday.co.kr", "이투데이"),
+            Map.entry("businesspost.co.kr", "비즈니스포스트"),
+            Map.entry("economist.co.kr", "이코노미스트"),
+            Map.entry("bizwatch.co.kr", "비즈워치"),
+            Map.entry("biz.newdaily.co.kr", "뉴데일리경제"),
+            Map.entry("techm.kr", "테크M"));
+
+    // host가 domain 자체이거나 domain의 하위 도메인일 때만 true — 단순 endsWith만 쓰면
+    // "fakesedaily.com"이 "sedaily.com"(서울경제)으로 오매칭되는 등, 접미사만 같은 사칭
+    // 도메인까지 신뢰 매체로 잘못 인식하게 된다("." 경계가 있어야 진짜 하위 도메인이다).
+    // NaverNewsApiClient.matchesDomain()에서 2026-08-06 최초 작성, 2026-08-24 이 클래스로 이동.
+    public static boolean matchesDomain(String host, String domain) {
+        return host.equals(domain) || host.endsWith("." + domain);
+    }
+
+    // feature/ai-news 전용 — 회사명이 없는 "종합 시황" 조회(NaverNewsApiClient.searchByOutlet())는
+    // 검색어("증시") 하나만으로는 진짜 시황 관련 기사인지 보장하지 못한다. 실제 라이브 테스트로
+    // 확인(2026-08-24, 29개 언론사 전수 조사) — 신뢰 매체인 연합뉴스에서 "증시"로 검색했는데
+    // 본문 한 줄에만 "그 회사가 최근 상장했다"는 문구가 스친 도핑 스캔들 기사가 섞여 들어왔다.
+    // 처음엔 제목+본문 요약 둘 다 확인했는데, 그러면 이런 "본문에 살짝 스친" 기사까지 통과해버려
+    // — "시황 브리핑이면 제목부터 증시 얘기여야 한다"는 판단에 따라 제목만 확인하도록 좁혔다
+    // (2026-08-24 사용자 확정, search()의 회사명 매칭이 제목만 보는 것과 동일한 원칙).
+    private static final List<String> MARKET_KEYWORDS = List.of(
+            "증시", "코스피", "코스닥", "주가", "주식", "증권", "상장", "환율",
+            "매도", "매수", "순매수", "순매도", "급등", "급락", "폭등", "폭락",
+            "지수", "종목", "ETF", "IPO", "유상증자", "시가총액", "시총",
+            "특징주", "대형주", "우량주", "테마주", "주주환원", "리레이팅");
+
+    public static boolean isMarketRelevant(String title) {
+        if (title == null) {
+            return false;
+        }
+        return MARKET_KEYWORDS.stream().anyMatch(title::contains);
+    }
+
     // "삼성전자"가 기사 제목엔 "삼성"으로 축약돼 나오는 경우가 많아, 흔한 계열사 접미사를 뗀
     // 축약명도 함께 확인한다.
     private static final List<String> COMPANY_SUFFIXES = List.of(

@@ -1,5 +1,16 @@
 -- =====================================================
--- AI STOCK MySQL Schema (최종본 v11)
+-- AI STOCK MySQL Schema (최종본 v12)
+-- 변경사항 v11 → v12:
+--   1. news_briefing_settings, news_briefings 테이블 신규 추가 (14, 15번째 테이블)
+--      (feature/ai-news — 맞춤형 뉴스 브리핑. AI 재무설계사와 달리 대화형이 아니라,
+--       사용자가 미리 골라둔 언론사 하나를 기준으로 스케줄러가 매일 오늘의 시황을
+--       요약해두는 단방향 비서. v5→v6에서 "Tavily 즉석 검색으로 전환"하며 제거했던
+--       market_briefings의 개념적 후속이지만, 이번엔 즉석 검색이 아니라 "언론사 선택
+--       기반 자동 생성" 방식이라 완전히 새로 설계했다. 상세 설계 배경은 각 테이블
+--       주석 참고.)
+--   2. notifications.type ENUM에 'NEWS' 값 추가
+--      (feature/ai-news — 브리핑이 생성되면 알림도 함께 발송하기로 확정, 2026-08-24)
+-- =====================================================
 -- 변경사항 v10 → v11:
 --   1. simulations 테이블에 investment_amount 컬럼 추가
 --      (feature/simulation 1차 PR — 목표 도달 시뮬레이션은 사용자의 실제 보유
@@ -64,9 +75,9 @@ USE aistock;
   주의: FK의 ON DELETE CASCADE는 부모 행(users)이 실제 DELETE될 때만 발동한다.
   탈퇴 처리는 UPDATE users SET deleted_at = NOW() ... 형태의 soft delete이므로,
   자식 테이블(social_accounts, investment_profile, accounts, watchlist,
-  ai_planning_sessions, simulations, recent_viewed, notifications)은
-  자동으로 삭제되지 않는다. 따라서 탈퇴 서비스 로직에서 아래 순서로
-  명시적 삭제를 수행해야 한다.
+  ai_planning_sessions, simulations, recent_viewed, notifications,
+  news_briefing_settings, news_briefings)은 자동으로 삭제되지 않는다.
+  따라서 탈퇴 서비스 로직에서 아래 순서로 명시적 삭제를 수행해야 한다.
 
   1) 자식 테이블 명시적 DELETE (서비스 코드에서 각 Repository의
      deleteByUserId(userId) 등을 통해 수행)
@@ -78,6 +89,8 @@ USE aistock;
        DELETE FROM recent_viewed          WHERE user_id = ?;
        DELETE FROM notifications          WHERE user_id = ?;
        DELETE FROM inquiries              WHERE user_id = ?;  -- v8 추가 (answered_by로 참조된 다른 문의는 영향 없음)
+       DELETE FROM news_briefing_settings WHERE user_id = ?;  -- v12 추가
+       DELETE FROM news_briefings         WHERE user_id = ?;  -- v12 추가
        DELETE FROM accounts               WHERE user_id = ?;  -- holdings/orders는 FK CASCADE로 자동 삭제
 
   2) Redis 정리 (RedisTokenService.deleteRefreshToken(userId) 등 호출)
@@ -495,7 +508,7 @@ CREATE TABLE recent_viewed (
 CREATE TABLE notifications (
     noti_id     BIGINT          NOT NULL AUTO_INCREMENT,
     user_id     BIGINT          NOT NULL,
-    type        ENUM('SYSTEM','ORDER','AI','SIMULATION') NOT NULL,
+    type        ENUM('SYSTEM','ORDER','AI','SIMULATION','NEWS') NOT NULL,  -- v12: NEWS 추가 (feature/ai-news)
     title       VARCHAR(100)    NOT NULL,
     content     VARCHAR(500)    NOT NULL,
     is_read     TINYINT(1)      NOT NULL DEFAULT 0,
@@ -557,7 +570,79 @@ CREATE TABLE inquiries (
 ) ENGINE=InnoDB;
 
 -- =====================================================
--- 테이블 관계 요약 (총 13개 — v8: inquiries 추가)
+-- 14. 뉴스 브리핑 설정 (news_briefing_settings) — v12 신규
+-- =====================================================
+/*
+  [설계 방향]
+  사용자가 고른 언론사 "현재 설정"만 담는다. 언론사는 한 번에 하나만 고를 수 있다
+  (2026-08-24 확정 — 한국경제를 고르면 한국경제만, 매일경제로 바꾸면 그때부터
+  매일경제만). uq_news_setting_user로 유저당 행 1개만 허용한다.
+
+  [outlet_domain]
+  언론사를 도메인 문자열로 저장한다(예: "hankyung.com"). 어느 언론사가 선택
+  가능한지는 NewsRelevanceMatcher.OUTLET_NAMES(global/util, 신뢰 매체 29곳 중
+  일부)에 코드로 등록돼 있고, GET /api/ai/news/outlets가 이 목록을 그대로 노출한다.
+
+  [news_briefings와의 관계]
+  이 테이블은 "현재 설정"만 담고, 실제 생성된 브리핑 결과는 news_briefings에 별도로
+  쌓인다 — 설정을 바꿔도 과거에 만들어진 브리핑은 그때 기준 언론사를 그대로
+  유지해야 하기 때문이다(news_briefings 테이블 주석 참고).
+*/
+CREATE TABLE news_briefing_settings (
+    setting_id     BIGINT          NOT NULL AUTO_INCREMENT,
+    user_id        BIGINT          NOT NULL,
+    outlet_domain  VARCHAR(50)     NOT NULL,
+    created_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                             ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (setting_id),
+    UNIQUE KEY uq_news_setting_user (user_id),
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- =====================================================
+-- 15. 뉴스 브리핑 (news_briefings) — v12 신규
+-- =====================================================
+/*
+  [생성 흐름]
+  AiNewsService.generateDailyBriefings()가 매일 07:00(KST)에 news_briefing_settings를
+  가진 사용자 전원을 순회한다. NaverNewsApiClient.searchByOutlet(outletDomain)로 그
+  언론사의 오늘자 시황 기사를 모으고, Gemini로 3~4문장 요약을 만들어 한 행씩 저장한
+  뒤 notifications에도 "오늘의 브리핑 도착" 알림을 함께 남긴다(type='NEWS').
+  재무설계사(ai_planning_sessions/messages)처럼 대화 이력을 쌓는 게 아니라, 하루 한
+  건의 완성된 요약만 저장하는 구조다.
+
+  [outlet_domain을 설정과 별도로 복제 저장하는 이유]
+  news_briefing_settings.outlet_domain은 "지금" 기준이라, 사용자가 언론사를 바꾸면
+  과거에 이미 만들어진 브리핑이 실제로는 어느 언론사 기준이었는지 알 수 없게 된다.
+  그래서 생성 시점의 언론사를 이 테이블에도 그대로 복사해 기록한다.
+
+  [uq_news_briefing_user_date]
+  유저당 하루 한 건만 허용 — 스케줄러가 재시작 등으로 같은 날 두 번 돌아도
+  중복 생성되지 않도록 서비스 계층(existsByUserIdAndBriefingDate 선확인)과 DB
+  제약 양쪽에서 막는다.
+
+  [source_links]
+  요약이 어떤 기사를 근거로 만들어졌는지 [{title, link, outlet}, ...] 형태로 저장한다
+  (simulations.scenario_data와 동일하게 JSON 컬럼 + 서비스 계층 직렬화 패턴, 2026-08-24
+  사용자 요청). 프론트가 각 기사를 원문 링크로 바로 이동시킬 수 있도록 link를 포함한다.
+*/
+CREATE TABLE news_briefings (
+    briefing_id    BIGINT          NOT NULL AUTO_INCREMENT,
+    user_id        BIGINT          NOT NULL,
+    outlet_domain  VARCHAR(50)     NOT NULL,
+    briefing_date  DATE            NOT NULL,
+    content        TEXT            NOT NULL,             -- Gemini 요약 본문
+    source_links   JSON            NOT NULL,             -- 요약 근거 기사 [{title,link,outlet}, ...] (원문 이동용)
+    created_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (briefing_id),
+    UNIQUE KEY uq_news_briefing_user_date (user_id, briefing_date),
+    INDEX idx_news_briefing_user (user_id, briefing_date),
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- =====================================================
+-- 테이블 관계 요약 (총 15개 — v12: news_briefing_settings, news_briefings 추가)
 -- =====================================================
 /*
   users 1:1  → investment_profile
@@ -570,6 +655,8 @@ CREATE TABLE inquiries (
   users 1:N  → notifications
   users 1:N  → inquiries (작성자 기준)
   users 1:N  → inquiries (답변자 기준, answered_by — nullable)
+  users 1:1  → news_briefing_settings (v12)
+  users 1:N  → news_briefings (v12)
   accounts 1:N → holdings
   accounts 1:N → orders
   ai_planning_sessions 1:N → ai_planning_messages
