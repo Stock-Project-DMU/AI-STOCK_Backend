@@ -31,7 +31,7 @@
 | `AccountStatus` | `ACTIVE`, `SUSPENDED` | `domain.account.entity` (관리자에 의한 계좌 거래 정지 — 로그인은 가능, 매수·매도만 차단) |
 | `SessionStatus` | `ACTIVE`, `CLOSED` | `domain.ai.entity` |
 | `MessageRole` | `USER`, `AI` | `domain.ai.entity` |
-| `NotificationType` | `SYSTEM`, `ORDER`, `AI`, `SIMULATION`, `NEWS`(feature/ai-news 추가) | `domain.notification.entity` |
+| `NotificationType` | `SYSTEM`, `ORDER`, `AI`, `SIMULATION` | `domain.notification.entity` |
 | `InquiryStatus` | `PENDING`, `ANSWERED` | `domain.inquiry.entity` |
 | `PriceDirection` | `UP`, `DOWN`, `FLAT` | `domain.stock.dto` (4주차 `feature/stock-price` 추가 — Entity/DB 컬럼이 아니라 `StockPriceResponse` 응답 시점에 `changeRate` 부호로 계산해서 채우는 값이라 `entity`가 아닌 `dto` 패키지에 둔다) |
 
@@ -56,12 +56,7 @@
 | `RecentViewed` | `viewId`, `user`, `stockCode`, `stockName`, `viewedAt` |
 | `Notification` | `notiId`, `user`, `type`, `title`, `content`, `isRead`, `createdAt` |
 | `Inquiry` | `inquiryId`, `user`, `title`, `content`, `status`, `answer`, `answeredBy`, `answeredAt`, `createdAt`, `updatedAt` |
-| `NewsBriefingSetting` (feature/ai-news 추가) | `settingId`, `user`, `outletDomain`, `createdAt`, `updatedAt` |
-| `NewsBriefing` (feature/ai-news 추가) | `briefingId`, `user`, `outletDomain`, `briefingDate`, `content`, `sourceLinksJson`(요약 근거 기사 JSON, 2026-08-24 추가), `createdAt` |
 
-- **뉴스 브리핑 설정 변경 메서드 (feature/ai-news 추가)**: `NewsBriefingSetting.changeOutlet(String
-  outletDomain)` — 언론사 재선택(예: 한국경제 → 매일경제). `NewsBriefing`은 하루치 완성된
-  결과라 변경 메서드 없이 생성만 한다.
 - 연관관계 필드(`user`, `account`, `session`)는 `@ManyToOne` 객체 참조로 두고,
   DB 컬럼명(`user_id` 등)은 `@JoinColumn(name = "user_id")`로 매핑한다.
 - `Inquiry.answeredBy`도 동일하게 `User` 타입 `@ManyToOne` 참조이며
@@ -117,8 +112,6 @@
 | `SimulationRepository` | `findAllByUserIdOrderByCreatedAtDesc(Long userId)`, `findByUserIdAndSimulationId(Long userId, Long simulationId)`, `deleteByUserId(Long userId)` |
 | `RecentViewedRepository` | `findAllByUserIdOrderByViewedAtDesc(Long userId)`, `findByUserIdAndStockCode(Long userId, String stockCode)`, `touchViewedAt(Long userId, String stockCode)`(mypage-account 추가 — `@Modifying`, 이미 본 종목을 다시 볼 때 새 행 대신 viewedAt만 UPDATE. delete 후 재삽입 방식은 `RecentViewed`가 `@GeneratedValue(IDENTITY)`라 save()가 즉시 INSERT를 실행해버려 아직 flush 안 된 DELETE와 충돌해 `uq_user_stock_view` 위반이 나는 버그가 있어 이 방식으로 교체했다), `deleteByUserId(Long userId)`, `findFirstByStockCode(String stockCode)`(4주차 `feature/stock-price` 추가 — `StockNameResolver`용, 8-4 참고) |
 | `NotificationRepository` | `findAllByUserIdOrderByCreatedAtDesc(Long userId)`, `countByUserIdAndIsReadFalse(Long userId)`, `findByNotiIdAndUserId(Long notiId, Long userId)` |
-| `NewsBriefingSettingRepository` (feature/ai-news 추가) | `findByUserId(Long userId)`, `findAllWithUser()`(스케줄러가 전체 사용자 순회용 — `@Query` JOIN FETCH user, 트랜잭션 밖에서도 LazyInitializationException 없이 순회하기 위함), `deleteByUserId(Long userId)`(탈퇴 처리용) |
-| `NewsBriefingRepository` (feature/ai-news 추가) | `findByUserIdAndBriefingDate(Long userId, LocalDate briefingDate)`, `existsByUserIdAndBriefingDate(Long userId, LocalDate briefingDate)`(스케줄러 중복 생성 방지), `deleteByUserId(Long userId)`(탈퇴 처리용) |
 | `InquiryRepository` | `findAllByUserIdOrderByCreatedAtDesc(Long userId)`(사용자 본인 문의 목록), `findByInquiryIdAndUserId(Long inquiryId, Long userId)`(본인 문의 상세, 소유권 검증), `findAllByOrderByStatusDescCreatedAtDesc()`(관리자 전체 목록, 무인자 `List` 버전 — "PENDING"이 "ANSWERED"보다 알파벳순 뒤(P > A)라 status 내림차순 정렬해야 미답변 우선 노출), `findAllByOrderByStatusDescCreatedAtDesc(Pageable pageable)`(같은 정렬 기준의 `Page` 오버로드 — `AdminInquiryService.getInquiries()`용. feature/admin-inquiry 코드리뷰 반영: `@Query` JOIN FETCH user로 N+1 방지, 8-18 참고), `deleteByUserId(Long userId)`(탈퇴 처리용) |
 
 > `deleteByUserId`는 탈퇴 로직(문서 하단 8-3 참고)에서 공통으로 쓰인다. v8부터 `InquiryRepository.deleteByUserId`도 동일하게 탈퇴 처리 순서에 포함한다.
@@ -182,9 +175,6 @@
 | `CHARGE_LIMIT_EXCEEDED` | 400 (mypage-account 추가 — 계좌의 `chargeCount`가 이미 3회에 도달한 상태에서 추가 충전을 시도하는 경우. 문의(inquiries) 기능으로 관리자에게 요청하도록 안내) |
 | `SELF_STATUS_CHANGE_NOT_ALLOWED` | 400 (feature/admin-user 코드리뷰 추가 — 관리자가 `PATCH /api/admin/users/{userId}/status`로 본인 계정을 SUSPENDED로 정지시키려는 경우) |
 | `LAST_ADMIN_SUSPEND_NOT_ALLOWED` | 400 (feature/admin-user 코드리뷰 추가 — 활성 상태인 ADMIN이 본인 하나만 남은 상태에서 그 ADMIN을 정지시키려는 경우. 관리자 전원이 `/api/admin/**`에서 잠기는 lockout을 막기 위함) |
-| `INVALID_NEWS_OUTLET` | 400 (feature/ai-news 추가 — `PUT /api/ai/news/settings`에 `NewsRelevanceMatcher.OUTLET_NAMES`에 없는 언론사 도메인을 보낸 경우. `AiNewsService.UNRELIABLE_BRIEFING_OUTLET_DOMAINS`(2026-08-24 추가)에 속한 도메인도 동일하게 거부) |
-| `NEWS_BRIEFING_NOT_FOUND` | 404 (feature/ai-news 추가 — 아직 스케줄러가 오늘의 브리핑을 만들지 않은 상태에서 `GET /api/ai/news/briefings/today` 조회) |
-| `NEWS_SOURCE_DATA_PARSE_ERROR` | 500 (feature/ai-news 추가, 2026-08-24 — `news_briefings.source_links` JSON 컬럼 파싱 실패. `SCENARIO_DATA_PARSE_ERROR`와 동일한 성격, DB 컬럼이라 별도 코드) |
 
 ### 2-3. 예외/핸들러
 - `CustomException(ErrorCode errorCode)`, `CustomException(ErrorCode errorCode, Throwable cause)`
@@ -263,10 +253,6 @@ STOMP 엔드포인트: `/ws-stomp`
 
 ### `AsyncConfig`
 빈: `tickTaskExecutor()` — 스레드풀 이름 prefix `tick-executor-`
-
-> feature/ai-news 추가: `@EnableScheduling` 어노테이션도 이 클래스에 함께 선언한다(프로젝트
-> 최초의 스케줄링 도입이라 별도 `SchedulingConfig`를 새로 만들지 않고, 이미 "실행 관련 설정"을
-> 모아두는 이 클래스에 둠). `AiNewsService.generateDailyBriefings()`의 `@Scheduled` 활성화용.
 
 ### `RedisConfig`
 빈: `redisTemplate(RedisConnectionFactory factory)` — Key/Value/Hash 전부 `StringRedisSerializer`.
@@ -819,13 +805,6 @@ call(String url, String trCd, Map<String, Object> requestBody, String token, Str
   "fakesedaily.com" 같은 유사 도메인 차단)와 관련성 필터(제목/본문 요약 중 하나에 회사명 매칭 +
   topic 있으면 `NewsRelevanceMatcher.topicMatchesAnyToken()`까지 통과)를 모두 거친 뒤 최대 5건 반환.
 - `NaverNewsSearchRequest`(companyName, topic, periodDays), `NaverNewsSearchResponse`(results: `NaverNewsResult`(title, description, link, pubDate, outlet) 리스트)
-- `NaverNewsApiClient.searchByOutlet(String outletDomain)` (feature/ai-news 추가, 8-19 참고) —
-  고정 검색어 목록(`GENERAL_MARKET_QUERIES`: "증시"→"코스피"→"주가"→"코스닥" 순서, 2026-08-24
-  다중화)으로 넉넉히 받아온 뒤 처음부터 지정된 언론사 도메인 하나로만 걸러내고,
-  `NewsRelevanceMatcher.isMarketRelevant()`(2026-08-24 추가, 아래 참고)로 진짜 시황 관련
-  기사인지 한 번 더 거른 다음에야 최대 5건으로 자른다(29개 신뢰 도메인 전체에서 5건으로 먼저
-  자르는 `search()`의 순서를 그대로 따르면 원하는 언론사 기사가 5건 안에 못 들어 0건이 되는
-  문제가 있어 순서를 뒤집었다).
 
 **global 신규/변경 유틸리티**
 - `RedisAiToolCacheService`(§7 redis-service에도 등록) — `getCachedResult(Long sessionId, String toolKey)`,
@@ -836,15 +815,7 @@ call(String url, String trCd, Map<String, Object> requestBody, String token, Str
 - `NewsRelevanceMatcher` — `SECURITIES_NEWS_DOMAINS`(신뢰 언론사 도메인 29개), `KNOWN_ALIASES`(현재
   `삼성전자`→`삼전`만 등록, 필요시 확장), `MAX_PERIOD_DAYS`(730일=2년, 2026-08-11에 90일에서 확장),
   `titleMatchesToken()`, `topicMatchesAnyToken()`(topic을 공백 기준 토큰으로 쪼개 하나만 일치해도 인정,
-  "및"/"관련" 등 `TOPIC_STOPWORDS` 제외), `resolvePeriodDays(Integer periodDays)`,
-  `OUTLET_NAMES`(도메인→한글 언론사명 맵, feature/ai-news 추가 시 `NaverNewsApiClient`의 private
-  map을 이 클래스로 승격 — 8-19 참고), `matchesDomain(String host, String domain)`(같은 이유로 승격,
-  `host`가 `domain` 자체이거나 하위 도메인일 때만 true), `isMarketRelevant(String title)`
-  (feature/ai-news 추가, 2026-08-24 — `MARKET_KEYWORDS`(증시/코스피/코스닥/주가 등 시황 관련
-  단어) 중 하나라도 제목에 있어야 통과. 처음엔 본문 요약까지 같이 확인했는데, 본문에 한 줄만
-  스친 기사까지 통과해버려 "시황 브리핑이면 제목부터 증시 얘기여야 한다"는 판단에 따라
-  제목만 보도록 좁혔다 — `searchByOutlet()`이 회사명 없이 "증시" 단일 검색어만으로는
-  걸러내지 못하는 무관한 기사를 잡기 위해 추가)
+  "및"/"관련" 등 `TOPIC_STOPWORDS` 제외), `resolvePeriodDays(Integer periodDays)`
 - `DateUtil` — `isCallAuctionTime()`(08:30~09:00, 15:20~15:30 KST 평일), `isAfterHoursTradingTime()`(15:30~18:00
   KST 평일). 시간대가 아닐 때 해당 LS 도구 호출 자체를 막고 안내 문구로 대체하는 "시간대 게이트"용 —
   둘 다 `Asia/Seoul` 고정, 테스트 주입용 `ZonedDateTime` 오버로드 있음
@@ -861,54 +832,23 @@ call(String url, String trCd, Map<String, Object> requestBody, String token, Str
 | Request DTO | `NewsSearchRequest`(keyword) |
 | Response DTO | `NewsSearchResponse`(title, url, summary, publishedAt) |
 
-### 8-11. feature/simulation / feature/simulation-integration
+### 8-11. feature/simulation
 
-> **2차 PR(`feature/simulation-integration`) 반영**: 1차 PR은 `GeminiApiClient`/
-> `DartApiClient`/`infra/naver/*`가 dev에 아직 없어(`feature/ai-planning` 미병합)
-> 순수 계산 로직(`ScenarioCalculator`)과 조회 API(`GET`)만 구현했었다.
-> `feature/ai-planning`이 dev에 병합된 뒤 이 브랜치에서 `POST /api/simulations`
-> (`runSimulation`)을 이어 구현했다 — Gemini에는 stockCode/종목명만 주고
-> 시나리오별 월 복리 성장률(스칼라 double 3개, JSON 응답)을 근거와 함께 요청하며
-> (`SimulationService.MonthlyGrowthRates`, private record — JSON 파싱 실패는
-> `SCENARIO_DATA_PARSE_ERROR` 재사용), DART 재무 데이터(연간+최근분기)와 네이버
-> 뉴스 조회는 Gemini 호출과 무관하게 별도로 수행해 `dart_data`/`news_data`
-> 컬럼에만 원본을 저장한다. `stockCode`→`corpCode` 변환은 `DartApiClient`에
-> stockCode 전용 메서드가 없어 `StockNameResolver.resolveStockName()`으로 얻은
-> 종목명을 `DartApiClient.resolveCorpCodeByName()`에 넘기는 방식으로 처리한다
-> (corpCode를 못 찾으면 dartData는 null — 두 컬럼 모두 schema.sql상 NULL 허용).
-> DART 연간+최근분기 병렬 조회는 `DartApiClient.fetchFinancialIndicatorCategories()`와
-> 동일하게 `Executors.newVirtualThreadPerTaskExecutor()`를 쓴다(AI 상담 전용인
-> `aiToolTaskExecutor` 빈은 재사용하지 않음 — 스코프가 다른 기능이라).
->
-> **트랜잭션 분리(코드리뷰 반영)**: `runSimulation()`은 `AiPlanningService.sendMessage()`와
-> 동일한 이유로 `@Transactional`을 걸지 않는다 — Gemini/DART/네이버 호출을 DB 트랜잭션
-> 안에 묶으면 커넥션을 수 초씩 점유해 무관한 API까지 커넥션 풀 고갈 영향을 받을 수 있다.
-> `SimulationService`는 이제 클래스 레벨 `@Transactional`을 두지 않고(`AiPlanningService`와
-> 동일), `getMySimulations`/`getSimulation` 각각에 `@Transactional(readOnly = true)`를 개별로
-> 붙인다. 외부 호출 전/후 경계는 `loadHistory()`/`saveTurn()`과 동일한 self-invocation
-> 패턴(`@Autowired @Lazy private SimulationService self`)으로 나눈다 — `resolveStockName(Long
-> userId, String stockCode)`(`@Transactional(readOnly = true)`, 사용자 존재 확인 + 종목명 조회를
-> 외부 호출 전에 끝냄)와 `saveSimulation(Long userId, SimulationRequest request, String
-> stockName, ScenarioSetDto scenarioSet, String dartDataJson, String newsDataJson)`
-> (`@Transactional`, 외부 호출 성공 후 저장 + 알림 발송)로, 둘 다 `runSimulation()` 외부에서
-> 호출할 일은 없지만 self 프록시를 타야 해서 public이다. `saveSimulation()`은
-> `userRepository.getReferenceById()`로 User FK를 채운다(`resolveStockName()`에서 이미 존재를
-> 확인했으므로 `NotificationService.notify()`와 동일하게 재조회 없이 참조만 사용).
->
-> **SIMULATION 알림 추가(코드리뷰 반영)**: 저장 직후 `NotificationService.notify(userId,
-> NotificationType.SIMULATION, title, content)`를 호출한다 — `AiPlanningService`가 아니라
-> `AiNewsService.generateBriefingForUser()`와 동일한 패턴(`AiPlanningService`는 알림을 보내지
-> 않음). title은 `"{stockName} 목표 도달 시뮬레이션이 완료됐어요"`, content는 베이스 시나리오
-> 기준 `baseReachDate`가 있으면 `"베이스 시나리오 기준 목표 도달 예상일: {날짜}"`, 없으면(기간 내
-> 미도달) `"베이스 시나리오 기준으로는 설정하신 기간 내 목표 도달이 어려울 것으로 예상돼요."`
-> (`SimulationService.buildReachDateNotificationContent()`). `NotificationType.SIMULATION`의
-> 첫 실사용이다.
+> **1차 PR(계산 엔진 + 조회 API) 범위 설명**: dev 기준 `GeminiApiClient`/`DartApiClient`/
+> `infra/naver/*` 등 외부 연동 클라이언트가 전부 빈 스텁이거나 아예 없다(실 구현은
+> `feature/ai-planning`에만 있으며 아직 dev에 미병합). 따라서 1차 PR은
+> `POST /api/simulations`(`runSimulation`, Gemini/DART/뉴스 연동)를 아예 포함하지
+> 않고, 순수 계산 로직(`ScenarioCalculator`)과 조회 API(`GET`)만 구현한다.
+> `runSimulation`은 `feature/ai-planning` 병합 후 별도 브랜치(예:
+> `feature/simulation-integration`)에서 이어간다. 아래 표의 `runSimulation`/
+> `SimulationRequest` 항목은 다음 PR에서 그대로 쓸 수 있도록 지금 정의만 해두는
+> 것이며 컨트롤러에 실제로 연결되지 않는다.
 
 | 구분 | 이름 |
 |---|---|
 | Controller | `SimulationController` |
-| 엔드포인트 | `POST /api/simulations`, `GET /api/simulations`, `GET /api/simulations/{simulationId}` |
-| Service | `SimulationService` — `getMySimulations(Long userId)`, `getSimulation(Long userId, Long simulationId)`, `runSimulation(Long userId, SimulationRequest request)`. `resolveStockName(Long userId, String stockCode)`/`saveSimulation(...)`도 public인데, `AiPlanningService.loadHistory()`/`saveTurn()`과 동일하게 self-invocation으로 트랜잭션 경계를 나누기 위한 것 — 외부에서 호출할 일은 없다 |
+| 엔드포인트 | `GET /api/simulations`, `GET /api/simulations/{simulationId}` (`POST /api/simulations`는 다음 PR) |
+| Service | `SimulationService` — `getMySimulations(Long userId)`, `getSimulation(Long userId, Long simulationId)` (`runSimulation(Long userId, SimulationRequest request)`는 다음 PR에서 구현) |
 | Request DTO | `SimulationRequest`(stockCode, investmentAmount, targetAmount, targetMonths) — targetMonths는 1~12 (`@Min(1) @Max(12)`) |
 | Response DTO | `SimulationResponse`(simulationId, stockCode, stockName, investmentAmount, targetAmount, targetMonths, bestScenario, baseScenario, worstScenario, bestReachDate, baseReachDate, worstReachDate, createdAt) — 정적 팩토리 `of(Simulation, List<ScenarioPointDto> best, List<ScenarioPointDto> base, List<ScenarioPointDto> worst)` |
 | 내부 DTO | `ScenarioPointDto`(date: `LocalDate`, value: `long`) — 시나리오 곡선 한 포인트. `date`는 매월 1일로 정규화. `value`는 `investmentAmount` 복리 계산 결과인 포트폴리오 평가금액(원 단위, `Math.round()` 반올림)이며 종목 주당가(`price`)가 아니므로 필드명을 `price`가 아닌 `value`로 둔다(코드베이스 전역에서 `price`는 이미 "주당 시장가" 의미로 쓰이고 있어 혼동 방지). 위치는 `domain/stock/dto/StockPriceDto.java`와 동일하게 `domain/ai/dto/` 바로 아래. |
@@ -1081,135 +1021,20 @@ call(String url, String trCd, Map<String, Object> requestBody, String token, Str
 > `Inquiry` Entity·`InquiryRepository`를 공유하되 Controller/Service/DTO는 분리한다.
 >
 > `InquiryRepository.findAllByOrderByStatusDescCreatedAtDesc()`(무인자, `List` 반환 —
-> `feature/inquiry`의 `InquiryRepositoryIntegrationTest`가 이미 사용 중이라 그대로 둠)와 같은
-> 정렬 기준의 `Pageable` 오버로드는 이름을 분리하지 않고 `findAllByOrderByStatusDescCreatedAtDesc
-> (Pageable)`(`Page<Inquiry>` 반환)로 오버로드한다. `AdminInquiryResponse.from()`이
-> `inquiry.getUser()`를 참조하므로 파생 쿼리 대신 `join fetch i.user`를 쓰는 `@Query`로 작성해
-> `getInquiries()` 목록 조회 시 페이지당 N+1 SELECT가 발생하지 않도록 한다.
+> `feature/inquiry`의 `InquiryRepositoryIntegrationTest`가 이미 사용 중이라 그대로 둠)에
+> 같은 정렬 기준의 `Pageable` 오버로드(`Page<Inquiry>` 반환)를 추가해 `getInquiries()`가 쓴다.
 >
 > **N+1 방지 (코드리뷰 반영, v8)**: `Pageable` 오버로드는 처음에 파생 쿼리(메서드 이름만으로
 > 자동 생성되는 쿼리) 그대로였는데, `AdminInquiryResponse.from()`이 목록의 각 `Inquiry`마다
 > `inquiry.getUser()`(LAZY)를 호출해 페이지 크기만큼 추가 SELECT가 발생했다. `AdminTradeService.
 > findAllOrdersWithUser`와 동일한 패턴으로 `@Query`에 `join fetch i.user`를 추가해 한 번의
 > 쿼리로 즉시 로딩한다 — `@Query`를 쓰면 메서드 이름의 `OrderBy`는 더 이상 자동 파싱되지 않으므로
-> 원래 정렬 기준(`status desc, createdAt desc`)을 JPQL `order by` 절로 명시했다. `user_id`는
-> `NOT NULL`(FK `ON DELETE CASCADE`)이라 `inquiry`는 항상 `user`를 가지므로 `left join fetch`
-> 대신 `join fetch`(inner)를 쓴다. `@Query`에 `fetch`가 섞이면 `Page` 카운트 쿼리를 자동
-> 유도하기 어려우므로 `countQuery`를 명시적으로 지정한다(`dev` 병합 시 정리, v9).
+> 원래 정렬 기준(`status desc, createdAt desc`)을 JPQL `order by` 절로 명시했다.
 >
 > **재답변(덮어쓰기) 정책**: `answerInquiry`는 대상 문의가 이미 `ANSWERED`여도 소유권/상태
 > 검증 없이 그대로 `Inquiry.answer()`를 호출해 기존 답변을 덮어쓴다 — 오타 정정 등 관리자가
 > 답변을 다시 보내야 하는 상황을 막지 않기 위한 의도적 선택이다(`admin-user`의 `updateUserStatus`
 > 같은 멱등/잠금 가드는 두지 않는다).
-
-### 8-19. feature/ai-news (2026-08-24 신규 — 맞춤형 뉴스 브리핑)
-
-AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사용자가 언론사를 하나
-설정해두면(2026-08-24 확정 — 한 번에 하나만 선택 가능, 키워드 입력 없음), 스케줄러가
-매일 그 언론사의 오늘자 시황 기사를 모아 Gemini로 요약해두고 알림까지 보낸다.
-`feature/ai-planning`이 아직 `dev`에 미병합이라 `NaverNewsApiClient`/`GeminiApiClient`에
-의존하는 이 기능도 `feature/ai-planning` 병합 이후에야 `dev`로 합류할 수 있다
-(`feature/simulation-integration`과 동일한 제약).
-
-| 구분 | 이름 |
-|---|---|
-| Controller | `AiNewsController` |
-| 엔드포인트 | `GET /api/ai/news/outlets`(선택 가능한 언론사 목록), `GET /api/ai/news/settings`(내 설정 조회), `PUT /api/ai/news/settings`(언론사 설정/변경), `GET /api/ai/news/briefings/today`(오늘의 브리핑 조회) |
-| Service | `AiNewsService` — `getSelectableOutlets()`, `getMySetting(Long userId)`, `updateMySetting(Long userId, String outletDomain)`, `getTodayBriefing(Long userId)`, `generateDailyBriefings()`(`@Scheduled(cron = "0 0 7 * * *", zone = "Asia/Seoul")`), `generateBriefingForUser(NewsBriefingSetting setting, LocalDate today)`(`@Transactional`, 사용자 1명분 생성 — `self` 프록시로만 호출), `generateVerifiedSummary(NaverNewsSearchResponse newsResponse, String outletName)`(요약+근거검증+재생성 오케스트레이션, 2026-08-24 추가), `buildArticlesText(...)`, `requestSummary(...)`, `isGrounded(String articles, String summary)`(근거검증 전용 Gemini 호출, 2026-08-24 추가) |
-| Request DTO | `NewsBriefingSettingRequest`(outletDomain) |
-| Response DTO | `NewsOutletResponse`(outletDomain, outletName), `NewsBriefingSettingResponse`(outletDomain, outletName), `NewsBriefingResponse`(outletDomain, outletName, briefingDate, content, `sources`: `NewsSourceLinkDto` 리스트, 2026-08-24 추가) |
-| 내부 DTO | `NewsSourceLinkDto`(title, link, outlet) — `news_briefings.source_links` JSON 컬럼 미러링용(`ScenarioDataJson`과 동일 패턴), `domain.ai.dto` 소속 |
-| Entity/Repository | 1-1/1-2 참고 (`NewsBriefingSetting`/`NewsBriefingSettingRepository`, `NewsBriefing`/`NewsBriefingRepository`) |
-
-> **최초 스펙과 달라진 점**: 처음 작업 지시 문서는 "Tavily 즉석 검색, DB 저장 없음"이라는
-> 4개 파일(Controller/Service/Request/Response)짜리 단순 검색 기능으로 적혀 있었다. 하지만
-> Tavily는 이미 2026-08-05~06에 네이버로 전량 교체·삭제된 상태였고(CLAUDE.md 2번 항목), 사용자와
-> 협의 결과 실제로 원하는 건 "AI 재무설계사처럼 채팅하는 것"이 아니라 "설정해둔 언론사를 매일
-> 알아서 요약해주는 비서"였다(2026-08-24 확정). 그래서 `NewsSearchRequest`/`NewsSearchResponse`
-> 대신 설정(`NewsBriefingSettingRequest`/`Response`)과 결과 조회(`NewsBriefingResponse`) DTO로
-> 이름을 바꿨고, `news_briefing_settings`/`news_briefings` 테이블과 스케줄러를 추가로 설계했다.
-> schema.sql v5→v6에서 "Tavily 즉석 검색으로 전환"하며 제거했던 `market_briefings` 테이블의
-> 개념적 후속이지만, 그때와 달리 "언론사 선택 기반 자동 생성" 방식이라 완전히 새로 설계했다.
-
-> **`NaverNewsApiClient.searchByOutlet()` 신설 이유**: 기존 `search()`는 회사명이 반드시
-> 있어야 하고, 신뢰 도메인 29곳 전체에서 먼저 5건으로 잘라낸 뒤에야 걸러내는 구조라 "언론사
-> 하나만 종합적으로 보고 싶다"는 요청에 그대로 재사용하면 결과가 자주 0건이 될 위험이 있었다
-> (2026-08-24 설계 논의, `search()`는 건드리지 않고 옆에 전용 메서드만 추가했다 — ai-planning
-> 쪽 동작에 영향 없음). 언론사 도메인→한글명 매핑(`OUTLET_NAMES`)과 도메인 매칭
-> (`matchesDomain()`)은 이 기능에서 "이름으로 선택 → 도메인 변환"이라는 반대 방향으로도
-> 필요해져서 `NaverNewsApiClient` 전용 private 멤버였던 것을 `NewsRelevanceMatcher`(공용
-> 위치)로 승격했다.
-
-> **알림 연동**: 브리핑 생성 시 `NotificationService.notify(userId, NotificationType.NEWS, ...)`를
-> 함께 호출한다(2026-08-24 확정). `NotificationType`에 `NEWS` 값 추가, `notifications.type`
-> ENUM에도 `NEWS` 추가(schema.sql v12, `news_briefing_migration.sql`).
-
-> **`searchByOutlet()` 페이지네이션 (2026-08-24 추가)**: 첫 실측 때 29곳 중 16곳이 0건으로
-> 나왔는데, 500건(5페이지)까지 더 파보니 그중 15곳은 실제로 오늘 기사가 있었고 전부 오늘
-> 날짜였다(과거로 새지 않음, 500건 안에서는 "증시"가 워낙 흔한 검색어라 하루 안에서 다 채워짐).
-> 그래서 `MAX_OUTLET_PAGES`(5)까지, 이 언론사 몫(`MAX_RESULTS`)을 채우면 그 즉시 멈추는
-> early-exit 방식으로 페이지네이션을 추가했다 — 자원 낭비를 최소화하기 위해 이미 첫 페이지에서
-> 다 채워지는 언론사(대부분)는 종전과 동일하게 1번만 호출된다.
-
-> **검색어 다중화 (2026-08-24 추가)**: 페이지네이션 이후에도 디일렉·조선비즈·이코노미스트
-> 3곳은 여전히 0건이었다. 원인은 "증시"라는 단일 검색어 자체의 한계였다 — 조선비즈는 "증시"로는
-> 0건이지만 "코스피"로 검색하면 "[마켓뷰] 삼성전자 급락에 코스피 6700선 아래로" 같은 진짜
-> 시황 기사가 나왔다(검색어별로 네이버가 돌려주는 후보 집합 자체가 달라짐, 단순히 더 많이
-> 가져온다고 해결되는 문제가 아니었음). `GENERAL_MARKET_QUERY`(String 1개)를
-> `GENERAL_MARKET_QUERIES`(List, "증시"→"코스피"→"주가"→"코스닥" 순서로 시도)로 바꿨다 — 앞
-> 검색어에서 이미 `MAX_RESULTS`를 채우면 뒤 검색어는 호출하지 않는 early-exit 유지, 검색어를
-> 넘나들며 같은 기사가 중복 잡히는 경우는 link 기준으로 제거. 이 수정으로 조선비즈·이코노미스트
-> 둘 다 실제 시황 기사가 잡혀 살아났다.
-
-> **제목 기준 중복 제거 (2026-08-24 추가)**: 통신사(연합뉴스 등)가 같은 기사를 시간대별로
-> 갱신 재배포하면 link는 다른데 제목은 완전히 동일한 경우가 실측 확인됐다("삼전·닉스 동반
-> 하락에 코스피 3% 하락"이 5건 중 4건). link 기준 중복 제거(`seenLinks`)만으로는 못 잡아서
-> 제목 기준(`seenTitles`)도 추가했다 — 중복으로 걸러진 기사는 `MAX_RESULTS` 카운트에도 안
-> 잡히므로, early-exit 조건(`collected.size() < MAX_RESULTS`)이 자연스럽게 다른 검색어/
-> 페이지를 더 뒤져 진짜 다른 기사로 채운다(중복만 빼고 5건 미만으로 짧아지는 게 아니라,
-> 빠진 자리를 다른 기사로 다시 채움).
-
-> **`UNRELIABLE_BRIEFING_OUTLET_DOMAINS` (2026-08-24 추가, 검색어 다중화 후 축소)**: 검색어를
-> 4개까지 넓혀도(2000건 넘게 스캔) 디일렉(`thelec.kr`, 반도체 장비 전문지)만 끝까지 시황 관련
-> 기사가 0건이었다 — 이 언론사는 애초에 "오늘의 시황"을 다루지 않는 것으로 판단해 유일하게
-> `getSelectableOutlets()`/`validateOutlet()`에서 제외한다. 필터를 억지로 느슨하게 풀면 이전에
-> 고친 "본문에 살짝 스친 무관 기사 통과" 문제가 재발하므로, 대신 애초에 "기사 없음"이 나올
-> 선택지 자체를 없앴다(재무설계사가 쓰는 `NewsRelevanceMatcher.OUTLET_NAMES`/
-> `SECURITIES_NEWS_DOMAINS` 원본은 건드리지 않음 — 이 기능 전용 28곳 선택지만 별도로 좁힌 것).
-
-> **Gemini 요약 호출**: 대화 이력(`history`)도, 도구(`tools`)도 없이 `systemInstruction` +
-> `prompt`만 채운 1회성 `GeminiRequest`를 `GeminiRequest.GeminiModel.ANSWER`로 호출한다.
-> `RedisRateLimiterService`(분당3/일일10)는 적용하지 않는다 — 그 한도는 사용자가 직접 채팅을
-> 남용하는 것을 막기 위한 것이라, 서버가 스스로 도는 배치 작업의 목적과 다르다.
-
-> **근거 검증/재생성 (2026-08-24 1차 시도 후 보류 → 같은 날 재도입, 라이브 재검증 완료)**:
-> Gemini가 원본 기사에 없는 수치·회사·사건을 지어내는 문제(코스피 지수 오기재, "SK하이닉스
-> 12% 급등" 등 완전 지어내기, 시점 혼합 — 총 3종)를 막기 위해 2단계로 대응한다.
-> **1단계**: `SUMMARY_SYSTEM_INSTRUCTION`에 "기사 원문에 없는 정확한 소수점 숫자는 쓰지 말고
-> '6,700선'처럼 대략적으로만 표현하라"는 지시를 추가해 지수 숫자 오기재 자체의 발생 빈도를
-> 줄인다. **2단계**: 요약 생성 직후 `isGrounded()`가 별도 `GeminiRequest.GeminiModel.JUDGE`
-> 호출로 "원본 기사 목록 대비 브리핑 초안에 근거 없는 문장이 있는지"를 판정("SAFE" 또는
-> "UNSAFE: <인용>")한다. UNSAFE면 `generateVerifiedSummary()`가 `MAX_SUMMARY_ATTEMPTS`(2)
-> 안에서 폐기 후 재생성하고, 마지막 시도까지 UNSAFE면 **지어낸 내용을 사용자에게 보내느니
-> 이번 브리핑 자체를 포기한다**(null 반환 → `generateBriefingForUser()`가 저장·알림 없이
-> 스킵, 다음날 스케줄에서 다시 시도) — 증권 정보는 틀린 걸 보내는 것보다 아예 안 보내는 게
-> 낫다는 판단(2026-08-24 확정, 처음엔 "재시도 소진 시 그대로 발송"으로 짰다가 라이브 테스트
-> 중 사용자 지적으로 즉시 "폐기"로 정정).
-> **라이브 재검증(아주경제, SK하이닉스 지어내기가 3회 재현됐던 데이터셋) 결과**: 1·2차 생성
-> 모두 검증에서 UNSAFE 판정을 받았고("6,700선" 등 지수 숫자 오기재를 정확히 짚어냄), 최종적으로
-> 브리핑을 발송하지 않고 스킵 처리됨을 확인(`checkRealBriefing()`에서 `생성 여부 === false`).
-
-> **비서 톤 인사말 (2026-08-24 사용자 요청)**: 브리핑 본문 맨 앞에 "안녕하세요, AI 시황 비서
-> AI STOCK입니다. 오늘의 주요 시황을 브리핑해드리겠습니다."를 항상 붙인다. `AiPlanningService`의
-> 첫 인사 버그(프롬프트로만 시키면 가끔 누락됨, 8-9 참고)와 같은 이유로 Gemini에게 맡기지
-> 않고 `AiNewsService.BRIEFING_GREETING` 상수를 코드가 직접 앞에 붙인다 — `SUMMARY_SYSTEM_INSTRUCTION`은
-> 반대로 "인사말은 쓰지 마라"고 명시해 중복을 막는다.
-
-> **요약 근거 기사 링크 (2026-08-24 사용자 요청)**: "요약이 진짜 근거가 있는지 원문으로 확인하고
-> 싶다"는 요청으로, `NaverNewsApiClient.searchByOutlet()` 결과(title/link/outlet)를
-> `NewsSourceLinkDto` 리스트로 만들어 `news_briefings.source_links`(JSON)에 함께 저장한다.
-> `GET /api/ai/news/briefings/today` 응답의 `sources` 필드로 그대로 노출되며, 프론트는 각 기사의
-> `link`로 원문 이동 버튼/링크를 만들면 된다.
 
 ---
 

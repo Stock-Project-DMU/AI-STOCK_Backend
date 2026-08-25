@@ -1,0 +1,107 @@
+spring:
+  application:
+    name: aistock
+  profiles:
+    active: dev
+  data:
+    web:
+      # 관리자 목록 API(admin-trade/admin-user/admin-inquiry)는 @PageableDefault(size=20)만
+      # 걸어뒀는데, 이는 요청이 없을 때의 기본값일 뿐 상한이 아니라 ?size=999999999 같은 요청이
+      # 그대로 통과해 전체 테이블을 한 번에 긁어올 수 있었다(코드리뷰 반영). 개별 컨트롤러마다
+      # 검증을 반복하는 대신 Spring Data Web의 전역 설정으로 요청 가능한 최대 size를 제한한다.
+      pageable:
+        max-page-size: 100
+
+server:
+  port: 8080
+
+jwt:
+  secret: ${JWT_SECRET:local-development-secret-key-change-me-please-0123456789}
+  access-token-expiration: 3600000
+  refresh-token-expiration: 604800000
+
+# 회원가입 시 role=ADMIN 선택 시 대조할 관리자 가입 코드
+admin:
+  signup-code: ${ADMIN_SIGNUP_CODE:}
+
+# CORS 허용 프론트 도메인 - 콤마(,)로 여러 개 지정 가능 (예: http://localhost:3000,https://aistock.example.com)
+# 로컬 개발 편의를 위해 기본값은 프론트 로컬 서버(localhost:3000)로 두고,
+# 운영 환경 값은 application-prod.yml에서 기본값 없이 환경변수로 강제한다 (하드코딩 금지 원칙).
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+
+# LS증권 Open API 연동 설정 - appkey/appsecret은 절대 코드·yml에 하드코딩하지 않고
+# 실행 환경변수(LS_APP_KEY, LS_APP_SECRET)로만 주입한다(.env는 gitignore 대상).
+# 접근토큰 발급 엔드포인트는 실서버/모의투자 서버 공통이며, appkey/appsecret 자체가 모의/실 계정을 구분한다.
+# 실시간시세 WebSocket 접속 URL은 모의/실서버 포트가 달라 프로필별(application-dev.yml/application-prod.yml)로 분리한다.
+# LsAccessTokenProvider(AI 상담용 REST 클라이언트 공용 토큰 발급기)가 ls.mode와 무관하게 항상
+# 등록되는 빈이라, gemini/dart/naver 키와 마찬가지로 빈 문자열 기본값을 둔다 — 값이 없으면
+# LsAccessTokenProvider.issueAccessToken() 호출 시점에 EXTERNAL_API_ERROR로 실패하므로,
+# 코드는 완성된 채로 두고 키만 .env로 나중에 채우면 된다(CI 등 키가 없는 환경에서도 컨텍스트
+# 로딩 자체는 통과해야 하기 때문에 기본값 없는 필수 프로퍼티로 두면 안 된다).
+ls:
+  token-url: ${LS_TOKEN_URL:https://openapi.ls-sec.co.kr:8080/oauth2/token}
+  app-key: ${LS_APP_KEY:}
+  app-secret: ${LS_APP_SECRET:}
+  # AI 상담의 get_current_price 도구 전용 — LsMarketDataApiClient가 종목 현재가를 그때그때
+  # REST로 조회하는 엔드포인트(t1102, 2026-08-07 추가). LsWebSocketClient의 실시간 스트림과
+  # 별개로, ls.mode와 무관하게 항상 이 URL로 호출한다.
+  market-data-url: ${LS_MARKET_DATA_URL:https://openapi.ls-sec.co.kr:8080/stock/market-data}
+  # AI 상담의 get_foreign_institutional_trend 도구 전용 — LsInvestorTrendApiClient가 외국인/기관
+  # 매매동향을 조회하는 엔드포인트(t1716, 2026-08-10 추가).
+  frgr-itt-url: ${LS_FRGR_ITT_URL:https://openapi.ls-sec.co.kr:8080/stock/frgr-itt}
+  # AI 상담의 get_investment_opinion/get_shareholder_meeting_schedule 도구 전용 —
+  # LsInvestInfoApiClient가 투자의견(t3401)/증시일정(t3202)을 조회하는 엔드포인트(2026-08-10 추가).
+  # 2026-08-11에 재무순위종합(t3341)/해외지수조회API용(t3521)/증시주변자금추이(t8428) 3개 추가.
+  investinfo-url: ${LS_INVESTINFO_URL:https://openapi.ls-sec.co.kr:8080/stock/investinfo}
+  # AI 상담의 get_market_ranking 도구 전용 — LsHighItemApiClient가 등락율상위(t1441)/
+  # 시가총액상위(t1444)/거래량상위(t1452)/거래대금상위(t1463)/거래급증(t1466)/
+  # 시간외등락율상위(t1481)/시간외거래량상위(t1482)를 조회하는 엔드포인트(2026-08-11 추가).
+  high-item-url: ${LS_HIGH_ITEM_URL:https://openapi.ls-sec.co.kr:8080/stock/high-item}
+  # AI 상담의 get_theme_info 도구 전용 — LsSectorApiClient가 테마별종목(t1531)/특이테마(t1533)/
+  # 테마종목별시세조회(t1537)를 조회하는 엔드포인트(2026-08-11 추가).
+  sector-url: ${LS_SECTOR_URL:https://openapi.ls-sec.co.kr:8080/stock/sector}
+  # AI 상담의 get_etf_info 도구 전용 — LsEtfApiClient(2026-08-11 추가).
+  etf-url: ${LS_ETF_URL:https://openapi.ls-sec.co.kr:8080/stock/etf}
+  # AI 상담의 get_program_trading_summary 도구 전용 — LsProgramApiClient(2026-08-11 추가).
+  program-url: ${LS_PROGRAM_URL:https://openapi.ls-sec.co.kr:8080/stock/program}
+  # AI 상담의 get_investor_trend_summary 도구 전용 — LsInvestorApiClient(2026-08-11 추가).
+  investor-url: ${LS_INVESTOR_URL:https://openapi.ls-sec.co.kr:8080/stock/investor}
+  # AI 상담의 get_stock_credit_info/신규상장/공매도/종목마스터 도구 전용 — LsEtcApiClient(2026-08-11 추가).
+  etc-url: ${LS_ETC_URL:https://openapi.ls-sec.co.kr:8080/stock/etc}
+  # AI 상담의 업종 시세 도구 전용 — LsIndustryApiClient(2026-08-11 추가).
+  industry-url: ${LS_INDUSTRY_URL:https://openapi.ls-sec.co.kr:8080/indtp/market-data}
+
+# 회원가입 이메일 인증코드 발신자 주소 (spring.mail과 별개 커스텀 프로퍼티)
+app:
+  mail:
+    from: ${MAIL_FROM:aistock@example.com}
+  # AI 재무설계 상담(feature/ai-planning)에서 쓰는 외부 API 설정.
+  # 로컬은 URL만 기본값을 주고 API 키는 빈 문자열 기본값으로 둔다 — 키가 없으면 각 클라이언트가
+  # 호출 시점에 EXTERNAL_API_ERROR로 실패하므로, 코드는 완성된 채로 두고 키만 .env로 나중에 채우면 된다.
+  gemini:
+    api-key: ${GEMINI_API_KEY:}
+    # 하이브리드 모델 구성(2026-08-06). 원래 judge=gemini-2.5-flash-lite/answer=gemini-2.5-flash로
+    # 정했으나, 이 프로젝트 계정은 "신규 사용자에게 더 이상 제공되지 않음"(404)으로 2.5 세대
+    # 전체가 막혀 있어 실제 호출이 안 됐다(실 API 키로 직접 확인, 2026-08-06). 그 다음 시도한
+    # "-latest" 별칭(gemini-flash-lite-latest/gemini-flash-latest)은 실제로는 gemini-3.6-flash로
+    # 서빙되어 원래 계획보다 3~6배 비쌌다. 최종적으로 실제 호출 가능 + 가장 저렴한 조합인
+    # gemini-3.1-flash-lite로 judge/answer 둘 다 통일했다(라이브 테스트 3턴으로 톤·맥락유지·
+    # 정확도 확인 완료, 2026-08-06). 버전을 직접 고정해 "-latest" 별칭처럼 Google이 나중에
+    # 가리키는 대상을 바꿔 가격이 예고 없이 뛰는 것을 막는다.
+    judge-api-url: ${GEMINI_JUDGE_API_URL:https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent}
+    answer-api-url: ${GEMINI_ANSWER_API_URL:https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent}
+  dart:
+    api-key: ${DART_API_KEY:}
+    api-url: ${DART_API_URL:https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json}
+    # 회사명→corp_code 매핑을 위한 DART 전체 회사 목록(zip) 다운로드 엔드포인트.
+    corp-code-url: ${DART_CORP_CODE_URL:https://opendart.fss.or.kr/api/corpCode.xml}
+  # 네이버 뉴스 검색(NAVER API HUB, NCP 콘솔에서 발급) — 원래 Tavily를 썼으나 AI 자동요약이
+  # 동일 검색어로도 결과가 재현되지 않는 문제(2026-08-05 라이브 테스트로 확인)를 겪은 뒤
+  # 뉴스 검색 백엔드를 이걸로 교체했다(Tavily 코드·설정은 2026-08-06 완전 삭제). 인증 방식이
+  # 옛 openapi.naver.com의 X-Naver-Client-Id/Secret이 아니라 NCP API Gateway 방식
+  # (X-NCP-APIGW-API-KEY-ID/KEY)이라 헷갈리기 쉽다 — NaverNewsApiClient 참고.
+  naver:
+    client-id: ${NAVER_CLIENT_ID:}
+    client-secret: ${NAVER_CLIENT_SECRET:}
+    api-url: ${NAVER_NEWS_API_URL:https://naverapihub.apigw.ntruss.com/search/v1/news}
