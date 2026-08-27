@@ -861,23 +861,54 @@ call(String url, String trCd, Map<String, Object> requestBody, String token, Str
 | Request DTO | `NewsSearchRequest`(keyword) |
 | Response DTO | `NewsSearchResponse`(title, url, summary, publishedAt) |
 
-### 8-11. feature/simulation
+### 8-11. feature/simulation / feature/simulation-integration
 
-> **1차 PR(계산 엔진 + 조회 API) 범위 설명**: dev 기준 `GeminiApiClient`/`DartApiClient`/
-> `infra/naver/*` 등 외부 연동 클라이언트가 전부 빈 스텁이거나 아예 없다(실 구현은
-> `feature/ai-planning`에만 있으며 아직 dev에 미병합). 따라서 1차 PR은
-> `POST /api/simulations`(`runSimulation`, Gemini/DART/뉴스 연동)를 아예 포함하지
-> 않고, 순수 계산 로직(`ScenarioCalculator`)과 조회 API(`GET`)만 구현한다.
-> `runSimulation`은 `feature/ai-planning` 병합 후 별도 브랜치(예:
-> `feature/simulation-integration`)에서 이어간다. 아래 표의 `runSimulation`/
-> `SimulationRequest` 항목은 다음 PR에서 그대로 쓸 수 있도록 지금 정의만 해두는
-> 것이며 컨트롤러에 실제로 연결되지 않는다.
+> **2차 PR(`feature/simulation-integration`) 반영**: 1차 PR은 `GeminiApiClient`/
+> `DartApiClient`/`infra/naver/*`가 dev에 아직 없어(`feature/ai-planning` 미병합)
+> 순수 계산 로직(`ScenarioCalculator`)과 조회 API(`GET`)만 구현했었다.
+> `feature/ai-planning`이 dev에 병합된 뒤 이 브랜치에서 `POST /api/simulations`
+> (`runSimulation`)을 이어 구현했다 — Gemini에는 stockCode/종목명만 주고
+> 시나리오별 월 복리 성장률(스칼라 double 3개, JSON 응답)을 근거와 함께 요청하며
+> (`SimulationService.MonthlyGrowthRates`, private record — JSON 파싱 실패는
+> `SCENARIO_DATA_PARSE_ERROR` 재사용), DART 재무 데이터(연간+최근분기)와 네이버
+> 뉴스 조회는 Gemini 호출과 무관하게 별도로 수행해 `dart_data`/`news_data`
+> 컬럼에만 원본을 저장한다. `stockCode`→`corpCode` 변환은 `DartApiClient`에
+> stockCode 전용 메서드가 없어 `StockNameResolver.resolveStockName()`으로 얻은
+> 종목명을 `DartApiClient.resolveCorpCodeByName()`에 넘기는 방식으로 처리한다
+> (corpCode를 못 찾으면 dartData는 null — 두 컬럼 모두 schema.sql상 NULL 허용).
+> DART 연간+최근분기 병렬 조회는 `DartApiClient.fetchFinancialIndicatorCategories()`와
+> 동일하게 `Executors.newVirtualThreadPerTaskExecutor()`를 쓴다(AI 상담 전용인
+> `aiToolTaskExecutor` 빈은 재사용하지 않음 — 스코프가 다른 기능이라).
+>
+> **트랜잭션 분리(코드리뷰 반영)**: `runSimulation()`은 `AiPlanningService.sendMessage()`와
+> 동일한 이유로 `@Transactional`을 걸지 않는다 — Gemini/DART/네이버 호출을 DB 트랜잭션
+> 안에 묶으면 커넥션을 수 초씩 점유해 무관한 API까지 커넥션 풀 고갈 영향을 받을 수 있다.
+> `SimulationService`는 이제 클래스 레벨 `@Transactional`을 두지 않고(`AiPlanningService`와
+> 동일), `getMySimulations`/`getSimulation` 각각에 `@Transactional(readOnly = true)`를 개별로
+> 붙인다. 외부 호출 전/후 경계는 `loadHistory()`/`saveTurn()`과 동일한 self-invocation
+> 패턴(`@Autowired @Lazy private SimulationService self`)으로 나눈다 — `resolveStockName(Long
+> userId, String stockCode)`(`@Transactional(readOnly = true)`, 사용자 존재 확인 + 종목명 조회를
+> 외부 호출 전에 끝냄)와 `saveSimulation(Long userId, SimulationRequest request, String
+> stockName, ScenarioSetDto scenarioSet, String dartDataJson, String newsDataJson)`
+> (`@Transactional`, 외부 호출 성공 후 저장 + 알림 발송)로, 둘 다 `runSimulation()` 외부에서
+> 호출할 일은 없지만 self 프록시를 타야 해서 public이다. `saveSimulation()`은
+> `userRepository.getReferenceById()`로 User FK를 채운다(`resolveStockName()`에서 이미 존재를
+> 확인했으므로 `NotificationService.notify()`와 동일하게 재조회 없이 참조만 사용).
+>
+> **SIMULATION 알림 추가(코드리뷰 반영)**: 저장 직후 `NotificationService.notify(userId,
+> NotificationType.SIMULATION, title, content)`를 호출한다 — `AiPlanningService`가 아니라
+> `AiNewsService.generateBriefingForUser()`와 동일한 패턴(`AiPlanningService`는 알림을 보내지
+> 않음). title은 `"{stockName} 목표 도달 시뮬레이션이 완료됐어요"`, content는 베이스 시나리오
+> 기준 `baseReachDate`가 있으면 `"베이스 시나리오 기준 목표 도달 예상일: {날짜}"`, 없으면(기간 내
+> 미도달) `"베이스 시나리오 기준으로는 설정하신 기간 내 목표 도달이 어려울 것으로 예상돼요."`
+> (`SimulationService.buildReachDateNotificationContent()`). `NotificationType.SIMULATION`의
+> 첫 실사용이다.
 
 | 구분 | 이름 |
 |---|---|
 | Controller | `SimulationController` |
-| 엔드포인트 | `GET /api/simulations`, `GET /api/simulations/{simulationId}` (`POST /api/simulations`는 다음 PR) |
-| Service | `SimulationService` — `getMySimulations(Long userId)`, `getSimulation(Long userId, Long simulationId)` (`runSimulation(Long userId, SimulationRequest request)`는 다음 PR에서 구현) |
+| 엔드포인트 | `POST /api/simulations`, `GET /api/simulations`, `GET /api/simulations/{simulationId}` |
+| Service | `SimulationService` — `getMySimulations(Long userId)`, `getSimulation(Long userId, Long simulationId)`, `runSimulation(Long userId, SimulationRequest request)`. `resolveStockName(Long userId, String stockCode)`/`saveSimulation(...)`도 public인데, `AiPlanningService.loadHistory()`/`saveTurn()`과 동일하게 self-invocation으로 트랜잭션 경계를 나누기 위한 것 — 외부에서 호출할 일은 없다 |
 | Request DTO | `SimulationRequest`(stockCode, investmentAmount, targetAmount, targetMonths) — targetMonths는 1~12 (`@Min(1) @Max(12)`) |
 | Response DTO | `SimulationResponse`(simulationId, stockCode, stockName, investmentAmount, targetAmount, targetMonths, bestScenario, baseScenario, worstScenario, bestReachDate, baseReachDate, worstReachDate, createdAt) — 정적 팩토리 `of(Simulation, List<ScenarioPointDto> best, List<ScenarioPointDto> base, List<ScenarioPointDto> worst)` |
 | 내부 DTO | `ScenarioPointDto`(date: `LocalDate`, value: `long`) — 시나리오 곡선 한 포인트. `date`는 매월 1일로 정규화. `value`는 `investmentAmount` 복리 계산 결과인 포트폴리오 평가금액(원 단위, `Math.round()` 반올림)이며 종목 주당가(`price`)가 아니므로 필드명을 `price`가 아닌 `value`로 둔다(코드베이스 전역에서 `price`는 이미 "주당 시장가" 의미로 쓰이고 있어 혼동 방지). 위치는 `domain/stock/dto/StockPriceDto.java`와 동일하게 `domain/ai/dto/` 바로 아래. |

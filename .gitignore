@@ -21,3 +21,6 @@ Thumbs.db
 
 ### Logs ###
 *.log
+
+### Review tool temp files ###
+.review_tmp/
