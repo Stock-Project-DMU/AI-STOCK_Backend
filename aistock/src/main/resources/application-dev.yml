@@ -50,3 +50,6 @@ logging:
 ls:
   mode: ${LS_MODE:mock}
   websocket-url: ${LS_WEBSOCKET_URL:wss://openapi.ls-sec.co.kr:29443/websocket}
+  # ls.mode=mock에서 로컬 파일로 시세를 공급할 때 사용할 데이터 디렉토리 경로(프로젝트
+  # 상대경로, feature/ls-local-data). 실제로 이 경로를 읽는 컴포넌트는 아직 없다(추후 추가 예정).
+  local-data-path: ${LS_LOCAL_DATA_PATH:./local-market-data}
