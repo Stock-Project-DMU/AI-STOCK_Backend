@@ -703,6 +703,15 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 압축한 결과, CLAUDE.md 4번 "infra는 domain을 통해서만" 원칙과 별개로 이건 Gemini 판단 정확도·
 프롬프트 비용 문제로 압축한 것).
 
+**LS 도구 22개는 전부 `ai:tool` 세션 캐시(30분) 대상에서 제외**된다(2026-08-31,
+feature/ls-local-data A-6). LS 시세·순위·동향·공시류는 DART 재무제표/네이버 뉴스와 달리 갱신
+주기가 짧아, 30분 세션 캐시에 태우면 낡은 값이 그대로 재사용되기 때문이다. `AiPlanningService`의
+`LS_CACHE_BYPASS_TOOL_NAMES`(Set)로 이름 기준 판정하며, `get_etf_info`만 예외적으로 이름이 아니라
+인자(`infoType`)로 갈린다 — `PRICE` 모드는 캐시 제외, `CONSTITUENTS` 모드(구성종목 비중, 자주 안
+바뀜)는 캐시 유지. DART 4개(`get_financial_statements`/`get_capital_change_info`/
+`get_ownership_info`/`get_disclosure_info`)와 뉴스 1개(`search_securities_news`)는 캐시를 그대로
+유지한다.
+
 | 도구 이름 | 파라미터 | 분기(묶음형만) → 실제 호출 |
 |---|---|---|
 | `search_securities_news` | companyName(필수), topic, periodDays | `NaverNewsApiClient.search()` |
@@ -751,7 +760,7 @@ confirmedCurrentPrices`(`executeTool()`이 `aiToolTaskExecutor`로 동시 실행
 | 클라이언트 | 엔드포인트(`ls.*-url`) | 공개 메서드 → TR코드 |
 |---|---|---|
 | `LsAccessTokenProvider` | `${ls.token-url}` | `issueAccessToken()` — 아래 10개 클라이언트가 전부 공유하는 토큰 발급 전용 컴포넌트(WebSocket 쪽 `LsWebSocketClient`는 이걸 안 쓰고 자체 토큰 발급 로직을 유지) |
-| `LsMarketDataApiClient` | `market-data-url` | `getCurrentPrice(String stockCode)`→t1102, `getRiskFlags(String stockCode)`→t1404+t1405, `getPivotLevels(String stockCode)`→t1105, `getRecentHistoricalPrices(String stockCode)`/`getHistoricalPrices(String stockCode, Integer periodMonths)`→t1305(periodMonths 없으면 일봉 최근 5건, 있으면 월봉으로 전환해 최대 24개월=2년, 2026-08-13 추가 — open/high/low도 함께 파싱), `getMultiStockPrices(List<String> stockCodes)`→t8407(최대 5종목), `getRecentCallAuctionPrices(String stockCode)`→t1486(최대 5건, 시간대 게이트는 호출부 책임) |
+| `LsMarketDataApiClient` | `market-data-url` | `getCurrentPrice(String stockCode)`→t1102(`ls.mode=mock`이면 `LsLocalMarketDataReader`로 대체, feature/ls-local-data 2026-08-30 추가 — 나머지 메서드 및 다른 9개 클라이언트는 그대로 항상 실제 LS API 호출), `getRiskFlags(String stockCode)`→t1404+t1405, `getPivotLevels(String stockCode)`→t1105, `getRecentHistoricalPrices(String stockCode)`/`getHistoricalPrices(String stockCode, Integer periodMonths)`→t1305(periodMonths 없으면 일봉 최근 5건, 있으면 월봉으로 전환해 최대 24개월=2년, 2026-08-13 추가 — open/high/low도 함께 파싱), `getMultiStockPrices(List<String> stockCodes)`→t8407(최대 5종목), `getRecentCallAuctionPrices(String stockCode)`→t1486(최대 5건, 시간대 게이트는 호출부 책임) |
 | `LsInvestorTrendApiClient` | `frgr-itt-url` | `getRecentTrend(String stockCode)`/`getTrend(String stockCode, Integer periodMonths)`→t1716(외인기관종목별동향, periodMonths 없으면 최근 10일·최대 5건, 있으면 최대 24개월=2년까지 일별 원본 그대로 반환해 호출부가 합계·최고/최저일 계산, 2026-08-13 추가) |
 | `LsInvestInfoApiClient` | `investinfo-url` | `getInvestmentOpinions(String stockCode)`→t3401(최대 5건), `getShareholderMeetingSchedule(String stockCode)`→t3202(`upgu=="09"` 필터, 최대 5건), `getFinancialRanking(String criteria)`→t3341(최대 10건), `getOverseasIndex(String kind, String symbol)`→t3521, `getRecentMarketLiquidityTrend()`/`getMarketLiquidityTrend(Integer periodMonths)`→t8428(periodMonths 없으면 최근 7일·최대 5건, 있으면 최대 24개월=2년, 2026-08-13 추가) |
 | `LsHighItemApiClient` | `high-item-url` | `getTopPriceChangeRate()`→t1441, `getTopMarketCap()`→t1444, `getTopVolume()`→t1452, `getTopTradingValue()`→t1463, `getSurgingVolumeVsYesterday()`→t1466, `getTopAfterHoursPriceChangeRate()`→t1481, `getTopAfterHoursVolume()`→t1482 (전부 `List<LsRankingItemDto>`, 최대 10건) |
@@ -761,6 +770,22 @@ confirmedCurrentPrices`(`executeTool()`이 `aiToolTaskExecutor`로 동시 실행
 | `LsInvestorApiClient` | `investor-url` | `getInvestorTypeSummary()`→t1601, `getMarketComparison()`→t1615 |
 | `LsEtcApiClient` | `etc-url` | `getCollateralLoanEligibility(String stockCode)`→`CLNAQ00100`(예탁담보융자가능종목현황조회), `getMarginRequirement(String stockCode)`→t1411(증거금율별종목조회), `getMarginTradingTrend(String stockCode)`→t1921(신용거래동향, 최근 5일 — LS API 자체에 기간 파라미터가 없어 확장 불가, 2026-08-13 전수조사로 확인), `getSecuritiesLendingTrend(String stockCode)`/`getSecuritiesLendingTrend(String stockCode, Integer periodMonths)`→t1941(종목별대차거래일간추이, periodMonths 없으면 최근 7일·최대 5건, 있으면 최대 24개월=2년, 2026-08-13 추가), `getNewListings()`/`getNewListings(Integer periodMonths)`→t1403(신규상장종목조회, periodMonths 없으면 최근 6개월·최대 10건, 있으면 최대 24개월=2년·최대 50건, 2026-08-13 추가), `getRecentShortSellingTrend(String stockCode)`/`getShortSellingTrend(String stockCode, Integer periodMonths)`→t1927(공매도일별추이, periodMonths 없으면 최근 7일·최대 5건, 있으면 최대 24개월=2년, 2026-08-13 추가), `getStockMasterInfo(String stockCode)`→t8436(주식종목조회API용) |
 | `LsIndustryApiClient` | `industry-url`(`/indtp/market-data`, 기존에 전혀 구현 안 돼 있던 업종 카테고리) | `getCurrentPrice(String marketName)`→t1511(업종현재가), `getRecentTrend(String marketName)`/`getTrend(String marketName, Integer periodMonths)`→t1514(업종기간별추이, periodMonths 없으면 일봉 최근 5건, 있으면 월봉(gubun2=3)으로 전환해 최대 24개월=2년, 2026-08-13 추가), `getExpectedIndex(String marketName, String callAuctionSession)`→t1485(예상지수, 시간대 게이트는 호출부 책임). `marketName`은 `코스피`→`001`/`코스닥`→`301`로 매핑 |
+
+**`LsLocalMarketDataReader`(`infra/ls`, feature/ls-local-data, 2026-08-30 추가)** — `ls.mode=mock`에서
+LS 실시간 시세 대신 로컬 파일로 시세를 공급하는 컴포넌트. 위 10개 REST 클라이언트와 달리 LS API를
+호출하지 않으므로(TR코드/`Authorization` 헤더 없음) `LsApiClientSupport`를 상속하지 않는다.
+`${ls.local-data-path}` 디렉토리에서 `{stockCode}.json` 파일을 읽어 `LsCurrentPriceDetailDto`로
+반환한다 — 파일은 LS 원본 TR 필드(hname/price/...)가 아니라 DTO 필드명(stockCode/currentPrice/...)으로
+이미 매핑된 형태를 그대로 역직렬화한다. 공개 메서드: `getCurrentPrice(String stockCode)` — 파일이
+없거나 파싱에 실패하면 다른 REST 클라이언트와 동일하게 `Optional.empty()`를 반환한다(예외를
+던지지 않음).
+
+`@ConditionalOnProperty(name = "ls.mode", havingValue = "mock")`로 `ls.mode=mock`일 때만 빈으로
+생성된다(`LsWebSocketClient`의 real 전용 조건과 정반대, A-4 2026-08-30 추가). `LsMarketDataApiClient`가
+이 빈을 `Optional<LsLocalMarketDataReader>` 생성자 주입으로 받아 `getCurrentPrice()` 안에서
+존재 여부로 mock/real을 분기한다 — `StockSubscriptionManager`가 `Optional<LsWebSocketClient>`로
+mock/real을 구분하는 것과 동일한 패턴. 로컬 파일 조회가 빈 값을 반환해도 실제 LS API로 폴백하지
+않는다(mock 모드에서는 로컬 파일이 유일한 데이터 소스).
 
 **`LsApiClientSupport`(추상, `infra/ls` 패키지 전용, 코드리뷰 반영)** — 위 10개 클라이언트가
 전부 거의 동일하게 복붙하고 있던 요청 빌딩(Authorization/tr_cd/tr_cont 헤더 + `ExternalApiInvoker`

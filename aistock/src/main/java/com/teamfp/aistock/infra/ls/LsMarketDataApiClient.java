@@ -38,6 +38,12 @@ import lombok.extern.slf4j.Slf4j;
  * 검증 완료), 이후 LS 공식 API 카탈로그 문서를 확보해 필드명 전체(166개)를 대조한 결과
  * hname/price/sign/change/diff/volume 등 이미 쓰던 필드는 전부 정확했다. 이번엔 그 문서를
  * 근거로 PER/PBR/52주 최고·최저·상장주식수·소진율까지 추가로 파싱한다(2026-08-10).</p>
+ *
+ * <p>{@code getCurrentPrice()}만 {@code ls.mode=mock}에서 {@link LsLocalMarketDataReader}(로컬
+ * 파일)로 전환된다(feature/ls-local-data, 2026-08-30). 이 클래스의 나머지 메서드(t1105/t1305/
+ * t8407/t1404+t1405/t1486)와 다른 9개 REST 클라이언트(t1716/t3401 등)는 {@link
+ * LsAccessTokenProvider}와 동일하게 ls.mode와 무관하게 항상 실제 LS API를 호출한다 — mock 전환
+ * 대상은 이번 범위에서 t1102(현재가) 하나로 한정한다.</p>
  */
 @Slf4j
 @Component
@@ -47,13 +53,18 @@ public class LsMarketDataApiClient extends LsApiClientSupport {
     private static final String OUT_BLOCK_KEY = "t1102OutBlock";
 
     private final LsAccessTokenProvider accessTokenProvider;
+    private final Optional<LsLocalMarketDataReader> localMarketDataReader;
 
     @Value("${ls.market-data-url}")
     private String marketDataUrl;
 
-    public LsMarketDataApiClient(LsAccessTokenProvider accessTokenProvider, RestClient.Builder restClientBuilder) {
+    public LsMarketDataApiClient(
+            LsAccessTokenProvider accessTokenProvider,
+            Optional<LsLocalMarketDataReader> localMarketDataReader,
+            RestClient.Builder restClientBuilder) {
         super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
+        this.localMarketDataReader = localMarketDataReader;
     }
 
     /**
@@ -61,8 +72,15 @@ public class LsMarketDataApiClient extends LsApiClientSupport {
      * PER/PBR/52주 최고·최저·상장주식수·소진율을 함께 조회한다. 토큰 발급 실패, TR 호출 실패,
      * 응답 구조가 예상과 다른 경우 전부 빈 값을 반환한다 — 호출자(AiPlanningService)가
      * "확인할 수 없다"로 자연스럽게 처리하도록 예외를 던지지 않는다.
+     *
+     * <p>{@code ls.mode=mock}이면(={@code localMarketDataReader}가 존재하면) LS API를 호출하지
+     * 않고 로컬 파일 조회로 대체한다. 로컬 파일이 없거나 파싱에 실패해도 실제 LS API로 폴백하지
+     * 않고 그대로 빈 값을 반환한다 — mock 모드에서는 로컬 파일이 유일한 데이터 소스다.</p>
      */
     public Optional<LsCurrentPriceDetailDto> getCurrentPrice(String stockCode) {
+        if (localMarketDataReader.isPresent()) {
+            return localMarketDataReader.get().getCurrentPrice(stockCode);
+        }
         try {
             String token = accessTokenProvider.issueAccessToken();
             Map<String, Object> requestBody = Map.of("t1102InBlock", Map.of("shcode", stockCode));

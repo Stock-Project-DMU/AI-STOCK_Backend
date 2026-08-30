@@ -6,6 +6,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
@@ -157,6 +158,22 @@ public class AiPlanningService {
     private static final String SHORT_SELLING_TREND_TOOL_NAME = "get_short_selling_trend";
     private static final String STOCK_MASTER_INFO_TOOL_NAME = "get_stock_master_info";
     private static final String INDUSTRY_INFO_TOOL_NAME = "get_industry_info";
+
+    // LS 도구(22개) 전체가 ai:tool 세션 캐시(RedisAiToolCacheService) 대상에서 제외된다(2026-08-31,
+    // feature/ls-local-data A-6) — DART/네이버와 달리 LS 시세·순위·동향류 데이터는 30분 세션
+    // 캐시에 태우기엔 갱신 주기가 짧아, 낡은 값이 캐시 유효시간(30분) 동안 재사용되는 문제가
+    // 생긴다. 이 중 이름만으로 항상 LS인 21개(시세류 3개 + 이번에 추가된 18개)는 이 Set으로
+    // 판정하고, get_etf_info(같은 도구 안에서 infoType이 PRICE면 LS 실시간 조회·CONSTITUENTS면
+    // 자주 안 바뀌는 구성종목 비중이라 캐시 유지 대상)만은 이름이 아니라 인자값으로 갈라야 해서
+    // 이 Set에 넣지 않고 executeTool()에서 별도 조건으로 처리한다.
+    private static final Set<String> LS_CACHE_BYPASS_TOOL_NAMES = Set.of(
+            CURRENT_PRICE_TOOL_NAME, MULTI_STOCK_PRICE_TOOL_NAME, CALL_AUCTION_PRICE_TOOL_NAME,
+            FOREIGN_INSTITUTIONAL_TREND_TOOL_NAME, INVESTMENT_OPINION_TOOL_NAME, SHAREHOLDER_MEETING_TOOL_NAME,
+            MARKET_RANKING_TOOL_NAME, THEME_INFO_TOOL_NAME, FINANCIAL_RANKING_TOOL_NAME,
+            OVERSEAS_INDEX_TOOL_NAME, MARKET_LIQUIDITY_TOOL_NAME, TECHNICAL_SIGNAL_TOOL_NAME,
+            HISTORICAL_PRICE_TOOL_NAME, RISK_FLAG_TOOL_NAME, STOCK_CREDIT_INFO_TOOL_NAME,
+            PROGRAM_TRADING_SUMMARY_TOOL_NAME, INVESTOR_TREND_SUMMARY_TOOL_NAME, NEW_LISTING_STOCKS_TOOL_NAME,
+            SHORT_SELLING_TREND_TOOL_NAME, STOCK_MASTER_INFO_TOOL_NAME, INDUSTRY_INFO_TOOL_NAME);
 
     // 실제 API로 검증한 결과(2026-08-03), Gemini는 도구 실행 결과가 마음에 안 들면 검색어를
     // 바꿔 도구를 다시 요청하는 등 한 턴에 도구 호출을 여러 번 반복할 수 있었다 — "판단 1번 +
@@ -1257,27 +1274,43 @@ public class AiPlanningService {
     private Map<String, Object> executeTool(
             Long sessionId, GeminiResponse.FunctionCall functionCall,
             List<ConfirmedPrice> confirmedCurrentPrices) {
-        // 실시간 시세는 5초마다 바뀌는 값이라, 나머지 도구(재무제표/공시/뉴스 등 세션 내내
-        // 크게 안 바뀌는 데이터)와 같은 30분짜리 세션 캐시에 태우면 낡은 가격을 계속 재사용하게
-        // 된다 — 그래서 공용 캐시 경로를 타지 않고 매번 새로 조회한다. get_current_price/
-        // get_multi_stock_price(ConfirmedPrice 확정 패턴 적용 대상)뿐 아니라 get_call_auction_price
-        // (동시호가 예상체결가 — 그 순간에만 유효)와 get_etf_info의 PRICE 모드(ETF 현재가. 반면
-        // CONSTITUENTS 모드는 구성종목 비중이라 자주 안 바뀌므로 캐시 대상으로 남겨둔다)도 같은
-        // 이유로 캐시를 우회해야 한다 — 이 중 하나라도 여기서 빠진 채 공용 캐시 경로만 타면, 캐시
+        // LS 22개 도구는 전부 ai:tool 세션 캐시(30분)를 우회한다(2026-08-31, A-6) — 실시간
+        // 시세는 5초마다 바뀌고, 순위/동향/공시류도 장중 계속 갱신되는 데이터라 나머지 도구
+        // (DART 재무제표·공시, 네이버 뉴스처럼 세션 내내 크게 안 바뀌는 데이터)와 같은 30분짜리
+        // 세션 캐시에 태우면 낡은 값을 계속 재사용하게 된다 — 그래서 공용 캐시 경로를 타지 않고
+        // 매번 새로 조회한다. get_etf_info만 예외적으로 인자(infoType)에 따라 갈린다 — PRICE
+        // 모드(ETF 현재가)는 캐시 우회, CONSTITUENTS 모드(구성종목 비중)는 자주 안 바뀌므로
+        // 캐시 대상으로 남겨둔다. 이 중 하나라도 여기서 빠진 채 공용 캐시 경로만 타면, 캐시
         // 히트 시 해당 도구의 실제 조회가 아예 호출되지 않아 낡은 값이 캐시 유효시간(30분) 동안
         // 조용히 재사용된다(get_multi_stock_price에서 실제로 있었던 버그, 코드리뷰로 발견돼
         // get_etf_info/get_call_auction_price에도 같은 유형이 남아있는 걸 함께 확인해 반영).
-        boolean isLivePriceTool = CURRENT_PRICE_TOOL_NAME.equals(functionCall.name())
-                || MULTI_STOCK_PRICE_TOOL_NAME.equals(functionCall.name())
-                || CALL_AUCTION_PRICE_TOOL_NAME.equals(functionCall.name())
+        boolean isLsTool = LS_CACHE_BYPASS_TOOL_NAMES.contains(functionCall.name())
                 || (ETF_INFO_TOOL_NAME.equals(functionCall.name())
                         && !"CONSTITUENTS".equals(stringArg(functionCall.args(), "infoType")));
-        if (isLivePriceTool) {
+        if (isLsTool) {
             try {
                 return switch (functionCall.name()) {
                     case CURRENT_PRICE_TOOL_NAME -> executeCurrentPriceLookup(functionCall, confirmedCurrentPrices);
                     case MULTI_STOCK_PRICE_TOOL_NAME -> executeMultiStockPriceLookup(functionCall, confirmedCurrentPrices);
                     case CALL_AUCTION_PRICE_TOOL_NAME -> executeCallAuctionPriceLookup(functionCall);
+                    case FOREIGN_INSTITUTIONAL_TREND_TOOL_NAME -> executeForeignInstitutionalTrendLookup(functionCall);
+                    case INVESTMENT_OPINION_TOOL_NAME -> executeInvestmentOpinionLookup(functionCall);
+                    case SHAREHOLDER_MEETING_TOOL_NAME -> executeShareholderMeetingLookup(functionCall);
+                    case MARKET_RANKING_TOOL_NAME -> executeMarketRankingLookup(functionCall);
+                    case THEME_INFO_TOOL_NAME -> executeThemeInfoLookup(functionCall);
+                    case FINANCIAL_RANKING_TOOL_NAME -> executeFinancialRankingLookup(functionCall);
+                    case OVERSEAS_INDEX_TOOL_NAME -> executeOverseasIndexLookup(functionCall);
+                    case MARKET_LIQUIDITY_TOOL_NAME -> executeMarketLiquidityLookup(functionCall);
+                    case TECHNICAL_SIGNAL_TOOL_NAME -> executeTechnicalSignalLookup(functionCall);
+                    case HISTORICAL_PRICE_TOOL_NAME -> executeHistoricalPriceLookup(functionCall);
+                    case RISK_FLAG_TOOL_NAME -> executeRiskFlagLookup(functionCall);
+                    case STOCK_CREDIT_INFO_TOOL_NAME -> executeStockCreditInfoLookup(functionCall);
+                    case PROGRAM_TRADING_SUMMARY_TOOL_NAME -> executeProgramTradingSummaryLookup(functionCall);
+                    case INVESTOR_TREND_SUMMARY_TOOL_NAME -> executeInvestorTrendSummaryLookup(functionCall);
+                    case NEW_LISTING_STOCKS_TOOL_NAME -> executeNewListingStocksLookup(functionCall);
+                    case SHORT_SELLING_TREND_TOOL_NAME -> executeShortSellingTrendLookup(functionCall);
+                    case STOCK_MASTER_INFO_TOOL_NAME -> executeStockMasterInfoLookup(functionCall);
+                    case INDUSTRY_INFO_TOOL_NAME -> executeIndustryInfoLookup(functionCall);
                     default -> executeEtfInfoLookup(functionCall);
                 };
             } catch (RuntimeException e) {
@@ -1304,24 +1337,6 @@ public class AiPlanningService {
                 case CAPITAL_CHANGE_TOOL_NAME -> executeCapitalChangeLookup(functionCall);
                 case OWNERSHIP_TOOL_NAME -> executeOwnershipLookup(functionCall);
                 case DISCLOSURE_TOOL_NAME -> executeDisclosureLookup(functionCall);
-                case FOREIGN_INSTITUTIONAL_TREND_TOOL_NAME -> executeForeignInstitutionalTrendLookup(functionCall);
-                case INVESTMENT_OPINION_TOOL_NAME -> executeInvestmentOpinionLookup(functionCall);
-                case SHAREHOLDER_MEETING_TOOL_NAME -> executeShareholderMeetingLookup(functionCall);
-                case MARKET_RANKING_TOOL_NAME -> executeMarketRankingLookup(functionCall);
-                case THEME_INFO_TOOL_NAME -> executeThemeInfoLookup(functionCall);
-                case FINANCIAL_RANKING_TOOL_NAME -> executeFinancialRankingLookup(functionCall);
-                case OVERSEAS_INDEX_TOOL_NAME -> executeOverseasIndexLookup(functionCall);
-                case MARKET_LIQUIDITY_TOOL_NAME -> executeMarketLiquidityLookup(functionCall);
-                case TECHNICAL_SIGNAL_TOOL_NAME -> executeTechnicalSignalLookup(functionCall);
-                case HISTORICAL_PRICE_TOOL_NAME -> executeHistoricalPriceLookup(functionCall);
-                case RISK_FLAG_TOOL_NAME -> executeRiskFlagLookup(functionCall);
-                case STOCK_CREDIT_INFO_TOOL_NAME -> executeStockCreditInfoLookup(functionCall);
-                case PROGRAM_TRADING_SUMMARY_TOOL_NAME -> executeProgramTradingSummaryLookup(functionCall);
-                case INVESTOR_TREND_SUMMARY_TOOL_NAME -> executeInvestorTrendSummaryLookup(functionCall);
-                case NEW_LISTING_STOCKS_TOOL_NAME -> executeNewListingStocksLookup(functionCall);
-                case SHORT_SELLING_TREND_TOOL_NAME -> executeShortSellingTrendLookup(functionCall);
-                case STOCK_MASTER_INFO_TOOL_NAME -> executeStockMasterInfoLookup(functionCall);
-                case INDUSTRY_INFO_TOOL_NAME -> executeIndustryInfoLookup(functionCall);
                 default -> {
                     log.warn("알 수 없는 도구 호출 요청 - name: {}", functionCall.name());
                     yield Map.of("result", "요청한 도구를 찾을 수 없습니다.");

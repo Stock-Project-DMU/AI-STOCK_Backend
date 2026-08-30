@@ -71,10 +71,10 @@ ls:
   etc-url: ${LS_ETC_URL:https://openapi.ls-sec.co.kr:8080/stock/etc}
   # AI 상담의 업종 시세 도구 전용 — LsIndustryApiClient(2026-08-11 추가).
   industry-url: ${LS_INDUSTRY_URL:https://openapi.ls-sec.co.kr:8080/indtp/market-data}
-  # ls.mode=mock에서 LS 실시간 시세 대신 로컬 파일로 시세를 공급하기 위한 데이터 디렉토리
-  # 경로(feature/ls-local-data, 2026-08-30 추가). real 모드에서는 쓰이지 않으므로
-  # application-prod.yml에는 이 키를 두지 않는다. 실제로 이 경로를 읽는 컴포넌트는 아직
-  # 없고(추후 로컬 파일 리더 클래스에서 사용 예정), 이번 단계는 설정값만 먼저 추가한다.
+  # ls.mode=mock 전용 — LS 실시간 시세 대신 로컬 파일로 시세를 공급하기 위한 데이터 디렉토리
+  # 경로(feature/ls-local-data). LsLocalMarketDataReader(ls.mode=mock에서만 빈 생성)가 이
+  # 경로에서 {stockCode}.json 파일을 읽어 LsMarketDataApiClient.getCurrentPrice()에 공급한다.
+  # real 모드에서는 쓰이지 않으므로 application-prod.yml에는 이 키를 두지 않는다.
   local-data-path: ${LS_LOCAL_DATA_PATH:}
 
 # 회원가입 이메일 인증코드 발신자 주소 (spring.mail과 별개 커스텀 프로퍼티)

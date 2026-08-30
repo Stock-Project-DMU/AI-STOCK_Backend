@@ -150,7 +150,7 @@ class LiveGeminiManualCheck {
         ReflectionTestUtils.setField(lsAccessTokenProvider, "appKey", System.getenv("LS_APP_KEY"));
         ReflectionTestUtils.setField(lsAccessTokenProvider, "appSecret", System.getenv("LS_APP_SECRET"));
 
-        LsMarketDataApiClient lsMarketDataApiClient = new LsMarketDataApiClient(lsAccessTokenProvider, RestClient.builder());
+        LsMarketDataApiClient lsMarketDataApiClient = new LsMarketDataApiClient(lsAccessTokenProvider, Optional.empty(), RestClient.builder());
         ReflectionTestUtils.setField(lsMarketDataApiClient, "marketDataUrl", "https://openapi.ls-sec.co.kr:8080/stock/market-data");
 
         LsInvestorTrendApiClient lsInvestorTrendApiClient = new LsInvestorTrendApiClient(lsAccessTokenProvider, RestClient.builder());

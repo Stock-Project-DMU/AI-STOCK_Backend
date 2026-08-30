@@ -1,6 +1,8 @@
 package com.teamfp.aistock.infra.ls;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
@@ -48,7 +50,7 @@ class LsMarketDataApiClientTest {
         RestClient.Builder builder = RestClient.builder();
         mockServer = MockRestServiceServer.bindTo(builder).build();
 
-        client = new LsMarketDataApiClient(accessTokenProvider, builder);
+        client = new LsMarketDataApiClient(accessTokenProvider, Optional.empty(), builder);
         ReflectionTestUtils.setField(client, "marketDataUrl", MARKET_DATA_URL);
     }
 
@@ -124,6 +126,48 @@ class LsMarketDataApiClientTest {
         Optional<LsCurrentPriceDetailDto> result = client.getCurrentPrice(STOCK_CODE);
 
         assertThat(result).isEmpty();
+    }
+
+    @Nested
+    @DisplayName("현재가 조회 mock 분기 (getCurrentPrice, ls.mode=mock)")
+    class GetCurrentPriceMockBranch {
+
+        @Mock
+        private LsLocalMarketDataReader localMarketDataReader;
+
+        @Test
+        @DisplayName("localMarketDataReader가 존재하면 LS API를 호출하지 않고 로컬 파일 결과를 그대로 반환한다")
+        void usesLocalReader_whenPresent_andSkipsRealApiCall() {
+            LsCurrentPriceDetailDto localResult = LsCurrentPriceDetailDto.builder()
+                    .stockCode(STOCK_CODE)
+                    .stockName("삼성전자(로컬)")
+                    .currentPrice(70000L)
+                    .build();
+            when(localMarketDataReader.getCurrentPrice(STOCK_CODE)).thenReturn(Optional.of(localResult));
+            LsMarketDataApiClient mockModeClient =
+                    new LsMarketDataApiClient(accessTokenProvider, Optional.of(localMarketDataReader), RestClient.builder());
+            ReflectionTestUtils.setField(mockModeClient, "marketDataUrl", MARKET_DATA_URL);
+
+            Optional<LsCurrentPriceDetailDto> result = mockModeClient.getCurrentPrice(STOCK_CODE);
+
+            assertThat(result).isPresent();
+            assertThat(result.get().getStockName()).isEqualTo("삼성전자(로컬)");
+            verify(accessTokenProvider, never()).issueAccessToken();
+        }
+
+        @Test
+        @DisplayName("localMarketDataReader가 빈 값을 반환하면 실제 LS API로 폴백하지 않고 그대로 빈 값을 반환한다")
+        void empty_whenLocalReaderEmpty_noFallbackToRealApi() {
+            when(localMarketDataReader.getCurrentPrice(STOCK_CODE)).thenReturn(Optional.empty());
+            LsMarketDataApiClient mockModeClient =
+                    new LsMarketDataApiClient(accessTokenProvider, Optional.of(localMarketDataReader), RestClient.builder());
+            ReflectionTestUtils.setField(mockModeClient, "marketDataUrl", MARKET_DATA_URL);
+
+            Optional<LsCurrentPriceDetailDto> result = mockModeClient.getCurrentPrice(STOCK_CODE);
+
+            assertThat(result).isEmpty();
+            verify(accessTokenProvider, never()).issueAccessToken();
+        }
     }
 
     @Nested
