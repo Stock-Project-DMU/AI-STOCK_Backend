@@ -50,6 +50,9 @@ class AccountServiceTest {
     @Mock
     private HoldingValuationService holdingValuationService;
 
+    @Mock
+    private AccountTransactionService accountTransactionService;
+
     private AccountService accountService;
 
     private static final Long USER_ID = 1L;
@@ -60,7 +63,7 @@ class AccountServiceTest {
 
     @BeforeEach
     void setUp() {
-        accountService = new AccountService(accountRepository, userRepository, holdingValuationService);
+        accountService = new AccountService(accountRepository, userRepository, holdingValuationService, accountTransactionService);
 
         User user = User.builder()
                 .loginId("tester")
@@ -142,6 +145,54 @@ class AccountServiceTest {
                     .isInstanceOf(CustomException.class)
                     .extracting(e -> ((CustomException) e).getErrorCode())
                     .isEqualTo(ErrorCode.ACCOUNT_NOT_FOUND);
+        }
+    }
+
+    @Nested
+    @DisplayName("계좌 개설")
+    class CreateAccount {
+
+        @Test
+        @DisplayName("계좌를 개설하면 INITIAL_GRANT 원장 기록을 남긴다")
+        void success_recordsInitialGrant() {
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(account.getUser()));
+            when(accountRepository.findAllByUserIdForUpdate(USER_ID)).thenReturn(List.of());
+
+            accountService.createAccount(USER_ID, new com.teamfp.aistock.domain.account.dto.request.CreateAccountRequest("계좌B"));
+
+            org.mockito.Mockito.verify(accountTransactionService).record(
+                    org.mockito.ArgumentMatchers.any(Account.class),
+                    org.mockito.ArgumentMatchers.eq(com.teamfp.aistock.domain.account.entity.AccountTransactionType.INITIAL_GRANT),
+                    org.mockito.ArgumentMatchers.eq(10_000_000L),
+                    org.mockito.ArgumentMatchers.eq(0L),
+                    org.mockito.ArgumentMatchers.isNull(),
+                    org.mockito.ArgumentMatchers.isNull(),
+                    org.mockito.ArgumentMatchers.isNull(),
+                    org.mockito.ArgumentMatchers.anyString());
+        }
+    }
+
+    @Nested
+    @DisplayName("자동 충전")
+    class ChargeBalance {
+
+        @Test
+        @DisplayName("충전하면 balanceBefore를 충전 전 값으로 담아 AUTO_CHARGE 원장 기록을 남긴다")
+        void success_recordsAutoChargeWithBalanceBefore() {
+            when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
+
+            accountService.chargeBalance(USER_ID, ACCOUNT_ID);
+
+            org.mockito.Mockito.verify(accountTransactionService).record(
+                    org.mockito.ArgumentMatchers.eq(account),
+                    org.mockito.ArgumentMatchers.eq(com.teamfp.aistock.domain.account.entity.AccountTransactionType.AUTO_CHARGE),
+                    org.mockito.ArgumentMatchers.eq(10_000_000L),
+                    org.mockito.ArgumentMatchers.eq(10_000_000L), // 충전 전 balance(=초기값)
+                    org.mockito.ArgumentMatchers.isNull(),
+                    org.mockito.ArgumentMatchers.isNull(),
+                    org.mockito.ArgumentMatchers.isNull(),
+                    org.mockito.ArgumentMatchers.anyString());
+            assertThat(account.getBalance()).isEqualTo(20_000_000L);
         }
     }
 }

@@ -313,17 +313,4 @@ public class LsMarketDataApiClient extends LsApiClientSupport {
         }
     }
 
-    // per/pbrx/exhratio는 값이 없으면(비교/우선주 등) 0.0으로 뭉개지 않고 null로 남겨,
-    // describe 단계에서 "정보없음"으로 자연스럽게 안내할 수 있게 한다 — changeRate(diff)와
-    // 달리 이 세 필드는 "0"과 "값 없음"을 구분해야 하는 지표라서 parseDoubleOrZero()와 분리했다.
-    private Double parseNullableDouble(Object value) {
-        if (value == null) {
-            return null;
-        }
-        try {
-            return Double.parseDouble(value.toString().trim());
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
 }

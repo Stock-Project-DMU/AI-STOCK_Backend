@@ -9,7 +9,11 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
 import com.teamfp.aistock.domain.account.entity.Account;
+import com.teamfp.aistock.domain.account.entity.AccountStatus;
 
 import jakarta.persistence.LockModeType;
 
@@ -62,6 +66,31 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
     // accountId만 갖고 조회하므로 findByAccountIdAndUserId를 쓸 수 없다).
     @Query("select a from Account a join fetch a.user where a.accountId = :accountId")
     Optional<Account> findAccountWithUserById(@Param("accountId") Long accountId);
+
+    // 관리자 잔고 수동 조정(AdminAccountService.adjustBalance()) 전용 — 위 findAccountWithUserById와
+    // 달리 비관적 락을 건다(코드리뷰 반영, 2026-09). 락 없이 조회하면 관리자가 잔고를 조정하는
+    // 도중 같은 계좌로 주문이 체결(OrderExecutionService.execute())되어 Account.version(낙관적
+    // 락) 충돌로 조정 자체가 실패하는 경우가 생길 수 있다 — AccountService.chargeBalance()와
+    // 동일한 이유로 비관적 락으로 순서를 맞춘다.
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select a from Account a join fetch a.user where a.accountId = :accountId")
+    Optional<Account> findAccountWithUserByIdForUpdate(@Param("accountId") Long accountId);
+
+    // 관리자 계좌 목록·검색(feature/admin-api-p0, ADMIN_API_BACKEND_HANDOFF.md 3.4). query는
+    // 계좌 소유자 아이디/이름/계좌번호 통합검색이고, status는 선택 필터다. 파라미터가 null이면
+    // 해당 조건을 걸지 않는다(컨트롤러가 빈 문자열을 null로 정규화). fetch join을 쓰는 페이징
+    // 쿼리라 count 쿼리는 fetch join 없이 별도로 지정한다 — findAllOrdersWithUser와 동일한 이유.
+    @Query(value = "select a from Account a join fetch a.user u where "
+            + "(:query is null or u.loginId like concat('%', :query, '%') "
+            + "or u.name like concat('%', :query, '%') "
+            + "or a.accountNumber like concat('%', :query, '%')) "
+            + "and (:status is null or a.status = :status)",
+            countQuery = "select count(a) from Account a join a.user u where "
+            + "(:query is null or u.loginId like concat('%', :query, '%') "
+            + "or u.name like concat('%', :query, '%') "
+            + "or a.accountNumber like concat('%', :query, '%')) "
+            + "and (:status is null or a.status = :status)")
+    Page<Account> searchAccountsWithUser(@Param("query") String query, @Param("status") AccountStatus status, Pageable pageable);
 
     @Modifying
     @Query("delete from Account a where a.user.userId = :userId")

@@ -11,6 +11,7 @@ import com.teamfp.aistock.domain.account.dto.request.CreateAccountRequest;
 import com.teamfp.aistock.domain.account.dto.response.AccountInfoResponse;
 import com.teamfp.aistock.domain.account.dto.response.ProfitResponse;
 import com.teamfp.aistock.domain.account.entity.Account;
+import com.teamfp.aistock.domain.account.entity.AccountTransactionType;
 import com.teamfp.aistock.domain.account.repository.AccountRepository;
 import com.teamfp.aistock.domain.order.service.HoldingValuationService;
 import com.teamfp.aistock.domain.user.entity.User;
@@ -40,6 +41,9 @@ public class AccountService {
     // HoldingValuationService를 통해서만 접근한다(코드리뷰 반영 — 이전에는 Repository를
     // 직접 참조해 도메인 경계를 넘었었다).
     private final HoldingValuationService holdingValuationService;
+    // 잔고 변동 원장 기록(ADMIN_API_BACKEND_HANDOFF.md 4.3) — 계좌 개설(INITIAL_GRANT)/자동
+    // 충전(AUTO_CHARGE) 시점에 record()를 호출한다.
+    private final AccountTransactionService accountTransactionService;
 
     @Transactional(readOnly = true)
     public List<AccountInfoResponse> getMyAccounts(Long userId) {
@@ -78,6 +82,8 @@ public class AccountService {
                 .balance(INITIAL_BALANCE)
                 .build();
         accountRepository.save(account);
+        accountTransactionService.record(account, AccountTransactionType.INITIAL_GRANT, INITIAL_BALANCE, 0L,
+                null, null, null, "계좌 개설 초기 지급");
 
         return AccountInfoResponse.from(account);
     }
@@ -100,7 +106,10 @@ public class AccountService {
         if (account.getChargeCount() >= MAX_CHARGE_COUNT) {
             throw new CustomException(ErrorCode.CHARGE_LIMIT_EXCEEDED);
         }
+        long balanceBefore = account.getBalance();
         account.chargeBalance(INITIAL_BALANCE);
+        accountTransactionService.record(account, AccountTransactionType.AUTO_CHARGE, INITIAL_BALANCE, balanceBefore,
+                null, null, null, "자동 충전");
         return AccountInfoResponse.from(account);
     }
 
@@ -122,6 +131,18 @@ public class AccountService {
     @Transactional(readOnly = true)
     public Account getOwnedAccount(Long userId, Long accountId) {
         return accountRepository.findByAccountIdAndUserId(accountId, userId)
+                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+    }
+
+    /**
+     * getOwnedAccount()와 동일하지만 비관적 락(SELECT ... FOR UPDATE)을 건다. 계좌 하나를 두고
+     * "확인 후 실행(check-then-act)" 패턴이 필요한 호출부(예: ChargeRequestService.createRequest()의
+     * "PENDING 요청 중복 확인 → 저장" 사이 경합 방지)가 chargeBalance()와 동일한 잠금 방식을
+     * 복붙하지 않고 재사용하도록 이 메서드로 뽑았다(코드리뷰 반영, 2026-09).
+     */
+    @Transactional
+    public Account getOwnedAccountForUpdate(Long userId, Long accountId) {
+        return accountRepository.findByAccountIdAndUserIdForUpdate(accountId, userId)
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
     }
 

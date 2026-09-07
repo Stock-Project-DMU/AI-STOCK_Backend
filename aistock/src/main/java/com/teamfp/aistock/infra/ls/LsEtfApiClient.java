@@ -52,6 +52,12 @@ public class LsEtfApiClient extends LsApiClientSupport {
             }
             Long changeAmount = parseLong(outBlock.get("change"));
             Long volume = parseLong(outBlock.get("volume"));
+            // per/high52wdate/low52wdate/listing/exhratio는 t1901OutBlock에 실제로 내려오는
+            // 필드인데(LS증권 API 정리.html t1901 섹션), LsMarketDataApiClient(t1102)와 달리
+            // 지금까지 매핑이 안 돼 있어서 describeCurrentPrice()가 이 값들을 항상 빈 값으로만
+            // 보여주고 있었다(코드리뷰 지적 반영, 2026-09). pbr은 t1901에 대응 필드가 없어(ETF는
+            // PBR 개념이 없음) 계속 null로 둔다 — LsMarketDataApiClient.getCurrentPrice()와
+            // 동일한 파싱 패턴(parseNullableDouble 등)을 그대로 따른다.
             return Optional.of(LsCurrentPriceDetailDto.builder()
                     .stockCode(stockCode)
                     .stockName(stringOf(outBlock.get("hname")))
@@ -59,8 +65,13 @@ public class LsEtfApiClient extends LsApiClientSupport {
                     .changeAmount(changeAmount != null ? changeAmount : 0L)
                     .changeRate(parseDoubleOrZero(outBlock.get("diff")))
                     .volume(volume != null ? volume : 0L)
+                    .per(parseNullableDouble(outBlock.get("per")))
                     .high52w(parseLong(outBlock.get("high52w")))
+                    .high52wDate(stringOf(outBlock.get("high52wdate")))
                     .low52w(parseLong(outBlock.get("low52w")))
+                    .low52wDate(stringOf(outBlock.get("low52wdate")))
+                    .listingShares(parseLong(outBlock.get("listing")))
+                    .foreignExhaustionRate(parseNullableDouble(outBlock.get("exhratio")))
                     .updatedAt(java.time.LocalDateTime.now())
                     .build());
         } catch (CustomException e) {

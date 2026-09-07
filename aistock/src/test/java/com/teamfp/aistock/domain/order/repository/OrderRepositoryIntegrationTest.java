@@ -1,6 +1,7 @@
 package com.teamfp.aistock.domain.order.repository;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -14,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.teamfp.aistock.domain.account.entity.Account;
 import com.teamfp.aistock.domain.account.repository.AccountRepository;
+import com.teamfp.aistock.global.util.StatisticsPointProjection;
 import com.teamfp.aistock.domain.order.entity.Order;
 import com.teamfp.aistock.domain.order.entity.OrderStatus;
 import com.teamfp.aistock.domain.order.entity.OrderType;
@@ -165,5 +167,68 @@ class OrderRepositoryIntegrationTest {
 
         assertThat(foundByOwner).isPresent();
         assertThat(foundByOtherUser).isEmpty();
+    }
+
+    @Test
+    @DisplayName("searchOrdersWithUser는 회원 아이디 query와 status 조건을 실제 SQL로 걸러낸다")
+    void searchOrdersWithUser_filtersByQueryAndStatus() {
+        // 유닛 테스트(AdminTradeServiceTest)는 Repository를 Mockito로 대체해서 count 쿼리를
+        // fetch join 없이 별도로 지정한 것(findAllOrdersWithUser와 동일한 패턴)이나 str(o.orderId)/
+        // concat 같은 JPQL 표현이 실제로 문법 오류 없이 동작하는지는 검증하지 못한다.
+        long uniqueSuffix = System.nanoTime();
+        String loginId = "trade-search-test-" + uniqueSuffix;
+        User user = userRepository.save(User.builder()
+                .loginId(loginId)
+                .name("거래검색테스터")
+                .role(Role.USER)
+                .isActive(true)
+                .build());
+        Account account = accountRepository.save(Account.builder()
+                .user(user)
+                .accountName("테스트계좌")
+                .accountNumber("T" + (uniqueSuffix % 10_000_000))
+                .openedAt(LocalDate.now())
+                .baseBalance(1_000_000L)
+                .balance(1_000_000L)
+                .build());
+        Order executedOrder = newExecutedOrder(account, 70_000L, 1);
+        Order pendingOrder = newPendingLimitOrder(account);
+
+        Page<Order> byLoginId = orderRepository.searchOrdersWithUser(
+                loginId, null, null, null, null, null, null, PageRequest.of(0, 10));
+        Page<Order> byLoginIdAndExecuted = orderRepository.searchOrdersWithUser(
+                loginId, OrderStatus.EXECUTED, null, null, null, null, null, PageRequest.of(0, 10));
+        Page<Order> noMatch = orderRepository.searchOrdersWithUser(
+                "no-such-login-id-" + uniqueSuffix, null, null, null, null, null, null, PageRequest.of(0, 10));
+
+        assertThat(byLoginId.getTotalElements()).isEqualTo(2);
+        assertThat(byLoginIdAndExecuted.getContent()).extracting(Order::getOrderId).containsExactly(executedOrder.getOrderId());
+        assertThat(byLoginIdAndExecuted.getContent()).extracting(Order::getOrderId).doesNotContain(pendingOrder.getOrderId());
+        assertThat(noMatch.getTotalElements()).isZero();
+    }
+
+    @Test
+    @DisplayName("aggregateOrderCounts/aggregateExecutedAmounts는 실제 MySQL에서 DATE_FORMAT 집계가 SQL 오류 없이 동작한다")
+    void aggregateOrderCountsAndAmounts_executesNativeDateFormatQuery() {
+        // 유닛 테스트(AdminStatisticsServiceTest)는 Repository를 Mockito로 대체해서
+        // date_format(ordered_at/executed_at, :pattern) 같은 MySQL 전용 함수를 쓰는 네이티브
+        // 쿼리가 실제로 문법 오류 없이 실행되고 StatisticsPointProjection으로 정상 매핑되는지는
+        // 검증하지 못한다.
+        Account account = newAccount(String.valueOf(System.nanoTime()));
+        newExecutedOrder(account, 70_000L, 2); // 140,000
+        newExecutedOrder(account, 50_000L, 1); // 50,000
+        LocalDate today = LocalDate.now();
+        LocalDateTime from = today.atStartOfDay();
+        LocalDateTime to = today.plusDays(1).atStartOfDay().minusNanos(1);
+
+        List<StatisticsPointProjection> counts = orderRepository.aggregateOrderCounts("%Y-%m-%d", from, to);
+        List<StatisticsPointProjection> amounts = orderRepository.aggregateExecutedAmounts("%Y-%m-%d", from, to);
+
+        assertThat(counts).isNotEmpty();
+        assertThat(counts.get(0).getPeriod()).matches("\\d{4}-\\d{2}-\\d{2}");
+        assertThat(counts.stream().mapToLong(StatisticsPointProjection::getValue).sum()).isGreaterThanOrEqualTo(2);
+
+        assertThat(amounts).isNotEmpty();
+        assertThat(amounts.stream().mapToLong(StatisticsPointProjection::getValue).sum()).isGreaterThanOrEqualTo(190_000L);
     }
 }

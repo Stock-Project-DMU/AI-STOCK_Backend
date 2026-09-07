@@ -70,6 +70,12 @@ class OrderServiceLimitOrderTest {
     @Mock
     private RedisPendingOrderService redisPendingOrderService;
 
+    @Mock
+    private com.teamfp.aistock.domain.account.service.AccountTransactionService accountTransactionService;
+
+    @Mock
+    private org.springframework.context.ApplicationEventPublisher eventPublisher;
+
     @InjectMocks
     private OrderService orderService;
 
@@ -379,6 +385,89 @@ class OrderServiceLimitOrderTest {
             when(orderRepository.findByOrderIdAndUserIdForUpdate(1L, USER_ID)).thenReturn(Optional.of(order));
 
             assertThatThrownBy(() -> orderService.cancelOrder(USER_ID, 1L))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.ORDER_ALREADY_PROCESSED);
+
+            verify(redisPendingOrderService, never()).removePendingOrder(anyString(), anyLong());
+        }
+    }
+
+    /**
+     * feature/admin-api-p0 — OrderService.adminCancelOrder() 단위 테스트. cancelOrder()와 달리
+     * 소유자(userId) 검증이 없어 findByIdForUpdate를 쓰는지, 계좌 정지 여부와 무관하게 동작하는지를
+     * 집중 검증한다.
+     */
+    @Nested
+    @DisplayName("관리자 주문 강제취소")
+    class AdminCancelOrder {
+
+        private static final Long ADMIN_ID = 999L;
+
+        @Test
+        @DisplayName("PENDING 매수 주문을 취소하면 frozenBalance가 balance로 되돌아오고 CANCELLED로 바뀐다")
+        void success_unfreezesBalance() {
+            Order order = pendingBuyOrder(70_000L, 10);
+            account.freezeForOrder(700_000L);
+            when(orderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
+
+            orderService.adminCancelOrder(ADMIN_ID, 1L, "비정상 주문으로 관리자 취소");
+
+            assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+            assertThat(account.getFrozenBalance()).isZero();
+            assertThat(account.getBalance()).isEqualTo(1_000_000L);
+            verify(redisPendingOrderService).removePendingOrder(STOCK_CODE, order.getOrderId());
+        }
+
+        @Test
+        @DisplayName("성공하면 AdminOrderCancelledEvent를 발행한다(코드리뷰 반영 — admin의 AuditLogService를 직접 호출하지 않음)")
+        void success_publishesAdminOrderCancelledEvent() {
+            Order order = pendingBuyOrder(70_000L, 10);
+            account.freezeForOrder(700_000L);
+            when(orderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
+
+            orderService.adminCancelOrder(ADMIN_ID, 1L, "비정상 주문으로 관리자 취소");
+
+            org.mockito.ArgumentCaptor<com.teamfp.aistock.domain.order.event.AdminOrderCancelledEvent> captor =
+                    org.mockito.ArgumentCaptor.forClass(com.teamfp.aistock.domain.order.event.AdminOrderCancelledEvent.class);
+            verify(eventPublisher).publishEvent(captor.capture());
+            assertThat(captor.getValue().adminUserId()).isEqualTo(ADMIN_ID);
+            assertThat(captor.getValue().orderId()).isEqualTo(1L);
+            assertThat(captor.getValue().reason()).isEqualTo("비정상 주문으로 관리자 취소");
+        }
+
+        @Test
+        @DisplayName("계좌가 SUSPENDED여도 취소는 막지 않는다(사용자 cancelOrder()와 다른 부분)")
+        void success_worksEvenWhenAccountSuspended() {
+            Order order = pendingBuyOrder(70_000L, 10);
+            account.freezeForOrder(700_000L);
+            account.suspend();
+            when(orderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
+
+            orderService.adminCancelOrder(ADMIN_ID, 1L, "이상 거래 확인");
+
+            assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        }
+
+        @Test
+        @DisplayName("존재하지 않는 주문이면 ORDER_NOT_FOUND 예외를 던진다")
+        void fail_orderNotFound() {
+            when(orderRepository.findByIdForUpdate(anyLong())).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> orderService.adminCancelOrder(ADMIN_ID, 999L, "사유"))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.ORDER_NOT_FOUND);
+        }
+
+        @Test
+        @DisplayName("이미 체결되었거나 취소된 주문을 다시 취소하려 하면 ORDER_ALREADY_PROCESSED 예외를 던진다")
+        void fail_alreadyProcessed() {
+            Order order = pendingBuyOrder(70_000L, 10);
+            order.execute(65_000L);
+            when(orderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
+
+            assertThatThrownBy(() -> orderService.adminCancelOrder(ADMIN_ID, 1L, "사유"))
                     .isInstanceOf(CustomException.class)
                     .extracting(e -> ((CustomException) e).getErrorCode())
                     .isEqualTo(ErrorCode.ORDER_ALREADY_PROCESSED);

@@ -69,6 +69,23 @@ abstract class LsApiClientSupport {
     // (그 파일만 "값 없음"과 "0"을 구분해야 함), 이름이 같으면 반환 타입만 다른 두 메서드가
     // 같은 클래스 계층에 공존하게 돼 컴파일 에러가 난다. "실패 시 0.0"이라는 이 메서드의 계약을
     // 이름에 그대로 드러내 두 계약을 명확히 구분한다.
+    // per/pbrx/exhratio(LsMarketDataApiClient)·per/exhratio(LsEtfApiClient)는 값이 없으면
+    // (비교/우선주, ETF의 PBR 등) 0.0으로 뭉개지 않고 null로 남겨, describe 단계에서
+    // "정보없음"으로 자연스럽게 안내할 수 있게 한다 — changeRate(diff)와 달리 "0"과 "값 없음"을
+    // 구분해야 하는 지표라서 parseDoubleOrZero()와 분리한다. 원래 LsMarketDataApiClient에만
+    // private으로 있었는데, LsEtfApiClient(t1901)도 동일 파싱이 필요해져 이 공통 베이스로
+    // 올렸다(2026-09 코드리뷰 반영 — 두 클라이언트에 복붙하지 않기 위함).
+    protected Double parseNullableDouble(Object value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Double.parseDouble(value.toString().trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
     protected double parseDoubleOrZero(Object value) {
         if (value == null) {
             return 0.0;
