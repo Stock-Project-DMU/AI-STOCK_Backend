@@ -185,6 +185,7 @@
 | `INVALID_NEWS_OUTLET` | 400 (feature/ai-news 추가 — `PUT /api/ai/news/settings`에 `NewsRelevanceMatcher.OUTLET_NAMES`에 없는 언론사 도메인을 보낸 경우. `AiNewsService.UNRELIABLE_BRIEFING_OUTLET_DOMAINS`(2026-08-24 추가)에 속한 도메인도 동일하게 거부) |
 | `NEWS_BRIEFING_NOT_FOUND` | 404 (feature/ai-news 추가 — 아직 스케줄러가 오늘의 브리핑을 만들지 않은 상태에서 `GET /api/ai/news/briefings/today` 조회) |
 | `NEWS_SOURCE_DATA_PARSE_ERROR` | 500 (feature/ai-news 추가, 2026-08-24 — `news_briefings.source_links` JSON 컬럼 파싱 실패. `SCENARIO_DATA_PARSE_ERROR`와 동일한 성격, DB 컬럼이라 별도 코드) |
+| `PASSWORD_NOT_SET` | 401 (feature/admin-api-p0 추가, 2026-09-07 — 소셜 로그인 전용 계정(`users.password`가 null)이 `POST /api/users/me/password/verify` 또는 `PATCH /api/users/me/password`를 시도하는 경우) |
 
 ### 2-3. 예외/핸들러
 - `CustomException(ErrorCode errorCode)`, `CustomException(ErrorCode errorCode, Throwable cause)`
@@ -773,6 +774,17 @@ call(String url, String trCd, Map<String, Object> requestBody, String token, Str
 시 0.0이 아니라 `null`을 돌려주는 자체 `parseDouble(Object): Double`을 그대로 로컬에 유지한다(그
 파일의 호출부가 "값 없음"과 "0"을 구분해야 함) — 이 파일만 `parseDoubleOrZero`를 안 쓴다.
 
+> **`parseNullableDouble(Object)` 베이스 클래스로 승격 (코드리뷰 반영)**: 원래
+> `LsMarketDataApiClient`에만 있던 private 메서드였는데, `LsEtfApiClient.getCurrentPrice()`가
+> per/exhratio 파싱에 똑같이 필요해지면서 `protected`로 `LsApiClientSupport`에 옮기고
+> `LsMarketDataApiClient`의 중복 정의는 삭제했다.
+>
+> **`LsEtfApiClient.getCurrentPrice()`(t1901) 필드 매핑 보강 (LS증권 TR 필드 정정 반영,
+> 2026-09)**: `LsCurrentPriceDetailDto`의 per/high52wDate/low52wDate/listingShares/
+> foreignExhaustionRate가 t1901OutBlock에 실제로 내려오는데도 지금까지 매핑이 안 돼 있어
+> 항상 빈 값이었다. `outBlock`의 `per`/`high52wdate`/`low52wdate`/`listing`/`exhratio`
+> 필드를 각각 연결했다(pbr은 ETF에 개념이 없는 필드라 계속 null).
+
 **`infra/ls/dto` 신규 DTO 26개** (기존 실시간 계열의 `LsTickData`/`LsHogaData`/`LsTokenResponse`와는 별개)
 
 | DTO | 필드 |
@@ -969,7 +981,7 @@ call(String url, String trCd, Map<String, Object> requestBody, String token, Str
 |---|---|
 | Controller | `AdminTradeController` |
 | 엔드포인트 | `GET /api/admin/trades`, `GET /api/admin/trades/{orderId}` |
-| Service | `AdminTradeService` — `getTrades(Pageable pageable)`, `getTradeDetail(Long orderId)` |
+| Service | `AdminTradeService` — `getTrades(String query, OrderStatus status, OrderType orderType, PriceType priceType, String stockCode, LocalDateTime from, LocalDateTime to, Pageable pageable)`, `getTradeDetail(Long orderId)` |
 | Response DTO | `AdminTradeResponse`(userName, loginId, `order`: `OrderHistoryResponse` 재사용) |
 
 > **코드리뷰 반영**: 처음에는 `AdminTradeResponse`가 `OrderHistoryResponse`와 거의 같은 필드
@@ -978,15 +990,39 @@ call(String url, String trCd, Map<String, Object> requestBody, String token, Str
 > 재사용하고 있어 동일한 패턴으로 통일 — 주문 자체의 필드는 `order: OrderHistoryResponse`로
 > 위임하고, 관리자 화면에만 필요한 `userName`/`loginId`만 이 레코드가 따로 갖는다.
 
+> **검색·필터 추가 (feature/admin-api-p0, ADMIN_API_BACKEND_HANDOFF.md 3.3)**: `GET
+> /api/admin/trades`에 `query`(주문번호/회원 아이디/계좌번호/종목코드/종목명 통합검색),
+> `status`, `orderType`, `priceType`, `stockCode`(정확일치), `from`~`to`(orderedAt 구간) 쿼리
+> 파라미터를 추가했다. 전부 선택값이며 비어 있으면 기존과 동일하게 전체 목록을 반환한다.
+> 기본 정렬은 `orderedAt,desc`. `OrderRepository.searchOrdersWithUser(...)`가 실제 조건을
+> 처리하고, `findAllOrdersWithUser(Pageable)`는 더 이상 쓰지 않지만 다른 호출부가 없어
+> Repository 메서드 자체는 남겨뒀다.
+
+> **주문 강제취소 추가 (2026-09-07, handoff 문서 9번 "구현 전 결정이 필요한 정책" 2번 —
+> 정책 확정 전 우선 구현하기로 함)**: `PATCH /api/admin/trades/{orderId}/cancel`(body:
+> `reason`) 추가. `AdminTradeService.cancelTrade(Long adminUserId, Long orderId,
+> AdminOrderCancelRequest request)`가 `OrderService.adminCancelOrder(Long adminUserId,
+> Long orderId, String reason)`(신규)에 위임한다. `OrderService.cancelOrder()`(8-6)와
+> 로직은 거의 같지만 소유자(userId) 검증이 없어(관리자는 어느 유저의 주문이든 취소 가능해야
+> 함) `findByOrderIdAndUserIdForUpdate` 대신 `findByIdForUpdate`를 쓰고, 계좌 정지 여부도
+> 확인하지 않는다. 감사 로그는 `audit_logs` 테이블 승인 전이라 SLF4J 로그로만 최소한의
+> 추적성을 남긴다 — 테이블이 생기면 영구 저장으로 교체해야 한다.
+
 ### 8-16. feature/admin-account (v8 신규)
 
 | 구분 | 이름 |
 |---|---|
 | Controller | `AdminAccountController` |
-| 엔드포인트 | `GET /api/admin/accounts/{accountId}`, `PATCH /api/admin/accounts/{accountId}/status` |
-| Service | `AdminAccountService` — `getAccountDetail(Long accountId)`, `updateAccountStatus(Long accountId, AdminAccountStatusRequest request)` |
+| 엔드포인트 | `GET /api/admin/accounts`, `GET /api/admin/accounts/{accountId}`, `PATCH /api/admin/accounts/{accountId}/status` |
+| Service | `AdminAccountService` — `getAccounts(String query, AccountStatus status, Pageable pageable)`, `getAccountDetail(Long accountId)`, `updateAccountStatus(Long accountId, AdminAccountStatusRequest request)` |
 | Request DTO | `AdminAccountStatusRequest`(status) |
 | Response DTO | `AdminAccountDetailResponse`(accountId, userName, accountNumber, balance, frozenBalance, baseBalance, status) |
+
+> **계좌 목록·검색 추가 (feature/admin-api-p0, ADMIN_API_BACKEND_HANDOFF.md 3.4)**: `GET
+> /api/admin/accounts`를 추가했다. `query`(계좌 소유자 아이디/이름/계좌번호 통합검색),
+> `status`는 선택 파라미터, 기본 정렬은 `createdAt,desc`. 목록 전용 DTO를 새로 만들지 않고
+> 상세와 동일한 `AdminAccountDetailResponse`를 그대로 재사용한다(admin-trade가 목록/상세를
+> 하나의 DTO로 통일한 것과 동일한 이유).
 
 > **정지 시 PENDING 주문 일괄 취소 (코드리뷰 반영, v8)**: `updateAccountStatus()`가
 > `account.suspend()`만 하고 그 계좌의 기존 PENDING 지정가 주문을 그대로 두면, `accounts.status`가
@@ -1006,11 +1042,26 @@ call(String url, String trCd, Map<String, Object> requestBody, String token, Str
 |---|---|
 | Controller | `AdminUserController` |
 | 엔드포인트 | `GET /api/admin/users`, `GET /api/admin/users/{userId}`, `PATCH /api/admin/users/{userId}/status` |
-| Service | `AdminUserService` — `getUsers(Pageable pageable)`, `getUserDetail(Long userId)`, `updateUserStatus(Long adminUserId, Long userId, AdminUserStatusRequest request)` |
+| Service | `AdminUserService` — `getUsers(String query, UserStatus status, Role role, Pageable pageable)`, `getUserDetail(Long userId)`, `updateUserStatus(Long adminUserId, Long userId, AdminUserStatusRequest request)` |
 | Request DTO | `AdminUserStatusRequest`(status) |
 | Response DTO | `AdminUserListResponse`(userId, loginId, name, email, role, status, createdAt), `AdminUserDetailResponse`(기본정보 필드 + `accounts`: `List<AccountInfoResponse>` 재사용 + `holdings`: `List<HoldingResponse>` 재사용 + `orders`: `List<OrderHistoryResponse>` 재사용) |
 
+> **검색·필터 추가 (feature/admin-api-p0, ADMIN_API_BACKEND_HANDOFF.md 3.2)**: `GET
+> /api/admin/users`에 `query`(회원번호/아이디/이름/이메일 통합검색), `status`, `role` 쿼리
+> 파라미터를 추가했다. 전부 선택값이며 비어 있으면 기존과 동일하게 전체 목록을 반환한다.
+> 기본 정렬은 `createdAt,desc`. `UserRepository.searchUsers(...)`가 실제 조건을 처리하고,
+> `findAllByIsActiveTrue(Pageable)`는 더 이상 이 API가 쓰지 않지만 다른 호출부가 없어
+> Repository 메서드 자체는 남겨뒀다.
+>
 > `AdminUserDetailResponse`는 기존 마이페이지용 DTO(`AccountInfoResponse`, `HoldingResponse`, `OrderHistoryResponse`)를 그대로 내부 필드로 재사용한다 — 동일한 형태의 응답 DTO를 중복 정의하지 않는다.
+>
+> **탈퇴 회원 조회 추가 (2026-09-07, handoff 문서 5.4 — 3가지 옵션 중 정책 확정 전 옵션2
+> "익명화된 탈퇴 이력만 별도 조회"로 우선 구현하기로 함)**: `GET /api/admin/users/withdrawn`
+> 추가. `AdminUserService.getWithdrawnUsers(Pageable pageable)` → `UserRepository.
+> findAllByIsActiveFalse(pageable)`. 응답 DTO는 `AdminWithdrawnUserResponse`(userId, loginId,
+> name, deletedAt) — `deactivate()`가 이미 loginId/name/email을 익명화했으므로 그 값을 그대로
+> 노출한다. 기본 정렬은 `deletedAt,desc`. 최종 정책이 "완전 제외"나 "WITHDRAWN 정식 상태
+> 도입"으로 바뀌면 이 엔드포인트/메서드를 그에 맞게 제거하거나 교체해야 한다.
 >
 > 유저 1명이 계좌를 최대 3개(A/B/C)까지 가질 수 있어(`feature/mypage-account`) `account`(단수) 대신
 > `accounts`(복수, 전체 계좌 리스트)로 정의한다. `holdings`/`orders`도 계좌별로 나누지 않고
@@ -1210,6 +1261,240 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 > `NewsSourceLinkDto` 리스트로 만들어 `news_briefings.source_links`(JSON)에 함께 저장한다.
 > `GET /api/ai/news/briefings/today` 응답의 `sources` 필드로 그대로 노출되며, 프론트는 각 기사의
 > `link`로 원문 이동 버튼/링크를 만들면 된다.
+
+### 8-20. feature/admin-api-p0 (2026-09-07 신규 — 관리자 알림 발송)
+
+| 구분 | 이름 |
+|---|---|
+| Controller | `AdminNotificationController` |
+| 엔드포인트 | `POST /api/admin/notifications/users/{userId}`, `POST /api/admin/notifications/broadcast` |
+| Service | `AdminNotificationService` — `notifyUser(Long userId, AdminNotificationRequest request)`, `broadcast(AdminNotificationRequest request)` |
+| Request DTO | `AdminNotificationRequest`(title, content, type: `NotificationType`) |
+
+> admin 도메인은 자체 저장 로직 없이 `NotificationService.notify()`(8-12)를 그대로 재사용한다.
+> `broadcast()`는 `UserRepository.findAllActiveUserIds()`로 뽑은 활성 유저 전원에게 순차
+> 반복 호출한다(대량 insert/비동기 처리는 이번 범위에서 다루지 않음 — 유저 규모가 커지면
+> 전환 검토).
+
+### 8-21. feature/admin-api-p0 (2026-09-07 신규 — 비밀번호 확인·변경)
+
+| 구분 | 이름 |
+|---|---|
+| Controller | `UserController`(기존 컨트롤러에 추가) |
+| 엔드포인트 | `POST /api/users/me/password/verify`, `PATCH /api/users/me/password` |
+| Service | `UserService` — `verifyPassword(Long userId, PasswordVerifyRequest request)`, `changePassword(Long userId, PasswordChangeRequest request)` |
+| Request DTO | `PasswordVerifyRequest`(password), `PasswordChangeRequest`(currentPassword, newPassword — `SignupRequest.password`와 동일한 `@Pattern`/`@MaxByteSize` 정책) |
+| Entity 메서드 | `User.changePassword(String encodedPassword)` |
+| ErrorCode | `PASSWORD_NOT_SET`(401) — 소셜 로그인 전용 계정(password=null)이 확인/변경을 시도한 경우 |
+
+> `changePassword()` 성공 시 `RedisTokenService.deleteRefreshToken()`으로 기존 Refresh Token을
+> 폐기한다(handoff 문서 5.3 요구사항). Access Token 블랙리스트 등록까지는 하지 않는다 — 이
+> 메서드는 Access Token 문자열을 받지 않으므로(요청 헤더 필요) 다음 재발급 시점에 자연히 막힌다.
+
+### 8-22. feature/admin-api-p0 (2026-09-07 신규 — 관리자 계정 관리)
+
+| 구분 | 이름 |
+|---|---|
+| Controller | `AdminAdminController` |
+| 엔드포인트 | `GET /api/admin/admins`, `GET /api/admin/admins/{adminId}`, `PATCH /api/admin/admins/{adminId}/status` |
+| Service | `AdminUserService`(8-17)에 `getAdminDetail(Long adminId)`, `updateAdminStatus(Long adminUserId, Long adminId, AdminUserStatusRequest request)` 추가 — 목록은 기존 `getUsers(role=ADMIN 고정)` 재사용 |
+
+> **`updateAdminStatus()` 전용 메서드 추가 (코드리뷰 반영)**: 처음엔 `AdminAdminController`가
+> `updateUserStatus()`를 그대로 호출했는데, 그러면 `PATCH /api/admin/admins/{adminId}/status`에
+> ADMIN이 아닌 일반 userId를 넣어도 상태가 바뀌어버려 "관리자 전용" URL의 의미가 깨졌다.
+> `updateAdminStatus()`가 대상이 `Role.ADMIN`인지 먼저 확인하고 아니면 `USER_NOT_FOUND`를 던진
+> 뒤 내부적으로 `updateUserStatus()`에 위임한다(`getAdminDetail()`이 role 체크로 URL 의미를
+> 지키는 것과 동일한 패턴).
+
+> 관리자도 `users` 테이블의 `User(role=ADMIN)`일 뿐이라 별도 Entity 없이 `AdminUserService`의
+> 검색·상태변경 로직을 role 고정 조건으로 재사용한다 — 자기 자신 정지 금지, 마지막 활성
+> 관리자 정지 금지 가드(`validateSuspendable()`)도 동일하게 적용된다. `getAdminDetail()`은
+> `getUserDetail()`과 조회 로직은 같지만 role이 ADMIN이 아니면 `USER_NOT_FOUND`로 막아
+> "관리자 전용 목록에서 조회"라는 URL 의미를 지킨다.
+>
+> **`POST /api/admin/admins` 추가 (2026-09-07, handoff 문서 9번 "구현 전 결정이 필요한 정책"
+> 6번 — 정책 확정 전 "별도 생성 방식"으로 우선 구현하기로 함)**: `AdminUserService.
+> createAdmin(AdminCreateRequest request)`(loginId, password, name, email) — 승격 방식이
+> 아니라 신규 User(role=ADMIN)를 직접 만든다. `AuthService.signup()`과 동일한 패턴으로
+> 중복 아이디/이메일을 먼저 걸러내고, `save()` 시점 동시 가입 경합은 `DataIntegrityViolationException`을
+> 잡아 재조회 후 `DUPLICATE_LOGIN_ID`/`DUPLICATE_EMAIL`로 변환한다. **승격 방식으로 정책이
+> 정해지면 이 메서드 자체를 제거**하고 `PATCH /api/admin/users/{userId}/status`류로 역할만
+> 바꾸는 방향으로 대체해야 한다.
+
+### 8-23. feature/admin-api-p0 (2026-09-07 신규 — 기간별 통계)
+
+| 구분 | 이름 |
+|---|---|
+| Controller | `AdminStatisticsController` |
+| 엔드포인트 | `GET /api/admin/statistics/users`, `GET /api/admin/statistics/orders`, `GET /api/admin/statistics/amounts` (공통 쿼리 파라미터: `from`, `to`(날짜, ISO DATE), `interval`(`DAY`/`WEEK`/`MONTH`, 기본값 `DAY`)) |
+| Service | `AdminStatisticsService` — `getUserStatistics()`, `getOrderStatistics()`, `getAmountStatistics()`(전부 `LocalDateTime from, LocalDateTime to, StatisticsInterval interval`) |
+| 내부 타입 | `StatisticsInterval`(enum, MySQL `DATE_FORMAT` 패턴 보유 — DAY=`%Y-%m-%d`, WEEK=`%x-%v`, MONTH=`%Y-%m`) |
+| Response DTO | `StatisticsPointResponse`(period, value) ← `StatisticsPointProjection`(period, value, `global/util` 소속) 네이티브 쿼리 프로젝션 |
+| Repository | `UserRepository.aggregateUserSignups()`, `OrderRepository.aggregateOrderCounts()`, `OrderRepository.aggregateExecutedAmounts()`(전부 `nativeQuery = true`) |
+
+> JPQL은 MySQL 전용 함수(`date_format`)를 못 써서 네이티브 쿼리로 작성했다. `pattern`(포맷
+> 문자열)도 일반 바인드 파라미터로 넘긴다 — 컨트롤러가 `StatisticsInterval` enum으로만 받아
+> 세 값 중 하나만 전달되므로 SQL 인젝션 우려는 없다. WEEK는 `%x-%v`(ISO 8601 연도-주차)를
+> 써서 연말/연초 경계에서 실제 주 단위와 어긋나지 않게 했다.
+
+> **`StatisticsPointProjection` 위치 이동 (코드리뷰 반영)**: 처음엔 `domain/admin/dto/projection`
+> 소속이었는데, `OrderRepository`/`UserRepository`(order/user 도메인)가 이 인터페이스를
+> 반환 타입으로 쓰려면 admin 도메인을 역참조해야 해서 8-27에서 정리한 것과 같은 순환 의존
+> 문제가 생겼다. 도메인 어디에도 속하지 않는 순수 반환 타입 형태라 `global/util`로 옮기고
+> 원래 디렉터리(빈 채로 남은 `domain/admin/dto/projection`)는 삭제했다 — `OrderRepository`,
+> `UserRepository`, `StatisticsPointResponse`의 import를 전부 새 위치로 바꿨다.
+
+### 8-24. feature/admin-api-p0 (2026-09-07 신규 — CSV 내보내기)
+
+| 구분 | 이름 |
+|---|---|
+| 엔드포인트 | `GET /api/admin/users/export`, `GET /api/admin/trades/export`(handoff 문서는 `/api/admin/orders/export`를 제안했으나 기존 목록 API가 이미 `/api/admin/trades`라 같은 경로 아래 통일) |
+| Controller 메서드 | `AdminUserController.exportUsers()`, `AdminTradeController.exportTrades()` — 둘 다 `ResponseEntity<byte[]>` 반환(파일 다운로드라 `ApiResponse<T>` JSON 포맷 예외) |
+| Service 메서드 | `AdminUserService.exportUsersCsv(String query, UserStatus status, Role role, Sort sort)`, `AdminTradeService.exportTradesCsv(String query, OrderStatus status, OrderType orderType, PriceType priceType, String stockCode, LocalDateTime from, LocalDateTime to, Sort sort)` |
+| 공용 유틸 | `global/util/CsvWriter`(신규) — `write(List<String> headers, List<List<String>> rows)`, UTF-8 BOM 부착, RFC 4180 이스케이프 |
+
+> 화면과 동일한 검색·필터 조건을 그대로 받아 기존 `searchUsers()`/`searchOrdersWithUser()`에
+> 넘기되, 전역 설정(`application.yml`의 `spring.data.web.pageable.max-page-size=100`)에
+> 걸리지 않도록 서비스 내부에서 직접 `PageRequest.of(0, Integer.MAX_VALUE, sort)`를 만든다 —
+> 그 설정은 HTTP 쿼리 파라미터(`size=...`)를 해석할 때만 적용되고 코드에서 만든 `PageRequest`엔
+> 적용되지 않는다. 충전요청·감사로그 CSV(`/api/admin/charge-requests/export`,
+> `/api/admin/audit-logs/export`)는 2026-09-07 이후 두 도메인 자체는 생겼지만(8-25, 8-27)
+> export 엔드포인트까지는 이번 범위에서 만들지 않았다 — 필요해지면 이 두 서비스에
+> exportXxxCsv() 메서드만 추가하면 된다(패턴은 이미 있음).
+
+> **CSV 수식 인젝션(Formula/DDE Injection) 방어 (코드리뷰 반영)**: `CsvWriter.escape()`가
+> 셀 값을 RFC 4180 규칙(쉼표/줄바꿈/따옴표 포함 시 큰따옴표로 감싸기)으로만 이스케이프했는데,
+> 엑셀·구글시트는 셀 값이 `=`/`+`/`-`/`@`로 시작하면 그 내용을 수식으로 실행한다. 사용자가
+> 이름·문의 제목 등에 `=CMD(...)` 같은 문자열을 넣어두면 관리자가 CSV를 엑셀로 열 때 의도치
+> 않은 코드가 실행될 수 있는 OWASP에 알려진 취약점이다. `FORMULA_TRIGGER_CHARS = "=+-@"` 상수를
+> 추가해 값이 이 문자로 시작하면 RFC 4180 이스케이프 전에 앞에 작은따옴표(`'`)를 붙여 엑셀이
+> 문자열로만 취급하게 만든다(`CsvWriterTest`에 BOM/RFC4180/수식트리거 케이스 7개 테스트 추가).
+
+### 8-25. feature/admin-api-p0 (2026-09-07 신규 — 충전 요청·승인, 새 테이블)
+
+`charge_requests` 테이블 신규 생성(사용자 승인, ADMIN_API_BACKEND_HANDOFF.md 4.2 — 자동 충전
+3회 한도를 넘긴 사용자가 관리자 승인을 받는 절차).
+
+| 구분 | 이름 |
+|---|---|
+| Entity | `ChargeRequest`(domain/account/entity) — requestId, account, amount, reason, status(`ChargeRequestStatus`: PENDING/APPROVED/REJECTED), decidedBy(User, nullable), decisionReason, requestedAt, decidedAt |
+| Repository | `ChargeRequestRepository`(domain/account/repository) — `findAllByAccountId`, `findByRequestIdAndAccountId`, `existsByAccount_AccountIdAndStatus`, `searchWithAccountAndUser`, `findWithAccountAndUserById`, `findByIdForUpdate`(비관적 락) |
+| 사용자 엔드포인트 | `POST /api/accounts/{accountId}/charge-requests`, `GET /api/accounts/{accountId}/charge-requests`, `GET /api/accounts/{accountId}/charge-requests/{requestId}` (AccountController에 추가) |
+| 사용자 Service | `ChargeRequestService`(domain/account/service) — `createRequest`, `getMyRequests`, `getMyRequestDetail` |
+| 관리자 엔드포인트 | `GET /api/admin/charge-requests`, `GET /api/admin/charge-requests/{requestId}`, `PATCH /api/admin/charge-requests/{requestId}/decision` |
+| 관리자 Controller/Service | `AdminChargeRequestController`, `AdminChargeRequestService` — `getRequests`, `getRequestDetail`, `decide(Long adminUserId, Long requestId, AdminChargeDecisionRequest request)` |
+| Request DTO | `ChargeRequestCreateRequest`(amount, reason), `AdminChargeDecisionRequest`(decision: `ChargeRequestStatus`, reason) |
+| Response DTO | `ChargeRequestResponse`(사용자용), `AdminChargeRequestResponse`(관리자용 — 요청자/처리자 식별 정보 포함) |
+| Account 엔티티 메서드 | `applyAdminCharge(long amount)` — `chargeBalance()`와 달리 `chargeCount`를 안 올린다 |
+| ErrorCode | `CHARGE_REQUEST_NOT_FOUND`(404), `CHARGE_REQUEST_ALREADY_PENDING`(400 — 계좌당 PENDING 1건 제한, 정책 미확정 상태에서 우선 구현), `CHARGE_REQUEST_ALREADY_PROCESSED`(409) |
+
+> 계좌별 미처리 요청 중복 생성 방지는 handoff 문서가 "정책 필요"로 남긴 항목이라, 우선
+> "동시에 PENDING 1건만 허용"으로 구현했다. 승인·거절 금액의 일·월 누적 한도 검증도 문서가
+> 요구하지만 구체적 허용 범위가 미확정이라 넣지 않았다 — 정해지면 `AdminChargeRequestService.
+> decide()`에 검증을 추가해야 한다.
+
+> **`createRequest()` 락·정지 계좌 가드 (코드리뷰 반영)**: 원래 `AccountService.
+> getOwnedAccount()`(락 없음)로 계좌를 조회한 뒤 PENDING 존재 여부를 확인했는데, 동시에 두
+> 요청이 들어오면 둘 다 "PENDING 없음"을 보고 통과해 계좌당 1건 제한이 깨질 수 있었다.
+> `AccountService`에 `getOwnedAccountForUpdate(Long userId, Long accountId)`(비관적 락,
+> `findByAccountIdAndUserIdForUpdate` 재사용)를 추가해 `createRequest()`가 이걸로 바꿔
+> 잠근 상태에서 PENDING 존재 여부를 확인한다. 같은 메서드에서 계좌 `status`가 `SUSPENDED`면
+> `ACCOUNT_SUSPENDED`를 던져 정지 계좌가 충전 요청 자체를 못 넣게 막는다(CLAUDE.md 8번 "정지된
+> 계좌는 매수·매도만 차단, 조회는 가능" 원칙에 맞춰 충전 요청도 매수·매도에 준하는 자금 이동
+> 행위로 취급). 조회 전용 메서드(`getMyRequests`/`getMyRequestDetail`)는 그대로 락 없는
+> `getOwnedAccount()`를 쓴다.
+
+### 8-26. feature/admin-api-p0 (2026-09-07 신규 — 잔고 변동 원장, 새 테이블)
+
+`account_transactions` 테이블 신규 생성(사용자 승인, ADMIN_API_BACKEND_HANDOFF.md 4.3).
+
+| 구분 | 이름 |
+|---|---|
+| Entity | `AccountTransaction`(domain/account/entity) — append-only(수정 메서드 없음). transactionId, account, type(`AccountTransactionType`: INITIAL_GRANT/AUTO_CHARGE/ADMIN_CHARGE/ADMIN_DEDUCTION/ORDER_BUY/ORDER_SELL/ORDER_REFUND), amount(부호 있는 증감액), balanceBefore, balanceAfter, relatedOrderId/relatedChargeRequestId/processedBy(전부 FK 아닌 단순 참조 ID), reason, createdAt |
+| Repository | `AccountTransactionRepository`(domain/account/repository) — `findAllByAccount_AccountId` |
+| Service | `AccountTransactionService`(domain/account/service) — `record(Account account, AccountTransactionType type, long amount, long balanceBefore, Long relatedOrderId, Long relatedChargeRequestId, Long processedBy, String reason)`, `getTransactions(Long accountId, Pageable pageable)` |
+| 사용자 엔드포인트 | `GET /api/accounts/{accountId}/transactions` (AccountController에 추가) |
+| 관리자 엔드포인트 | `GET /api/admin/accounts/{accountId}/transactions`, `POST /api/admin/accounts/{accountId}/adjustments` (AdminAccountController에 추가) |
+| Request DTO | `AdminAccountAdjustmentRequest`(type: ADMIN_CHARGE/ADMIN_DEDUCTION만 허용, amount, reason) |
+| Response DTO | `AccountTransactionResponse` |
+| Account 엔티티 메서드 | `applyAdminDeduction(long amount)` — `applyAdminCharge()`와 대칭 |
+
+> **record() 호출 지점(잔고를 바꾸는 모든 곳에 연결 완료)**:
+> - `AccountService.createAccount()` → INITIAL_GRANT
+> - `AccountService.chargeBalance()` → AUTO_CHARGE
+> - `OrderService.executeBuy()/executeSell()`(시장가) → ORDER_BUY/ORDER_SELL
+> - `OrderService.createLimitOrder()`(지정가 매수, `freezeForOrder` 시점) → ORDER_BUY
+> - `OrderExecutionService.executeBuy()`(지정가 매수 체결 시 차액 환급, `refundAmount > 0`일 때만) → ORDER_REFUND
+> - `OrderExecutionService.executeSell()`(지정가 매도 체결) → ORDER_SELL
+> - `OrderService.cancelOrder()`/`adminCancelOrder()`/`cancelAllPendingOrdersForSuspension()`(매수 주문 취소·환불) → ORDER_REFUND
+> - `AdminChargeRequestService.decide()`(APPROVED) → ADMIN_CHARGE
+> - `AdminAccountService.adjustBalance()` → ADMIN_CHARGE 또는 ADMIN_DEDUCTION
+>
+> `balanceBefore`는 호출부가 Account 엔티티의 잔고 변경 메서드를 부르기 "직전" 값을 직접
+> 읽어서 넘긴다(`AccountTransactionService.record()` Javadoc 참고) — `account.getBalance()`는
+> 이미 변경된 이후 값이라 그 시점엔 balanceBefore를 알 수 없다.
+> `OrderService`/`OrderExecutionService`가 `AccountTransactionService`(account 도메인)를
+> 호출하는 방향은 `CLAUDE.md` 4번 "도메인 간 직접 참조 대신 서비스 계층을 통해 호출"에 부합한다.
+
+> **`adjustBalance()` 락·잔고검증·감사로그 보강 (코드리뷰 반영)**: `AccountRepository`에
+> `findAccountWithUserByIdForUpdate(accountId)`(비관적 락 + `user` fetch join)를 추가하고
+> `adjustBalance()`가 락 없는 조회 대신 이걸 쓰도록 바꿨다 — 동시에 여러 조정 요청이 들어와도
+> 순차적으로만 반영되게 하기 위함(다른 계좌 잔고 변경 지점들과 동일하게 비관적 락 원칙 통일).
+> ADMIN_DEDUCTION 처리 시 `account.getBalance() < amount`뿐 아니라 `account.getBaseBalance()
+> < amount`도 함께 확인해 차감 후 `baseBalance`가 음수가 되는 경우까지 `INSUFFICIENT_BALANCE`로
+> 막는다(`baseBalance`는 수익률 계산 기준값이라 음수 허용 시 수익률 계산 자체가 깨짐). 조정 성공
+> 시 `AuditLogService.record(adminUserId, ACTION_ACCOUNT_ADJUSTMENT, TARGET_ACCOUNT, accountId,
+> beforeBalance, afterBalance, reason)`을 호출해 8-27의 감사 로그에도 남긴다.
+
+### 8-27. feature/admin-api-p0 (2026-09-07 신규 — 관리자 작업 감사 로그, 새 테이블)
+
+`audit_logs` 테이블 신규 생성(사용자 승인, ADMIN_API_BACKEND_HANDOFF.md 5.2).
+
+| 구분 | 이름 |
+|---|---|
+| Entity | `AuditLog`(domain/admin/entity) — append-only(수정 메서드 없음). auditLogId, adminUserId, adminLoginId(기록 시점 스냅샷), action, targetType, targetId, beforeValue, afterValue, reason, requestIp(코드리뷰 반영 이후 실제로 채워짐 — 아래 참고), createdAt |
+| Repository | `AuditLogRepository`(domain/admin/repository) — `search(action, adminId, targetType, targetId, from, to, pageable)` |
+| Service | `AuditLogService`(domain/admin/service) — `record(Long adminUserId, String action, String targetType, Long targetId, String beforeValue, String afterValue, String reason)`, `search(...)`, `getDetail(Long auditLogId)`. action/targetType 문자열 상수(`ACTION_*`/`TARGET_*`, `ACTION_ACCOUNT_ADJUSTMENT` 코드리뷰 반영으로 추가)를 이 클래스에 모아둔다 |
+| 엔드포인트 | `GET /api/admin/audit-logs`, `GET /api/admin/audit-logs/{auditLogId}` (수정·삭제 API 없음 — handoff 문서 "관리자도 수정·삭제할 수 없게 한다") |
+| Controller | `AdminAuditLogController` |
+| Response DTO | `AuditLogResponse` |
+| ErrorCode | `AUDIT_LOG_NOT_FOUND`(404) |
+
+> **admin 도메인 원칙 예외**: CLAUDE.md 4번/NAMING.md 8-14~8-18은 "admin 도메인은 자체
+> Entity/Repository를 두지 않는다"는 원칙을 명시하지만, 감사 로그는 다른 도메인에 자연스러운
+> 소속처가 없는 admin 고유 데이터라 이번만 예외로 admin 도메인이 직접 Entity/Repository를
+> 갖는다(AuditLog 클래스 Javadoc 참고).
+>
+> **record() 호출 지점**: `AdminUserService.updateUserStatus()`(USER_STATUS_CHANGE),
+> `AdminUserService.createAdmin()`(ADMIN_CREATE), `AdminAccountService.updateAccountStatus()`
+> (ACCOUNT_STATUS_CHANGE — 이때문에 `AdminAccountStatusRequest`에 `reason` 필드를 추가함,
+> 최초 구현(8-16)엔 없었음), `AdminAccountService.adjustBalance()`(ACCOUNT_ADJUSTMENT, 코드리뷰
+> 반영으로 추가 — 8-26 참고), `OrderService.adminCancelOrder()`(ORDER_CANCEL, 아래 이벤트 방식
+> 참고), `AdminChargeRequestService.decide()`(CHARGE_REQUEST_DECISION).
+>
+> **`AdminOrderCancelledEvent`/`AdminAuditEventListener`로 순환 의존 해소 (코드리뷰 반영)**:
+> 원래 `OrderService.adminCancelOrder()`가 admin 도메인의 `AuditLogService`를 직접 주입받아
+> 호출했는데, admin 도메인이 이미 order 도메인의 `OrderRepository`를 참조하고 있어(관리자
+> 거래관리 조회용) 두 도메인이 서로를 참조하는 순환 의존이 생겼다(`OrderRepository.java`,
+> `OrderService.java`, `UserRepository.java`에서 admin→order/user, order→admin 양방향 import가
+> 실제로 확인됨). `domain/order/event`에 `AdminOrderCancelledEvent`(record: adminUserId,
+> orderId, reason)를 새로 만들고, `OrderService`는 `AuditLogService` 의존을 없앤 뒤
+> `ApplicationEventPublisher.publishEvent(new AdminOrderCancelledEvent(...))`만 발행한다.
+> `domain/admin/service`의 `AdminAuditEventListener`(신규)가 `@EventListener`로 이 이벤트를
+> 받아 `AuditLogService.record(...)`를 호출한다 — order→admin 직접 호출을 스프링 이벤트
+> 발행/구독으로 뒤집어 컴파일 시점 순환 의존을 없앴다(`domain/notification`의
+> `NotificationService`를 여러 도메인이 직접 호출하는 기존 패턴과 달리, 이 경우는 "admin이
+> 다른 도메인의 동작을 감사"하는 역방향이라 이벤트가 더 적합하다고 판단).
+>
+> **`requestIp` 실제 채움 (코드리뷰 반영)**: 처음엔 "서비스 메서드 시그니처에 IP를 추가로
+> 넘겨야 해서 범위상 보류"였으나, `JwtAuthenticationFilter.authenticate()`가 인증 성공 시
+> `authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request))`로
+> `WebAuthenticationDetails`(요청 IP 포함)를 `SecurityContext`에 심어두도록 바꿔서 서비스
+> 메서드 시그니처를 하나도 안 건드리고 해결했다. `AuditLogService`의 새 private
+> `currentRequestIp()`가 `SecurityContextHolder.getContext().getAuthentication().getDetails()`를
+> `WebAuthenticationDetails`로 캐스팅해 `getRemoteAddress()`를 꺼내 `record()`가 빌드하는
+> `AuditLog.requestIp`에 채운다. 인증 컨텍스트가 없는 경로(예: 통합 테스트에서 직접 서비스 호출)는
+> `getDetails()`가 null이라 여전히 requestIp가 null로 남는다.
 
 ---
 

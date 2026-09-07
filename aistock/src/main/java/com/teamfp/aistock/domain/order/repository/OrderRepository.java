@@ -1,5 +1,6 @@
 package com.teamfp.aistock.domain.order.repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -12,6 +13,9 @@ import org.springframework.data.repository.query.Param;
 
 import com.teamfp.aistock.domain.order.entity.Order;
 import com.teamfp.aistock.domain.order.entity.OrderStatus;
+import com.teamfp.aistock.domain.order.entity.OrderType;
+import com.teamfp.aistock.domain.order.entity.PriceType;
+import com.teamfp.aistock.global.util.StatisticsPointProjection;
 
 import jakarta.persistence.LockModeType;
 
@@ -48,6 +52,40 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     @Query(value = "select o from Order o join fetch o.account a join fetch a.user",
             countQuery = "select count(o) from Order o")
     Page<Order> findAllOrdersWithUser(Pageable pageable);
+
+    // 관리자 거래 검색·필터(feature/admin-api-p0, ADMIN_API_BACKEND_HANDOFF.md 3.3). query는
+    // 주문번호/회원 아이디/계좌번호/종목코드/종목명 통합검색이고, status/orderType/priceType/
+    // stockCode(정확일치)/from~to(orderedAt 구간)는 선택 필터다. 파라미터가 null이면 해당 조건을
+    // 걸지 않는다(컨트롤러가 빈 문자열을 null로 정규화). fetch join을 쓰는 페이징 쿼리라 count
+    // 쿼리를 fetch join 없이 별도로 지정해야 한다 — findAllOrdersWithUser와 동일한 이유.
+    @Query(value = "select o from Order o join fetch o.account a join fetch a.user u where "
+            + "(:query is null or str(o.orderId) like concat('%', :query, '%') "
+            + "or u.loginId like concat('%', :query, '%') "
+            + "or a.accountNumber like concat('%', :query, '%') "
+            + "or o.stockCode like concat('%', :query, '%') "
+            + "or o.stockName like concat('%', :query, '%')) "
+            + "and (:status is null or o.status = :status) "
+            + "and (:orderType is null or o.orderType = :orderType) "
+            + "and (:priceType is null or o.priceType = :priceType) "
+            + "and (:stockCode is null or o.stockCode = :stockCode) "
+            + "and (:from is null or o.orderedAt >= :from) "
+            + "and (:to is null or o.orderedAt <= :to)",
+            countQuery = "select count(o) from Order o join o.account a join a.user u where "
+            + "(:query is null or str(o.orderId) like concat('%', :query, '%') "
+            + "or u.loginId like concat('%', :query, '%') "
+            + "or a.accountNumber like concat('%', :query, '%') "
+            + "or o.stockCode like concat('%', :query, '%') "
+            + "or o.stockName like concat('%', :query, '%')) "
+            + "and (:status is null or o.status = :status) "
+            + "and (:orderType is null or o.orderType = :orderType) "
+            + "and (:priceType is null or o.priceType = :priceType) "
+            + "and (:stockCode is null or o.stockCode = :stockCode) "
+            + "and (:from is null or o.orderedAt >= :from) "
+            + "and (:to is null or o.orderedAt <= :to)")
+    Page<Order> searchOrdersWithUser(@Param("query") String query, @Param("status") OrderStatus status,
+            @Param("orderType") OrderType orderType, @Param("priceType") PriceType priceType,
+            @Param("stockCode") String stockCode, @Param("from") LocalDateTime from, @Param("to") LocalDateTime to,
+            Pageable pageable);
 
     // 관리자 거래 상세 — account, account.user까지 fetch join
     @Query("select o from Order o join fetch o.account a join fetch a.user where o.orderId = :orderId")
@@ -102,4 +140,22 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select o from Order o where o.account.accountId = :accountId and o.status = 'PENDING'")
     List<Order> findAllPendingByAccountIdForUpdate(@Param("accountId") Long accountId);
+
+    // 관리자 기간별 통계 — 주문 건수 추이(feature/admin-api-p0, ADMIN_API_BACKEND_HANDOFF.md 6.1).
+    // UserRepository.aggregateUserSignups()와 동일한 이유로 네이티브 쿼리를 쓴다. ordered_at
+    // 기준으로 집계한다 — 체결 여부와 무관하게 "주문이 실제로 발생한 시점" 추이를 보여준다.
+    @Query(value = "select date_format(ordered_at, :pattern) as period, count(*) as value "
+            + "from orders where ordered_at between :from and :to "
+            + "group by period order by period", nativeQuery = true)
+    List<StatisticsPointProjection> aggregateOrderCounts(
+            @Param("pattern") String pattern, @Param("from") LocalDateTime from, @Param("to") LocalDateTime to);
+
+    // 관리자 기간별 통계 — 체결 거래대금 추이(ADMIN_API_BACKEND_HANDOFF.md 6.1). executed_at
+    // 기준으로 집계하므로 체결된(EXECUTED) 주문만 대상이 된다(executed_at은 체결 시점에만 채워짐).
+    @Query(value = "select date_format(executed_at, :pattern) as period, "
+            + "coalesce(sum(exec_price * quantity), 0) as value "
+            + "from orders where status = 'EXECUTED' and executed_at between :from and :to "
+            + "group by period order by period", nativeQuery = true)
+    List<StatisticsPointProjection> aggregateExecutedAmounts(
+            @Param("pattern") String pattern, @Param("from") LocalDateTime from, @Param("to") LocalDateTime to);
 }

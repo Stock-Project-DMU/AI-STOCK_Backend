@@ -3,6 +3,7 @@ package com.teamfp.aistock.domain.order.service;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -11,7 +12,9 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import com.teamfp.aistock.domain.account.entity.Account;
 import com.teamfp.aistock.domain.account.entity.AccountStatus;
+import com.teamfp.aistock.domain.account.entity.AccountTransactionType;
 import com.teamfp.aistock.domain.account.service.AccountService;
+import com.teamfp.aistock.domain.account.service.AccountTransactionService;
 import com.teamfp.aistock.domain.notification.entity.NotificationType;
 import com.teamfp.aistock.domain.notification.service.NotificationService;
 import com.teamfp.aistock.domain.order.dto.PendingOrderDto;
@@ -24,6 +27,7 @@ import com.teamfp.aistock.domain.order.entity.Order;
 import com.teamfp.aistock.domain.order.entity.OrderStatus;
 import com.teamfp.aistock.domain.order.entity.OrderType;
 import com.teamfp.aistock.domain.order.entity.PriceType;
+import com.teamfp.aistock.domain.order.event.AdminOrderCancelledEvent;
 import com.teamfp.aistock.domain.order.repository.HoldingRepository;
 import com.teamfp.aistock.domain.order.repository.OrderRepository;
 import com.teamfp.aistock.domain.stock.dto.StockPriceDto;
@@ -33,7 +37,9 @@ import com.teamfp.aistock.global.redis.RedisPendingOrderService;
 import com.teamfp.aistock.global.redis.RedisStockCacheService;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class OrderService {
@@ -60,6 +66,15 @@ public class OrderService {
     private final RedisPendingOrderService redisPendingOrderService;
     // 주문 체결 시 알림 발송 — 도메인 간 직접 참조 대신 서비스 계층(NotificationService)을 통해 호출한다.
     private final NotificationService notificationService;
+    // 잔고 변동 원장 기록(ADMIN_API_BACKEND_HANDOFF.md 4.3) — 매수/매도/취소 환불 시점에 record()를 호출한다.
+    private final AccountTransactionService accountTransactionService;
+    // 관리자 강제취소 감사 로그(ADMIN_API_BACKEND_HANDOFF.md 5.2) — 이 서비스가 admin 도메인의
+    // AuditLogService를 직접 호출하지 않고 AdminOrderCancelledEvent를 발행하기만 한다
+    // (코드리뷰 반영, 2026-09) — order가 admin의 서비스를 직접 주입받으면 admin↔order 양방향
+    // 패키지 의존이 생겨 CLAUDE.md 4번이 정한 "admin이 다른 도메인을 조합만 한다"는 단방향
+    // 설계와 어긋난다. 이벤트를 구독해 실제로 감사 로그를 남기는 쪽은
+    // domain/admin/service/AdminAuditEventListener다.
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * 현재가(시장가) 주문 — 잔고/보유수량을 확인한 뒤 실시간 현재가로 즉시 체결한다.
@@ -88,6 +103,7 @@ public class OrderService {
 
         long currentPrice = priceDto.getCurrentPrice();
         long totalAmount = currentPrice * request.quantity();
+        long balanceBefore = account.getBalance();
 
         if (request.orderType() == OrderType.BUY) {
             executeBuy(account, request, priceDto.getStockName(), currentPrice, totalAmount);
@@ -108,6 +124,12 @@ public class OrderService {
                 .build();
         order.execute(currentPrice);
         orderRepository.save(order);
+
+        // 원장 기록(4.3) — Order 저장 뒤에 기록해야 orderId를 relatedOrderId로 남길 수 있다.
+        boolean isBuy = request.orderType() == OrderType.BUY;
+        accountTransactionService.record(account, isBuy ? AccountTransactionType.ORDER_BUY : AccountTransactionType.ORDER_SELL,
+                isBuy ? -totalAmount : totalAmount, balanceBefore, order.getOrderId(), null, null,
+                (isBuy ? "시장가 매수" : "시장가 매도") + " 체결");
 
         notificationService.notify(userId, NotificationType.ORDER, "주문 체결", buildExecutionMessage(order));
 
@@ -182,6 +204,7 @@ public class OrderService {
         }
 
         long totalAmount = request.orderPrice() * request.quantity();
+        long balanceBefore = account.getBalance();
         String stockName;
 
         if (request.orderType() == OrderType.BUY) {
@@ -231,6 +254,14 @@ public class OrderService {
                 .quantity(request.quantity())
                 .build();
         orderRepository.save(order);
+
+        // 원장 기록(4.3) — 지정가 매수는 등록 시점에 freezeForOrder로 balance가 이미 줄어드므로
+        // 그 시점을 ORDER_BUY로 기록한다. 매도는 이 메서드에서 balance를 건드리지 않으므로
+        // (보유 주식을 이미 갖고 있어 별도 예약 잠금이 필요 없음) 기록하지 않는다.
+        if (request.orderType() == OrderType.BUY) {
+            accountTransactionService.record(account, AccountTransactionType.ORDER_BUY, -totalAmount, balanceBefore,
+                    order.getOrderId(), null, null, "지정가 매수 주문 등록(잔고 동결)");
+        }
 
         PendingOrderDto pendingOrderDto = PendingOrderDto.builder()
                 .orderId(order.getOrderId())
@@ -292,7 +323,11 @@ public class OrderService {
         }
 
         if (order.getOrderType() == OrderType.BUY) {
-            account.unfreezeForOrder(order.getOrderPrice() * order.getQuantity());
+            long refundAmount = order.getOrderPrice() * order.getQuantity();
+            long balanceBefore = account.getBalance();
+            account.unfreezeForOrder(refundAmount);
+            accountTransactionService.record(account, AccountTransactionType.ORDER_REFUND, refundAmount, balanceBefore,
+                    order.getOrderId(), null, null, "지정가 매수 주문 취소(동결 해제)");
         }
 
         order.cancel();
@@ -300,6 +335,48 @@ public class OrderService {
         // 여기서 바로 지우면 이후 커밋이 실패(롤백)할 때 DB에는 여전히 PENDING인 주문이 Redis
         // pending:orders에서만 사라져 다시는 체결 대상이 되지 못하는 문제가 생긴다.
         registerAfterCommit(() -> redisPendingOrderService.removePendingOrder(order.getStockCode(), order.getOrderId()));
+    }
+
+    /**
+     * 관리자 강제 취소(ADMIN_API_BACKEND_HANDOFF.md 3.3, feature/admin-api-p0 — "구현 전 결정이
+     * 필요한 정책" 2번 항목이었으나 우선 구현해두고 정책이 다르게 정해지면 조정하기로 함).
+     * cancelOrder()와 로직은 거의 같지만 소유자 본인 여부를 확인하지 않는다 — 관리자는 어느
+     * 유저의 주문이든 취소할 수 있어야 하므로 findByOrderIdAndUserIdForUpdate 대신
+     * findByIdForUpdate를 쓴다. 계좌 정지 여부도 확인하지 않는다 — 이미 정지된 계좌의 PENDING
+     * 주문은 cancelAllPendingOrdersForSuspension()이 정지 시점에 이미 전부 취소했을 것이고,
+     * "정지 안 된 계좌의 이상 거래를 관리자가 취소"하려는 목적과는 무관하다.
+     *
+     * 감사 로그는 `audit_logs` 테이블 승인 후(2026-09-07) 기록한다. 다만 이 메서드가
+     * `AuditLogService.record()`를 직접 부르지 않고 `AdminOrderCancelledEvent`를 발행만 한다
+     * (코드리뷰 반영, 2026-09) — order 도메인이 admin 도메인의 서비스를 직접 주입받으면
+     * admin↔order 양방향 패키지 의존이 생기기 때문이다. 실제 감사 로그 저장은
+     * `domain/admin/service/AdminAuditEventListener`가 이 이벤트를 구독해서 처리한다.
+     * SLF4J 로그도 함께 남기지만 이제는 보조 수단일 뿐이다 — 실제 조회는 `GET
+     * /api/admin/audit-logs`로 한다.
+     */
+    @Transactional
+    public void adminCancelOrder(Long adminUserId, Long orderId, String reason) {
+        Order order = orderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new CustomException(ErrorCode.ORDER_NOT_FOUND));
+
+        if (order.getStatus() != OrderStatus.PENDING) {
+            throw new CustomException(ErrorCode.ORDER_ALREADY_PROCESSED);
+        }
+
+        Account account = order.getAccount();
+        if (order.getOrderType() == OrderType.BUY) {
+            long refundAmount = order.getOrderPrice() * order.getQuantity();
+            long balanceBefore = account.getBalance();
+            account.unfreezeForOrder(refundAmount);
+            accountTransactionService.record(account, AccountTransactionType.ORDER_REFUND, refundAmount, balanceBefore,
+                    order.getOrderId(), null, adminUserId, "관리자 강제취소: " + reason);
+        }
+
+        order.cancel();
+        registerAfterCommit(() -> redisPendingOrderService.removePendingOrder(order.getStockCode(), order.getOrderId()));
+
+        eventPublisher.publishEvent(new AdminOrderCancelledEvent(adminUserId, orderId, reason));
+        log.info("관리자 주문 강제취소 - adminUserId={}, orderId={}, reason={}", adminUserId, orderId, reason);
     }
 
     /**
@@ -319,7 +396,11 @@ public class OrderService {
 
         for (Order order : pendingOrders) {
             if (order.getOrderType() == OrderType.BUY) {
-                account.unfreezeForOrder(order.getOrderPrice() * order.getQuantity());
+                long refundAmount = order.getOrderPrice() * order.getQuantity();
+                long balanceBefore = account.getBalance();
+                account.unfreezeForOrder(refundAmount);
+                accountTransactionService.record(account, AccountTransactionType.ORDER_REFUND, refundAmount, balanceBefore,
+                        order.getOrderId(), null, null, "계좌 정지로 인한 주문 일괄 취소(동결 해제)");
             }
             order.cancel();
             registerAfterCommit(() -> redisPendingOrderService.removePendingOrder(order.getStockCode(), order.getOrderId()));

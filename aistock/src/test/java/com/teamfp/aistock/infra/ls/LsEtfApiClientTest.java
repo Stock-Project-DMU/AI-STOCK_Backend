@@ -66,6 +66,31 @@ class LsEtfApiClientTest {
         }
 
         @Test
+        @DisplayName("per/52주 최고저 날짜/상장주식수/외국인 소진율까지 함께 파싱한다(2026-09 코드리뷰 반영 — 기존엔 DTO에 자리는 있는데 안 채우고 있었음)")
+        void success_parsesExtendedFields() {
+            when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+            mockServer.expect(requestTo(ETF_URL))
+                    .andRespond(withSuccess("""
+                            {"t1901OutBlock":{"hname":"KODEX 200","price":98265,"change":175,"diff":"0.18",
+                            "volume":13128894,"per":"15.2","high52w":102000,"high52wdate":"20260301",
+                            "low52w":85000,"low52wdate":"20260110","listing":1234567,"exhratio":"12.3"}}""",
+                            MediaType.APPLICATION_JSON));
+
+            Optional<LsCurrentPriceDetailDto> result = client.getCurrentPrice(STOCK_CODE);
+
+            assertThat(result).isPresent();
+            LsCurrentPriceDetailDto dto = result.get();
+            assertThat(dto.getPer()).isEqualTo(15.2);
+            assertThat(dto.getHigh52w()).isEqualTo(102000L);
+            assertThat(dto.getHigh52wDate()).isEqualTo("20260301");
+            assertThat(dto.getLow52w()).isEqualTo(85000L);
+            assertThat(dto.getLow52wDate()).isEqualTo("20260110");
+            assertThat(dto.getListingShares()).isEqualTo(1234567L);
+            assertThat(dto.getForeignExhaustionRate()).isEqualTo(12.3);
+            assertThat(dto.getPbr()).isNull(); // ETF(t1901)에는 PBR 대응 필드가 없음
+        }
+
+        @Test
         @DisplayName("t1901OutBlock이 없으면 빈 값을 반환한다")
         void empty_whenOutBlockMissing() {
             when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");

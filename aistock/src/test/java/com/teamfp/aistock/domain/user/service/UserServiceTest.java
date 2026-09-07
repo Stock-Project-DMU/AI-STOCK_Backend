@@ -10,7 +10,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
+import com.teamfp.aistock.domain.user.dto.request.PasswordChangeRequest;
+import com.teamfp.aistock.domain.user.dto.request.PasswordVerifyRequest;
 import com.teamfp.aistock.domain.user.dto.request.SurveyRequest;
 import com.teamfp.aistock.domain.user.dto.request.UpdateUserRequest;
 import com.teamfp.aistock.domain.user.dto.response.InvestmentProfileResponse;
@@ -22,6 +25,7 @@ import com.teamfp.aistock.domain.user.repository.InvestmentProfileRepository;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
+import com.teamfp.aistock.global.redis.RedisTokenService;
 
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -48,6 +52,12 @@ class UserServiceTest {
     @Mock
     private InvestmentProfileRepository investmentProfileRepository;
 
+    @Mock
+    private PasswordEncoder passwordEncoder;
+
+    @Mock
+    private RedisTokenService redisTokenService;
+
     private UserService userService;
 
     private static final Long USER_ID = 1L;
@@ -57,10 +67,11 @@ class UserServiceTest {
     @BeforeEach
     void setUp() {
         ObjectMapper objectMapper = JsonMapper.builder().build();
-        userService = new UserService(userRepository, investmentProfileRepository, objectMapper);
+        userService = new UserService(userRepository, investmentProfileRepository, objectMapper, passwordEncoder, redisTokenService);
 
         user = User.builder()
                 .loginId("tester")
+                .password("encoded-old-password")
                 .name("테스터")
                 .email("old@example.com")
                 .role(Role.USER)
@@ -212,6 +223,83 @@ class UserServiceTest {
 
             assertThatThrownBy(() -> userService.saveSurvey(USER_ID, requestOf(4, 2)))
                     .isSameAs(unrelated);
+        }
+    }
+
+    @Nested
+    @DisplayName("비밀번호 확인")
+    class VerifyPassword {
+
+        @Test
+        @DisplayName("현재 비밀번호가 일치하면 예외 없이 통과한다")
+        void success() {
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+            when(passwordEncoder.matches("current-pw", "encoded-old-password")).thenReturn(true);
+
+            userService.verifyPassword(USER_ID, new PasswordVerifyRequest("current-pw"));
+        }
+
+        @Test
+        @DisplayName("비밀번호가 일치하지 않으면 INVALID_PASSWORD 예외를 던진다")
+        void fail_wrongPassword() {
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+            when(passwordEncoder.matches("wrong-pw", "encoded-old-password")).thenReturn(false);
+
+            assertThatThrownBy(() -> userService.verifyPassword(USER_ID, new PasswordVerifyRequest("wrong-pw")))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.INVALID_PASSWORD);
+        }
+
+        @Test
+        @DisplayName("소셜 로그인 전용 계정(password=null)이면 PASSWORD_NOT_SET 예외를 던진다")
+        void fail_socialOnlyAccount() {
+            User socialUser = User.builder()
+                    .name("소셜유저")
+                    .role(Role.USER)
+                    .isActive(true)
+                    .build();
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(socialUser));
+
+            assertThatThrownBy(() -> userService.verifyPassword(USER_ID, new PasswordVerifyRequest("아무거나")))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.PASSWORD_NOT_SET);
+
+            verify(passwordEncoder, never()).matches(anyString(), anyString());
+        }
+    }
+
+    @Nested
+    @DisplayName("비밀번호 변경")
+    class ChangePassword {
+
+        @Test
+        @DisplayName("현재 비밀번호가 일치하면 새 비밀번호로 바꾸고 Refresh Token을 폐기한다")
+        void success() {
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+            when(passwordEncoder.matches("current-pw", "encoded-old-password")).thenReturn(true);
+            when(passwordEncoder.encode("new-pw12")).thenReturn("encoded-new-password");
+
+            userService.changePassword(USER_ID, new PasswordChangeRequest("current-pw", "new-pw12"));
+
+            assertThat(user.getPassword()).isEqualTo("encoded-new-password");
+            verify(redisTokenService).deleteRefreshToken(USER_ID);
+        }
+
+        @Test
+        @DisplayName("현재 비밀번호가 틀리면 INVALID_PASSWORD 예외를 던지고 비밀번호를 바꾸지 않는다")
+        void fail_wrongCurrentPassword() {
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+            when(passwordEncoder.matches("wrong-pw", "encoded-old-password")).thenReturn(false);
+
+            assertThatThrownBy(() -> userService.changePassword(USER_ID, new PasswordChangeRequest("wrong-pw", "new-pw12")))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.INVALID_PASSWORD);
+
+            assertThat(user.getPassword()).isEqualTo("encoded-old-password");
+            verify(redisTokenService, never()).deleteRefreshToken(anyLong());
         }
     }
 }

@@ -22,9 +22,11 @@ public enum ErrorCode {
     SELF_STATUS_CHANGE_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "SELF_STATUS_CHANGE_NOT_ALLOWED", "본인 계정은 정지할 수 없습니다."),
     LAST_ADMIN_SUSPEND_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "LAST_ADMIN_SUSPEND_NOT_ALLOWED", "마지막 남은 관리자는 정지할 수 없습니다."),
     INVALID_NEWS_OUTLET(HttpStatus.BAD_REQUEST, "INVALID_NEWS_OUTLET", "지원하지 않는 언론사입니다."),
+    CHARGE_REQUEST_ALREADY_PENDING(HttpStatus.BAD_REQUEST, "CHARGE_REQUEST_ALREADY_PENDING", "이미 처리 대기 중인 충전 요청이 있습니다."),
 
     // 401 Unauthorized
     INVALID_PASSWORD(HttpStatus.UNAUTHORIZED, "INVALID_PASSWORD", "비밀번호가 일치하지 않습니다."),
+    PASSWORD_NOT_SET(HttpStatus.UNAUTHORIZED, "PASSWORD_NOT_SET", "소셜 로그인 계정은 비밀번호가 설정되어 있지 않습니다."),
     INVALID_TOKEN(HttpStatus.UNAUTHORIZED, "INVALID_TOKEN", "유효하지 않은 토큰입니다."),
     TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "TOKEN_EXPIRED", "만료된 토큰입니다."),
     REFRESH_TOKEN_NOT_FOUND(HttpStatus.UNAUTHORIZED, "REFRESH_TOKEN_NOT_FOUND", "리프레시 토큰을 찾을 수 없습니다."),
@@ -39,6 +41,8 @@ public enum ErrorCode {
     STOCK_NOT_FOUND(HttpStatus.NOT_FOUND, "STOCK_NOT_FOUND", "주식 종목을 찾을 수 없습니다."),
     RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "RESOURCE_NOT_FOUND", "요청한 API 경로를 찾을 수 없습니다."),
     INQUIRY_NOT_FOUND(HttpStatus.NOT_FOUND, "INQUIRY_NOT_FOUND", "문의를 찾을 수 없습니다."),
+    CHARGE_REQUEST_NOT_FOUND(HttpStatus.NOT_FOUND, "CHARGE_REQUEST_NOT_FOUND", "충전 요청을 찾을 수 없습니다."),
+    AUDIT_LOG_NOT_FOUND(HttpStatus.NOT_FOUND, "AUDIT_LOG_NOT_FOUND", "감사 로그를 찾을 수 없습니다."),
     NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "NOTIFICATION_NOT_FOUND", "알림을 찾을 수 없습니다."),
     AI_SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "AI_SESSION_NOT_FOUND", "AI 상담 세션을 찾을 수 없습니다."),
     SIMULATION_NOT_FOUND(HttpStatus.NOT_FOUND, "SIMULATION_NOT_FOUND", "시뮬레이션을 찾을 수 없습니다."),
@@ -49,6 +53,7 @@ public enum ErrorCode {
     DUPLICATE_EMAIL(HttpStatus.CONFLICT, "DUPLICATE_EMAIL", "이미 존재하는 이메일입니다."),
     OPTIMISTIC_LOCK_CONFLICT(HttpStatus.CONFLICT, "OPTIMISTIC_LOCK_CONFLICT", "동시 요청으로 처리에 실패했습니다. 다시 시도해 주세요."),
     ORDER_ALREADY_PROCESSED(HttpStatus.CONFLICT, "ORDER_ALREADY_PROCESSED", "이미 체결되었거나 취소된 주문입니다."),
+    CHARGE_REQUEST_ALREADY_PROCESSED(HttpStatus.CONFLICT, "CHARGE_REQUEST_ALREADY_PROCESSED", "이미 승인되었거나 거절된 충전 요청입니다."),
 
     // 423 Locked
     LOGIN_LOCKED(HttpStatus.LOCKED, "LOGIN_LOCKED", "로그인 시도 횟수 초과로 계정이 잠겼습니다."),

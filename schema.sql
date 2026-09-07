@@ -252,9 +252,14 @@ CREATE TABLE investment_profile (
   [가상캐시 충전 — v10]
   POST /api/accounts/{accountId}/charge 호출 시 balance/base_balance를 charge_amount만큼
   같이 올리고(수익률에 공짜 충전분이 반영되지 않도록) charge_count를 1 증가시킨다.
-  charge_count가 3 이상이면 CustomException(ErrorCode.CHARGE_LIMIT_EXCEEDED)로 막고,
-  관리자 문의(inquiries)를 통해 별도로 요청하도록 안내한다(관리자 승인 워크플로우 자체는
-  이번 범위 밖 — 필요해지면 admin-account 쪽에 charge_count를 초기화해주는 기능을 추가한다).
+  charge_count가 3 이상이면 CustomException(ErrorCode.CHARGE_LIMIT_EXCEEDED)로 막는다.
+
+  [한도 초과 시 관리자 승인 절차 — v13]
+  charge_count 3회를 넘긴 사용자는 charge_requests 테이블(18번 섹션)에 승인 요청을
+  남기고 관리자가 승인/거절한다. 승인 시 accounts.applyAdminCharge()로 balance/
+  base_balance만 올라가고 charge_count는 그대로 둔다(자동 충전 3회 한도와는 별개
+  트랙이라 재사용하지 않는다) — v10 시점엔 이 절차가 "관리자 문의로 별도 요청"
+  수준의 막연한 안내였으나, v13에서 전용 테이블·API로 정식 구현됐다.
 
   [version 컬럼 - 낙관적 락]
   동시성 문제 해결: 지정가 주문 동시 체결 시 잔고 오류 방지
@@ -642,7 +647,131 @@ CREATE TABLE news_briefings (
 ) ENGINE=InnoDB;
 
 -- =====================================================
--- 테이블 관계 요약 (총 15개 — v12: news_briefing_settings, news_briefings 추가)
+-- 16. 충전 요청·승인 (charge_requests) — v13 신규
+-- =====================================================
+/*
+  [용도]
+  accounts.charge_count(자동 충전, 3회 한도)를 넘긴 사용자가 관리자 승인을 받아
+  추가로 충전하는 절차(ADMIN_API_BACKEND_HANDOFF.md 4.2, 2026-09-07 사용자 승인으로
+  신규 생성). ChargeRequest.approve()가 호출되면 accounts.applyAdminCharge()로
+  balance/base_balance가 올라가되 charge_count는 올리지 않는다(자동 충전 한도와
+  별개 트랙이라는 의미).
+
+  [계좌당 동시 PENDING 1건 제한 — 정책 확정 전 우선 구현]
+  handoff 문서가 "일·월 누적 한도 등 세부 정책 필요"로 남긴 항목이라, 우선 "계좌당
+  미처리(PENDING) 요청은 동시에 1건만 허용"으로 좁혀 구현했다(NAMING.md 8-25 참고).
+  최종 정책이 확정되면 검증 로직만 서비스 계층에서 조정하면 되고 스키마 변경은
+  필요 없다.
+
+  [decided_by — nullable FK]
+  inquiries.answered_by와 동일한 설계(CLAUDE.md 6번) — 처리한 관리자가 이후 탈퇴해도
+  요청 처리 기록 자체는 보존해야 하므로 ON DELETE SET NULL.
+*/
+CREATE TABLE charge_requests (
+    request_id       BIGINT          NOT NULL AUTO_INCREMENT,
+    account_id        BIGINT          NOT NULL,
+    amount            BIGINT          NOT NULL,
+    reason            VARCHAR(500)    NOT NULL,
+    status            ENUM('PENDING','APPROVED','REJECTED')
+                                      NOT NULL DEFAULT 'PENDING',
+    decided_by        BIGINT,                              -- 처리한 관리자 user_id (nullable — 탈퇴 시 SET NULL)
+    decision_reason   VARCHAR(500),
+    requested_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    decided_at        DATETIME,
+    PRIMARY KEY (request_id),
+    INDEX idx_charge_request_account (account_id),
+    INDEX idx_charge_request_status (status),
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE,
+    FOREIGN KEY (decided_by) REFERENCES users(user_id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- =====================================================
+-- 17. 계좌 잔고 변동 원장 (account_transactions) — v13 신규
+-- =====================================================
+/*
+  [용도]
+  계좌 잔고가 바뀌는 모든 지점(최초 지급/자동 충전/관리자 충전·차감/주문 매수·매도/
+  지정가 환불)을 append-only로 남기는 장부(ADMIN_API_BACKEND_HANDOFF.md 4.3,
+  2026-09-07 사용자 승인으로 신규 생성). 수정·삭제 API가 없다 — 잘못 기록된 값이
+  있어도 반대 방향 보정 행을 새로 추가하는 방식으로 처리한다(회계 원장과 동일한 원칙).
+
+  [related_order_id / related_charge_request_id / processed_by — FK 아님]
+  주문 체결마다 매번 orders/users를 조인할 필요는 없고 "어느 주문·충전요청 때문에
+  생긴 변동인지"만 참조 가능하면 충분하다는 판단으로 단순 ID 컬럼으로 뒀다(FK
+  제약을 걸면 원본 주문이 삭제될 일이 없는 이 서비스 특성상 실익이 없다). processed_by는
+  ADMIN_CHARGE/ADMIN_DEDUCTION일 때만 채워지는 관리자 user_id.
+
+  [amount / balance_before / balance_after]
+  amount는 증감액(양수=증가, 음수=감소)이며 항상 balance_after - balance_before와
+  같다. 조회 시 별도 계산 없이 이 세 컬럼만으로 "그 순간 얼마에서 얼마로 바뀌었는지"를
+  바로 알 수 있게 하기 위해 셋 다 저장한다.
+*/
+CREATE TABLE account_transactions (
+    transaction_id            BIGINT          NOT NULL AUTO_INCREMENT,
+    account_id                BIGINT          NOT NULL,
+    type                      ENUM('INITIAL_GRANT','AUTO_CHARGE','ADMIN_CHARGE','ADMIN_DEDUCTION',
+                                    'ORDER_BUY','ORDER_SELL','ORDER_REFUND')
+                                              NOT NULL,
+    amount                    BIGINT          NOT NULL,     -- 증감액 (양수=증가, 음수=감소)
+    balance_before             BIGINT          NOT NULL,
+    balance_after              BIGINT          NOT NULL,
+    related_order_id           BIGINT,                       -- FK 아님, 참조용 (orders.order_id)
+    related_charge_request_id  BIGINT,                       -- FK 아님, 참조용 (charge_requests.request_id)
+    processed_by               BIGINT,                       -- FK 아님, 참조용 (users.user_id) — 관리자 개입 시에만
+    reason                     VARCHAR(500),
+    created_at                 DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (transaction_id),
+    INDEX idx_account_transaction_account (account_id, created_at),
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- =====================================================
+-- 18. 관리자 작업 감사 로그 (audit_logs) — v13 신규
+-- =====================================================
+/*
+  [용도]
+  관리자가 수행한 주요 작업(사용자·계좌 상태 변경, 계좌 잔고 조정, 주문 강제취소,
+  충전요청 승인/거절, 관리자 신규 생성)을 append-only로 남긴다(ADMIN_API_BACKEND_HANDOFF.md
+  5.2, 2026-09-07 사용자 승인으로 신규 생성). handoff 문서 요구사항대로 관리자도
+  수정·삭제할 수 없다 — UPDATE/DELETE API 자체를 만들지 않는다.
+
+  [admin_user_id / admin_login_id — FK 아님 + 스냅샷]
+  관리자가 나중에 탈퇴·정지되어도 "그 시점에 누가 했는지"를 그대로 읽을 수 있어야
+  하는 감사 로그 특성상, FK로 users를 참조하지 않고 기록 시점의 login_id를 값 그대로
+  복사해 저장한다(조회 시점에 조인해서 알아내는 방식이 아님).
+
+  [target_type / target_id]
+  ACCOUNT/USER/ORDER/CHARGE_REQUEST 등 문자열로 대상 종류를 구분하고 target_id로
+  구체적인 행을 가리킨다 — 감사 로그 한 테이블이 여러 도메인의 행위를 다루므로
+  다형적 참조가 필요해 단일 FK 대신 이 방식을 택했다.
+
+  [request_ip]
+  최초 구현 시엔 "서비스 메서드 시그니처 변경이 여러 곳에 필요해 범위 밖"으로 컬럼만
+  만들고 항상 null이었으나, 코드리뷰 반영 이후 JwtAuthenticationFilter가 인증 시점에
+  SecurityContext에 심어둔 WebAuthenticationDetails에서 꺼내 채우도록 바뀌어 실제
+  값이 들어간다(NAMING.md 8-27 참고). 인증 컨텍스트가 없는 경로에서는 여전히 null일
+  수 있다.
+*/
+CREATE TABLE audit_logs (
+    audit_log_id    BIGINT          NOT NULL AUTO_INCREMENT,
+    admin_user_id   BIGINT          NOT NULL,                -- FK 아님, 기록 시점 참조 ID
+    admin_login_id  VARCHAR(50)     NOT NULL,                -- 기록 시점 스냅샷 (관리자 탈퇴 후에도 보존)
+    action          VARCHAR(50)     NOT NULL,                -- 예: USER_STATUS_CHANGE, ACCOUNT_ADJUSTMENT, ORDER_CANCEL
+    target_type     VARCHAR(30)     NOT NULL,                -- 예: USER, ACCOUNT, ORDER, CHARGE_REQUEST
+    target_id       BIGINT          NOT NULL,
+    before_value    VARCHAR(500),
+    after_value     VARCHAR(500),
+    reason          VARCHAR(500),
+    request_ip      VARCHAR(45),                             -- IPv6까지 고려한 길이
+    created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (audit_log_id),
+    INDEX idx_audit_log_admin (admin_user_id),
+    INDEX idx_audit_log_target (target_type, target_id),
+    INDEX idx_audit_log_created (created_at)
+) ENGINE=InnoDB;
+
+-- =====================================================
+-- 테이블 관계 요약 (총 18개 — v13: charge_requests, account_transactions, audit_logs 추가)
 -- =====================================================
 /*
   users 1:1  → investment_profile
@@ -657,9 +786,15 @@ CREATE TABLE news_briefings (
   users 1:N  → inquiries (답변자 기준, answered_by — nullable)
   users 1:1  → news_briefing_settings (v12)
   users 1:N  → news_briefings (v12)
+  users 1:N  → charge_requests (decided_by 기준, nullable — v13)
   accounts 1:N → holdings
   accounts 1:N → orders
+  accounts 1:N → charge_requests (v13)
+  accounts 1:N → account_transactions (v13)
   ai_planning_sessions 1:N → ai_planning_messages
+
+  ※ audit_logs는 FK 없이 admin_user_id/target_id를 참조 ID로만 저장한다(위 [admin_user_id
+    / admin_login_id — FK 아님 + 스냅샷] 참고) — 다른 테이블과 관계선을 긋지 않는다.
 */
 
 -- =====================================================
