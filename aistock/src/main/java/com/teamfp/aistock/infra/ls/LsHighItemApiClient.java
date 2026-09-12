@@ -37,7 +37,7 @@ public class LsHighItemApiClient extends LsApiClientSupport {
     @Value("${ls.high-item-url}")
     private String highItemUrl;
 
-    public LsHighItemApiClient(LsAccessTokenProvider accessTokenProvider, RestClient.Builder restClientBuilder) {
+    public LsHighItemApiClient(LsAccessTokenProvider accessTokenProvider, @org.springframework.beans.factory.annotation.Qualifier("lsRestClientBuilder") RestClient.Builder restClientBuilder) {
         super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
     }

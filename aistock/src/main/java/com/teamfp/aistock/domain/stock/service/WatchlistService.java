@@ -14,7 +14,7 @@ import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
-import com.teamfp.aistock.global.redis.RedisStockCacheService;
+import com.teamfp.aistock.domain.stock.service.StockQuoteService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,11 +26,8 @@ public class WatchlistService {
 
     private final WatchlistRepository watchlistRepository;
     private final UserRepository userRepository;
-    // OrderService.createLimitOrder()와 같은 이유로 feature/stock-price(StockService)를 거치지
-    // 않고 global/redis 서비스를 직접 조회한다 — 이 프로젝트는 종목 마스터 테이블이 따로 없어
-    // (schema.sql 13개 테이블 기준) stockName을 얻을 수 있는 유일한 소스가 LS증권 tick 캐시
-    // (stock:price)이기 때문이다.
-    private final RedisStockCacheService redisStockCacheService;
+    // 실시간 캐시가 없으면 LS REST 조회로 서버 검증된 시세와 종목명을 얻는다.
+    private final StockQuoteService stockQuoteService;
     // v14, feature/stock-price: 관심종목 추가/삭제를 LS 실시간 구독 참조 카운트에 반영한다.
     private final StockSubscriptionManager stockSubscriptionManager;
 
@@ -61,7 +58,7 @@ public class WatchlistService {
             return;
         }
 
-        StockPriceDto priceDto = redisStockCacheService.getStockPrice(stockCode);
+        StockPriceDto priceDto = stockQuoteService.getStockPrice(stockCode);
         if (priceDto == null) {
             throw new CustomException(ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
         }

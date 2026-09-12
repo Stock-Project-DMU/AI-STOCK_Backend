@@ -42,7 +42,7 @@ public class LsSectorApiClient extends LsApiClientSupport {
     // DB나 Redis에 새로 저장하지 않고 인스턴스 메모리에 캐싱한다(전체테마 목록은 자주 안 바뀜).
     private volatile Map<String, String> themeCodeCache;
 
-    public LsSectorApiClient(LsAccessTokenProvider accessTokenProvider, RestClient.Builder restClientBuilder) {
+    public LsSectorApiClient(LsAccessTokenProvider accessTokenProvider, @org.springframework.beans.factory.annotation.Qualifier("lsRestClientBuilder") RestClient.Builder restClientBuilder) {
         super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
     }

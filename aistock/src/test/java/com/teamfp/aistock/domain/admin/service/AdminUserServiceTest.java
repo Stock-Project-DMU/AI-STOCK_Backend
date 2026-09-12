@@ -268,7 +268,7 @@ class AdminUserServiceTest {
     void updateAdminStatus_regularUser_blocked() {
         when(userRepository.findByUserIdAndIsActiveTrue(USER_ID)).thenReturn(Optional.of(user));
 
-        assertThatThrownBy(() -> adminUserService.updateAdminStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.SUSPENDED)))
+        assertThatThrownBy(() -> adminUserService.updateAdminStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.SUSPENDED, "테스트 사유", null)))
                 .isInstanceOf(CustomException.class)
                 .extracting(e -> ((CustomException) e).getErrorCode())
                 .isEqualTo(ErrorCode.USER_NOT_FOUND);
@@ -292,7 +292,7 @@ class AdminUserServiceTest {
                 .thenReturn(List.of(targetAdmin, targetAdmin)); // 활성 관리자가 2명 이상이라 정지 가능한 상황을 흉내낸다
         when(accountRepository.findAllByUserId(USER_ID)).thenReturn(List.of());
 
-        AdminUserDetailResponse result = adminUserService.updateAdminStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.SUSPENDED));
+        AdminUserDetailResponse result = adminUserService.updateAdminStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.SUSPENDED, "테스트 사유", null));
 
         assertThat(result.status()).isEqualTo(UserStatus.SUSPENDED);
     }
@@ -322,7 +322,7 @@ class AdminUserServiceTest {
     void updateUserStatus_deactivatedUser_blocked() {
         when(userRepository.findByUserIdAndIsActiveTrue(USER_ID)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> adminUserService.updateUserStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.ACTIVE)))
+        assertThatThrownBy(() -> adminUserService.updateUserStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.ACTIVE, "테스트 사유", null)))
                 .isInstanceOf(CustomException.class);
     }
 
@@ -332,10 +332,25 @@ class AdminUserServiceTest {
         when(userRepository.findByUserIdAndIsActiveTrue(USER_ID)).thenReturn(Optional.of(user));
         when(accountRepository.findAllByUserId(USER_ID)).thenReturn(List.of());
 
-        AdminUserDetailResponse result = adminUserService.updateUserStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.SUSPENDED));
+        AdminUserDetailResponse result = adminUserService.updateUserStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.SUSPENDED, "테스트 사유", 7));
 
         assertThat(result.status()).isEqualTo(UserStatus.SUSPENDED);
         assertThat(user.getStatus()).isEqualTo(UserStatus.SUSPENDED);
+        assertThat(result.suspensionReason()).isEqualTo("테스트 사유");
+        assertThat(result.suspendedUntil()).isAfter(java.time.LocalDateTime.now(java.time.ZoneId.of("Asia/Seoul")).plusDays(6));
+    }
+
+    @Test
+    void rejectsMissingReasonAndInvalidDurationBeforeMutation() {
+        for (AdminUserStatusRequest request : List.of(
+                new AdminUserStatusRequest(UserStatus.SUSPENDED, " ", 7),
+                new AdminUserStatusRequest(UserStatus.SUSPENDED, "사유", 0),
+                new AdminUserStatusRequest(UserStatus.SUSPENDED, "사유", 366),
+                new AdminUserStatusRequest(UserStatus.ACTIVE, "해제 사유", 7))) {
+            assertThatThrownBy(() -> adminUserService.updateUserStatus(ADMIN_ID, USER_ID, request))
+                    .isInstanceOf(CustomException.class);
+        }
+        org.mockito.Mockito.verifyNoInteractions(userRepository, auditLogService);
     }
 
     @Test
@@ -345,7 +360,7 @@ class AdminUserServiceTest {
         when(userRepository.findByUserIdAndIsActiveTrue(USER_ID)).thenReturn(Optional.of(user));
         when(accountRepository.findAllByUserId(USER_ID)).thenReturn(List.of());
 
-        AdminUserDetailResponse result = adminUserService.updateUserStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.ACTIVE));
+        AdminUserDetailResponse result = adminUserService.updateUserStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.ACTIVE, "테스트 사유", null));
 
         assertThat(result.status()).isEqualTo(UserStatus.ACTIVE);
         assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
@@ -364,7 +379,7 @@ class AdminUserServiceTest {
         ReflectionTestUtils.setField(admin, "userId", ADMIN_ID);
         when(userRepository.findByUserIdAndIsActiveTrue(ADMIN_ID)).thenReturn(Optional.of(admin));
 
-        assertThatThrownBy(() -> adminUserService.updateUserStatus(ADMIN_ID, ADMIN_ID, new AdminUserStatusRequest(UserStatus.SUSPENDED)))
+        assertThatThrownBy(() -> adminUserService.updateUserStatus(ADMIN_ID, ADMIN_ID, new AdminUserStatusRequest(UserStatus.SUSPENDED, "테스트 사유", null)))
                 .isInstanceOf(CustomException.class)
                 .extracting(e -> ((CustomException) e).getErrorCode())
                 .isEqualTo(ErrorCode.SELF_STATUS_CHANGE_NOT_ALLOWED);
@@ -387,7 +402,7 @@ class AdminUserServiceTest {
         when(userRepository.findAllByRoleAndStatusAndIsActiveTrueForUpdate(Role.ADMIN, UserStatus.ACTIVE))
                 .thenReturn(List.of(targetAdmin));
 
-        assertThatThrownBy(() -> adminUserService.updateUserStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.SUSPENDED)))
+        assertThatThrownBy(() -> adminUserService.updateUserStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.SUSPENDED, "테스트 사유", null)))
                 .isInstanceOf(CustomException.class)
                 .extracting(e -> ((CustomException) e).getErrorCode())
                 .isEqualTo(ErrorCode.LAST_ADMIN_SUSPEND_NOT_ALLOWED);
@@ -419,7 +434,7 @@ class AdminUserServiceTest {
                 .thenReturn(List.of(targetAdmin, otherAdmin));
         when(accountRepository.findAllByUserId(USER_ID)).thenReturn(List.of());
 
-        AdminUserDetailResponse result = adminUserService.updateUserStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.SUSPENDED));
+        AdminUserDetailResponse result = adminUserService.updateUserStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.SUSPENDED, "테스트 사유", null));
 
         assertThat(result.status()).isEqualTo(UserStatus.SUSPENDED);
     }
@@ -439,7 +454,7 @@ class AdminUserServiceTest {
         when(userRepository.findByUserIdAndIsActiveTrue(USER_ID)).thenReturn(Optional.of(targetAdmin));
         when(accountRepository.findAllByUserId(USER_ID)).thenReturn(List.of());
 
-        AdminUserDetailResponse result = adminUserService.updateUserStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.SUSPENDED));
+        AdminUserDetailResponse result = adminUserService.updateUserStatus(ADMIN_ID, USER_ID, new AdminUserStatusRequest(UserStatus.SUSPENDED, "테스트 사유", null));
 
         assertThat(result.status()).isEqualTo(UserStatus.SUSPENDED);
         // 이미 SUSPENDED인 경우 lockout 검증(마지막 admin 확인 락 조회)까지 갈 필요가 없다.

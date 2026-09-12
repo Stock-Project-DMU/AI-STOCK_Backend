@@ -57,7 +57,7 @@ public class SecurityConfig {
      * 인증 없이 접근 가능한(permitAll) API 경로 목록.
      *
      * NAMING.md 8-1/8-2 기준으로 "로그인 전"에 호출되어야 하는 인증 관련 API만 공개하고,
-     * 그 외 모든 API(마이페이지, 시세, 주문, AI 등)는 로그인(JWT)이 필요하다.
+     * 시장·종목 정보의 GET 조회도 공개하며, 마이페이지·주문·AI 등은 로그인(JWT)이 필요하다.
      * - 로그아웃(/api/auth/logout)은 이미 로그인된 사용자가 자기 토큰을 무효화하는 동작이라 인증이 필요하므로 목록에서 제외한다.
      * - WebSocket 핸드셰이크(/ws-stomp/**)는 HTTP 레벨에서는 열어두고,
      *   실제 인증은 CLAUDE.md 8번 항목에 따라 별도의 StompAuthInterceptor(feature/websocket-config)가
@@ -66,6 +66,9 @@ public class SecurityConfig {
     private static final String[] PUBLIC_URLS = {
             "/api/auth/login",
             "/api/auth/signup",
+            "/api/auth/login-id/availability",
+            "/api/auth/find-id",
+            "/api/auth/password/reset",
             "/api/auth/oauth/**",
             "/api/auth/refresh",
             "/api/auth/email/**",
@@ -141,6 +144,8 @@ public class SecurityConfig {
                 // 경로별 인가 규칙: PUBLIC_URLS는 누구나 접근 가능, 그 외에는 인증(JWT) 필요
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(PUBLIC_URLS).permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.GET,
+                                "/api/market/**", "/api/stocks/*", "/api/stocks/*/hoga").permitAll()
                         // v8 추가 — 관리자 전용 API는 ROLE_ADMIN만 접근 가능 (CLAUDE.md 8번, NAMING.md 4번)
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()

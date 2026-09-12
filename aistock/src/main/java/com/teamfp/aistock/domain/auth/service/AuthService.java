@@ -45,6 +45,47 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true)
 public class AuthService {
 
+    public com.teamfp.aistock.domain.auth.dto.response.LoginIdCheckResponse checkLoginId(String loginId) {
+        if (loginId == null || !loginId.matches("[A-Za-z0-9_]{4,50}")) {
+            throw new CustomException(ErrorCode.INVALID_INPUT);
+        }
+        return new com.teamfp.aistock.domain.auth.dto.response.LoginIdCheckResponse(loginId,
+                !userRepository.existsByLoginId(loginId));
+    }
+
+    public String findLoginId(com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest request) {
+        User user = verifyRecoveryIdentity(request);
+        if (request.birthdate() == null || !request.birthdate().equals(user.getBirthdate())) {
+            throw new CustomException(ErrorCode.INVALID_INPUT);
+        }
+        return user.getLoginId();
+    }
+
+    @Transactional
+    public void resetPassword(com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest request) {
+        if (request.newPassword() == null || request.newPassword().isBlank()
+                || request.loginId() == null || request.loginId().isBlank()) {
+            throw new CustomException(ErrorCode.INVALID_INPUT);
+        }
+        User user = verifyRecoveryIdentity(request);
+        if (!request.loginId().equals(user.getLoginId())) {
+            throw new CustomException(ErrorCode.INVALID_INPUT);
+        }
+        user.changePassword(passwordEncoder.encode(request.newPassword()));
+        redisTokenService.deleteRefreshToken(user.getUserId());
+    }
+
+    private User verifyRecoveryIdentity(com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest request) {
+        // 이메일 소유 증명을 먼저 소비해 비인증 계정 조회와 인증코드 재사용을 차단한다.
+        if (!redisAuthCodeService.verifyAndDeleteEmailCode(request.email(), request.code())) {
+            throw new CustomException(ErrorCode.EMAIL_CODE_MISMATCH);
+        }
+        return userRepository.findByEmail(request.email())
+                .filter(User::isActive)
+                .filter(user -> request.name().equals(user.getName()) && user.getLoginId() != null)
+                .orElseThrow(() -> new CustomException(ErrorCode.INVALID_INPUT));
+    }
+
     private static final SecureRandom EMAIL_CODE_RANDOM = new SecureRandom();
     // 회원가입 직후 자동 생성되는 첫 계좌의 이름. 이후 유저가 추가하는 계좌와 동일하게
     // AccountService.createAccount()를 그대로 재사용한다(NAMING.md 8-7 참고).
@@ -97,6 +138,9 @@ public class AuthService {
     @Lazy
     private AuthService self;
 
+    @Autowired
+    private com.teamfp.aistock.domain.user.repository.InvestmentProfileRepository investmentProfileRepository;
+
     /**
      * 일반 로그인
      */
@@ -143,7 +187,7 @@ public class AuthService {
                 .orElseThrow(() -> new CustomException(ErrorCode.INVALID_INPUT));
 
         // 소셜 유저 정보 가져오기
-        SocialUserDto userInfo = client.getUserInfo(request.getCode());
+        SocialUserDto userInfo = client.getUserInfo(request.getCode(), request.getState());
 
         try {
             return self.processSocialLogin(request.getProvider(), userInfo);
@@ -198,6 +242,7 @@ public class AuthService {
                         .isActive(true)
                         .build();
                 userRepository.save(user);
+                accountService.createAccount(user.getUserId(), new CreateAccountRequest(DEFAULT_ACCOUNT_NAME));
                 log.info("신규 소셜 회원[{}] 가입 처리를 수행합니다.", userInfo.getEmail());
             }
 
@@ -320,6 +365,11 @@ public class AuthService {
         }
 
         accountService.createAccount(user.getUserId(), new CreateAccountRequest(DEFAULT_ACCOUNT_NAME));
+
+        if (request.getInvestmentLevel() != null) {
+            investmentProfileRepository.save(com.teamfp.aistock.domain.user.entity.InvestmentProfile.builder()
+                    .user(user).investmentTendency(3).fundTendency(2).investmentLevel(request.getInvestmentLevel()).build());
+        }
 
         return SignupResponse.builder()
                 .userId(user.getUserId())

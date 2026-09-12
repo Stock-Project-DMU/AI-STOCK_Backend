@@ -29,7 +29,7 @@ public class LsProgramApiClient extends LsApiClientSupport {
     @Value("${ls.program-url}")
     private String programUrl;
 
-    public LsProgramApiClient(LsAccessTokenProvider accessTokenProvider, RestClient.Builder restClientBuilder) {
+    public LsProgramApiClient(LsAccessTokenProvider accessTokenProvider, @org.springframework.beans.factory.annotation.Qualifier("lsRestClientBuilder") RestClient.Builder restClientBuilder) {
         super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
     }

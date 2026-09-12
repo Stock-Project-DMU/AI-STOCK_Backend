@@ -71,12 +71,17 @@ public class InvestmentProfile {
     }
 
     /**
-     * 투자성향 설문 재제출. investmentLevel(초보자/중급자/전문가)은 이 설문으로 바꾸지 않는다 —
-     * 별도 평가 로직은 이번 범위 밖이라 기존 값을 그대로 둔다.
+     * 설문 응답과 성향을 저장한다. 서비스가 계산한 투자 레벨은 같은 트랜잭션의 updatePreferences로 반영한다.
      */
     public void updateSurvey(int investmentTendency, int fundTendency, String surveyAnswers) {
         this.investmentTendency = investmentTendency;
         this.fundTendency = fundTendency;
         this.surveyAnswers = surveyAnswers;
+    }
+
+    public void updatePreferences(int investmentTendency, int fundTendency, InvestmentLevel investmentLevel) {
+        this.investmentTendency = investmentTendency;
+        this.fundTendency = fundTendency;
+        this.investmentLevel = investmentLevel;
     }
 }

@@ -43,7 +43,7 @@ public class LsEtcApiClient extends LsApiClientSupport {
     @Value("${ls.etc-url}")
     private String etcUrl;
 
-    public LsEtcApiClient(LsAccessTokenProvider accessTokenProvider, RestClient.Builder restClientBuilder) {
+    public LsEtcApiClient(LsAccessTokenProvider accessTokenProvider, @org.springframework.beans.factory.annotation.Qualifier("lsRestClientBuilder") RestClient.Builder restClientBuilder) {
         super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
     }

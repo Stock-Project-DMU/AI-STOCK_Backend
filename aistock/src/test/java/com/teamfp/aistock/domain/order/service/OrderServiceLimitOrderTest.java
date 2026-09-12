@@ -34,7 +34,7 @@ import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.redis.RedisPendingOrderService;
-import com.teamfp.aistock.global.redis.RedisStockCacheService;
+import com.teamfp.aistock.domain.stock.service.StockQuoteService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -65,7 +65,7 @@ class OrderServiceLimitOrderTest {
     private AccountService accountService;
 
     @Mock
-    private RedisStockCacheService redisStockCacheService;
+    private StockQuoteService stockQuoteService;
 
     @Mock
     private RedisPendingOrderService redisPendingOrderService;
@@ -171,7 +171,7 @@ class OrderServiceLimitOrderTest {
         @Test
         @DisplayName("잔고가 충분하면 주문금액만큼 frozenBalance로 묶고 PENDING 주문을 Redis에도 등록한다")
         void success_freezesBalanceAndRegistersPendingOrder() {
-            when(redisStockCacheService.getStockPrice(STOCK_CODE)).thenReturn(StockPriceDto.builder()
+            when(stockQuoteService.getStockPrice(STOCK_CODE)).thenReturn(StockPriceDto.builder()
                     .stockCode(STOCK_CODE)
                     .stockName("삼성전자")
                     .currentPrice(65_000L)
@@ -218,7 +218,7 @@ class OrderServiceLimitOrderTest {
         @Test
         @DisplayName("현재가 캐시가 없으면(신규 종목 이름 조회 불가) STOCK_PRICE_NOT_AVAILABLE 예외를 던진다")
         void fail_priceCacheMissingForStockName() {
-            when(redisStockCacheService.getStockPrice(STOCK_CODE)).thenReturn(null);
+            when(stockQuoteService.getStockPrice(STOCK_CODE)).thenReturn(null);
 
             assertThatThrownBy(() -> orderService.createLimitOrder(USER_ID, limitRequestOf(OrderType.BUY, 1, 70_000L)))
                     .isInstanceOf(CustomException.class)
@@ -244,7 +244,7 @@ class OrderServiceLimitOrderTest {
 
             assertThat(response.status()).isEqualTo(OrderStatus.PENDING);
             assertThat(account.getFrozenBalance()).isEqualTo(70_000L);
-            verify(redisStockCacheService, never()).getStockPrice(anyString());
+            verify(stockQuoteService, never()).getStockPrice(anyString());
 
             ArgumentCaptor<PendingOrderDto> captor = ArgumentCaptor.forClass(PendingOrderDto.class);
             verify(redisPendingOrderService).addPendingOrder(eq(STOCK_CODE), captor.capture());

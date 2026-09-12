@@ -27,6 +27,29 @@ public class UserController {
 
     private final UserService userService;
 
+    @PatchMapping("/me/profile")
+    public ApiResponse<UserInfoResponse> updateProfile(@Valid @RequestBody com.teamfp.aistock.domain.user.dto.request.ProfileUpdateRequest request) {
+        return ApiResponse.success(userService.updateProfile(SecurityUtil.getCurrentUserId(), request));
+    }
+    private final com.teamfp.aistock.domain.user.service.UserWithdrawalService userWithdrawalService;
+
+    @org.springframework.web.bind.annotation.DeleteMapping("/me")
+    public ApiResponse<Void> withdraw(@Valid @RequestBody PasswordVerifyRequest request) {
+        userWithdrawalService.withdraw(SecurityUtil.getCurrentUserId(), request);
+        return ApiResponse.success("탈퇴가 완료되었습니다.", null);
+    }
+
+    @GetMapping("/me/investment-profile")
+    public ApiResponse<InvestmentProfileResponse> getInvestmentProfile() {
+        return ApiResponse.success(userService.getInvestmentProfile(SecurityUtil.getCurrentUserId()));
+    }
+
+    @org.springframework.web.bind.annotation.PutMapping("/me/investment-profile")
+    public ApiResponse<InvestmentProfileResponse> updateInvestmentProfile(@Valid @RequestBody
+            com.teamfp.aistock.domain.user.dto.request.InvestmentProfileUpdateRequest request) {
+        return ApiResponse.success(userService.updateInvestmentProfile(SecurityUtil.getCurrentUserId(), request));
+    }
+
     @GetMapping("/me")
     public ApiResponse<UserInfoResponse> getMyInfo() {
         Long userId = SecurityUtil.getCurrentUserId();

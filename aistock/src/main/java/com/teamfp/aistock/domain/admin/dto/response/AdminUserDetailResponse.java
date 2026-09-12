@@ -26,7 +26,9 @@ public record AdminUserDetailResponse(
         LocalDateTime createdAt,
         List<AccountInfoResponse> accounts,
         List<HoldingResponse> holdings,
-        List<OrderHistoryResponse> orders
+        List<OrderHistoryResponse> orders,
+        String suspensionReason,
+        LocalDateTime suspendedUntil
 ) {
 
     public static AdminUserDetailResponse of(
@@ -45,7 +47,9 @@ public record AdminUserDetailResponse(
                 user.getCreatedAt(),
                 accounts,
                 holdings,
-                orders
+                orders,
+                user.getStatus() == UserStatus.SUSPENDED ? user.getSuspensionReason() : null,
+                user.getStatus() == UserStatus.SUSPENDED ? user.getSuspendedUntil() : null
         );
     }
 }

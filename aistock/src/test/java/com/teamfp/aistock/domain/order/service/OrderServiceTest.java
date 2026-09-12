@@ -36,7 +36,7 @@ import com.teamfp.aistock.domain.user.entity.Role;
 import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
-import com.teamfp.aistock.global.redis.RedisStockCacheService;
+import com.teamfp.aistock.domain.stock.service.StockQuoteService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -54,7 +54,7 @@ import static org.mockito.Mockito.when;
  *
  * DB/Redis/Auth 등 다른 브랜치(feature/auth-login, feature/account-mypage,
  * feature/stock-price)가 아직 스텁이라 서버를 띄우는 통합 테스트는 지금 불가능하다.
- * 대신 Repository/RedisStockCacheService를 Mockito로 모킹해서 OrderService의
+ * 대신 Repository/StockQuoteService를 Mockito로 모킹해서 OrderService의
  * 잔고 검증-체결-보유종목 갱신 로직만 독립적으로 검증한다.
  */
 @ExtendWith(MockitoExtension.class)
@@ -70,7 +70,7 @@ class OrderServiceTest {
     private AccountService accountService;
 
     @Mock
-    private RedisStockCacheService redisStockCacheService;
+    private StockQuoteService stockQuoteService;
 
     @Mock
     private HoldingValuationService holdingValuationService;
@@ -120,6 +120,28 @@ class OrderServiceTest {
         ReflectionTestUtils.setField(orderService, "holdingSettlementService", new HoldingSettlementService(holdingRepository));
     }
 
+    @Test
+    void marketSellCannotConsumeSharesReservedForLimitSell() {
+        when(stockQuoteService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(70000));
+        Holding holding = Holding.builder().account(account).stockCode(STOCK_CODE)
+                .stockName("삼성전자").quantity(10).avgPrice(60000L).build();
+        when(holdingRepository.findByAccountIdAndStockCode(any(), anyString())).thenReturn(Optional.of(holding));
+        when(orderRepository.sumPendingSellQuantity(any(), eq(STOCK_CODE))).thenReturn(8);
+        assertThatThrownBy(() -> orderService.createMarketOrder(USER_ID, requestOf(OrderType.SELL, 3)))
+                .isInstanceOf(CustomException.class);
+        assertThat(holding.getQuantity()).isEqualTo(10);
+        assertThat(account.getBalance()).isEqualTo(1_000_000L);
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    void amountOverflowDoesNotChangeBalance() {
+        when(stockQuoteService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(Long.MAX_VALUE));
+        assertThatThrownBy(() -> orderService.createMarketOrder(USER_ID, requestOf(OrderType.BUY, 2)))
+                .isInstanceOf(CustomException.class);
+        assertThat(account.getBalance()).isEqualTo(1_000_000L);
+        verify(orderRepository, never()).save(any());
+    }
     private StockPriceDto priceOf(long currentPrice) {
         return StockPriceDto.builder()
                 .stockCode(STOCK_CODE)
@@ -139,7 +161,7 @@ class OrderServiceTest {
         @Test
         @DisplayName("잔고가 충분하면 즉시 체결되고, 처음 매수하는 종목이면 보유종목이 새로 생긴다")
         void buy_success_createsNewHolding() {
-            when(redisStockCacheService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(70_000L));
+            when(stockQuoteService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(70_000L));
             when(holdingRepository.findByAccountIdAndStockCode(any(), anyString())).thenReturn(Optional.empty());
 
             CreateOrderResponse response = orderService.createMarketOrder(USER_ID, requestOf(OrderType.BUY, 10));
@@ -157,7 +179,7 @@ class OrderServiceTest {
         @Test
         @DisplayName("체결되면 알림 서비스에 주문 체결 알림을 정확한 인자로 보낸다")
         void buy_success_notifiesExecution() {
-            when(redisStockCacheService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(70_000L));
+            when(stockQuoteService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(70_000L));
             when(holdingRepository.findByAccountIdAndStockCode(any(), anyString())).thenReturn(Optional.empty());
 
             orderService.createMarketOrder(USER_ID, requestOf(OrderType.BUY, 10));
@@ -176,7 +198,7 @@ class OrderServiceTest {
                     .quantity(10)
                     .avgPrice(1_000L)
                     .build();
-            when(redisStockCacheService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(2_000L));
+            when(stockQuoteService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(2_000L));
             when(holdingRepository.findByAccountIdAndStockCode(any(), anyString())).thenReturn(Optional.of(existing));
 
             orderService.createMarketOrder(USER_ID, requestOf(OrderType.BUY, 5));
@@ -190,7 +212,7 @@ class OrderServiceTest {
         @Test
         @DisplayName("잔고가 부족하면 INSUFFICIENT_BALANCE 예외를 던지고 체결하지 않는다")
         void buy_fail_insufficientBalance() {
-            when(redisStockCacheService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(200_000L)); // 10주 = 2,000,000원 (잔고 초과)
+            when(stockQuoteService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(200_000L)); // 10주 = 2,000,000원 (잔고 초과)
 
             assertThatThrownBy(() -> orderService.createMarketOrder(USER_ID, requestOf(OrderType.BUY, 10)))
                     .isInstanceOf(CustomException.class)
@@ -209,7 +231,7 @@ class OrderServiceTest {
             // 본 뒤 각자 INSERT를 시도하는 경합은 holdings.uq_account_stock 유니크 제약으로만
             // 걸러진다. 이 케이스를 재현하기 위해 save()가 DataIntegrityViolationException을
             // 던지도록 모킹한다.
-            when(redisStockCacheService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(70_000L));
+            when(stockQuoteService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(70_000L));
             when(holdingRepository.findByAccountIdAndStockCode(any(), anyString())).thenReturn(Optional.empty());
             when(holdingRepository.save(any(Holding.class)))
                     .thenThrow(new org.springframework.dao.DataIntegrityViolationException("uq_account_stock"));
@@ -235,7 +257,7 @@ class OrderServiceTest {
                     .quantity(10)
                     .avgPrice(50_000L)
                     .build();
-            when(redisStockCacheService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(60_000L));
+            when(stockQuoteService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(60_000L));
             when(holdingRepository.findByAccountIdAndStockCode(any(), anyString())).thenReturn(Optional.of(existing));
 
             CreateOrderResponse response = orderService.createMarketOrder(USER_ID, requestOf(OrderType.SELL, 4));
@@ -257,7 +279,7 @@ class OrderServiceTest {
                     .quantity(10)
                     .avgPrice(50_000L)
                     .build();
-            when(redisStockCacheService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(60_000L));
+            when(stockQuoteService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(60_000L));
             when(holdingRepository.findByAccountIdAndStockCode(any(), anyString())).thenReturn(Optional.of(existing));
 
             orderService.createMarketOrder(USER_ID, requestOf(OrderType.SELL, 4));
@@ -276,7 +298,7 @@ class OrderServiceTest {
                     .quantity(5)
                     .avgPrice(50_000L)
                     .build();
-            when(redisStockCacheService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(60_000L));
+            when(stockQuoteService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(60_000L));
             when(holdingRepository.findByAccountIdAndStockCode(any(), anyString())).thenReturn(Optional.of(existing));
 
             orderService.createMarketOrder(USER_ID, requestOf(OrderType.SELL, 5));
@@ -288,7 +310,7 @@ class OrderServiceTest {
         @Test
         @DisplayName("보유하지 않은 종목을 매도하려 하면 INSUFFICIENT_HOLDING 예외를 던진다")
         void sell_fail_noHolding() {
-            when(redisStockCacheService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(60_000L));
+            when(stockQuoteService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(60_000L));
             when(holdingRepository.findByAccountIdAndStockCode(any(), anyString())).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> orderService.createMarketOrder(USER_ID, requestOf(OrderType.SELL, 1)))
@@ -307,7 +329,7 @@ class OrderServiceTest {
                     .quantity(3)
                     .avgPrice(50_000L)
                     .build();
-            when(redisStockCacheService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(60_000L));
+            when(stockQuoteService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(60_000L));
             when(holdingRepository.findByAccountIdAndStockCode(any(), anyString())).thenReturn(Optional.of(existing));
 
             assertThatThrownBy(() -> orderService.createMarketOrder(USER_ID, requestOf(OrderType.SELL, 4)))
@@ -335,7 +357,7 @@ class OrderServiceTest {
         @Test
         @DisplayName("현재가 캐시가 없으면(TTL 만료) STOCK_PRICE_NOT_AVAILABLE 예외를 던진다")
         void fail_priceCacheMissing() {
-            when(redisStockCacheService.getStockPrice(STOCK_CODE)).thenReturn(null);
+            when(stockQuoteService.getStockPrice(STOCK_CODE)).thenReturn(null);
 
             assertThatThrownBy(() -> orderService.createMarketOrder(USER_ID, requestOf(OrderType.BUY, 1)))
                     .isInstanceOf(CustomException.class)
@@ -355,7 +377,7 @@ class OrderServiceTest {
                     .extracting(e -> ((CustomException) e).getErrorCode())
                     .isEqualTo(ErrorCode.ACCOUNT_SUSPENDED);
 
-            verify(redisStockCacheService, never()).getStockPrice(anyString());
+            verify(stockQuoteService, never()).getStockPrice(anyString());
             verify(orderRepository, never()).save(any());
         }
     }

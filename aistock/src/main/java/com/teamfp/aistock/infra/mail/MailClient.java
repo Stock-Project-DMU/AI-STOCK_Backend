@@ -28,7 +28,7 @@ public class MailClient {
         message.setFrom(fromAddress);
         message.setTo(toEmail);
         message.setSubject(AUTH_CODE_SUBJECT);
-        message.setText("AI STOCK 회원가입 인증코드입니다.\n\n인증코드: " + code + "\n\n인증코드는 5분간 유효합니다.");
+        message.setText("AI STOCK 이메일 인증코드입니다.\n\n인증코드: " + code + "\n\n인증코드는 5분간 유효합니다. 요청하지 않았다면 이 메일을 무시해 주세요.");
 
         try {
             mailSender.send(message);

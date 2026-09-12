@@ -76,6 +76,7 @@ import static org.mockito.Mockito.when;
  */
 @ExtendWith(MockitoExtension.class)
 class AiPlanningServiceTest {
+    @Mock private PlanningPreferencesService planningPreferencesService;
 
     @Mock
     private AiPlanningSessionRepository sessionRepository;
