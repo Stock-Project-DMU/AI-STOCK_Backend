@@ -11,6 +11,7 @@ import org.springframework.data.repository.query.Param;
 import com.teamfp.aistock.domain.ai.entity.NewsBriefing;
 
 public interface NewsBriefingRepository extends JpaRepository<NewsBriefing, Long> {
+    java.util.List<NewsBriefing> findTop100ByUserUserIdOrderByBriefingDateDesc(Long userId);
 
     // User.userId는 필드명이 "id"가 아니라 "userId"라서 파생 쿼리(findByUserId...)로는
     // "user.id"를 찾다가 PropertyReferenceException이 난다(InquiryRepository와 동일한 이유로

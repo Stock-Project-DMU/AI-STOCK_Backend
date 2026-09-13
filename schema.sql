@@ -67,6 +67,27 @@ CREATE DATABASE IF NOT EXISTS aistock
 
 USE aistock;
 
+CREATE TABLE IF NOT EXISTS planning_preferences (
+    user_id BIGINT NOT NULL PRIMARY KEY,
+    version BIGINT,
+    selections TEXT NOT NULL
+);
+
+-- 장기 적립식 목표 UI용 저장소. 기존 종목별 simulations와 계산 입력이 다르다.
+-- 실제 운영 DB에는 아래 CREATE TABLE을 별도 적용한다(전체 schema.sql 재실행 금지).
+CREATE TABLE IF NOT EXISTS goal_plans (
+    plan_id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    goal VARCHAR(20) NOT NULL,
+    monthly_payment BIGINT NOT NULL,
+    years INT NOT NULL,
+    annual_return DOUBLE NOT NULL,
+    aggressive BOOLEAN NOT NULL,
+    is_saved BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at DATETIME(6) NOT NULL,
+    INDEX idx_goal_plan_user (user_id)
+);
+
 -- =====================================================
 -- 1. 회원 (users)
 -- =====================================================

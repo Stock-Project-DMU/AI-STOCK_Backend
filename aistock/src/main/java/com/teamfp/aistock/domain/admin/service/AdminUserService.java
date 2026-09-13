@@ -180,15 +180,26 @@ public class AdminUserService {
 
     @Transactional
     public AdminUserDetailResponse updateUserStatus(Long adminUserId, Long userId, AdminUserStatusRequest request) {
+        if (request.status() == null || request.reason() == null || request.reason().isBlank()
+                || request.reason().length() > 500 || (request.durationDays() != null
+                && (request.durationDays() < 1 || request.durationDays() > 365))
+                || (request.status() == UserStatus.ACTIVE && request.durationDays() != null)) {
+            throw new CustomException(ErrorCode.INVALID_INPUT);
+        }
         User user = findUser(userId);
         UserStatus beforeStatus = user.getStatus();
         if (request.status() == UserStatus.SUSPENDED) {
             suspend(adminUserId, user);
+            user.setSuspensionDetails(request.reason().trim(), request.durationDays() == null ? null
+                    : java.time.LocalDateTime.now(java.time.ZoneId.of("Asia/Seoul")).plusDays(request.durationDays()));
         } else {
             user.activate();
         }
         auditLogService.record(adminUserId, AuditLogService.ACTION_USER_STATUS_CHANGE, AuditLogService.TARGET_USER,
-                userId, beforeStatus.name(), user.getStatus().name(), null);
+                userId, beforeStatus.name(), user.getStatus().name()
+                        + (request.status() == UserStatus.SUSPENDED ? " | 정지 종료: "
+                        + (user.getSuspendedUntil() == null ? "무기한" : user.getSuspendedUntil() + " (KST)") : " | 수동 정지 해제"),
+                request.reason().trim());
         return buildDetail(user);
     }
 

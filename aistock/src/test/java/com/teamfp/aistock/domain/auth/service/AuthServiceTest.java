@@ -65,6 +65,37 @@ class AuthServiceTest {
 
     private AuthService authService;
 
+    @Test
+    void recoveryRejectsCodeBeforeLookingUpIdentity() {
+        var request = new com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest(
+                "tester01", "테스터", "tester01@example.com", LocalDate.of(2000, 1, 1), "000000", "newpass123");
+        assertThatThrownBy(() -> authService.findLoginId(request)).isInstanceOf(CustomException.class);
+        verify(userRepository, never()).findByEmail(anyString());
+    }
+
+    @Test
+    void passwordRecoveryUpdatesHashAndRevokesRefreshToken() {
+        var request = new com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest(
+                "tester01", "테스터", "tester01@example.com", null, "123456", "newpass123");
+        var user = User.builder().loginId("tester01").name("테스터").email("tester01@example.com")
+                .password("oldHash").isActive(true).build();
+        ReflectionTestUtils.setField(user, "userId", 10L);
+        given(redisAuthCodeService.verifyAndDeleteEmailCode(request.email(), request.code())).willReturn(true);
+        given(userRepository.findByEmail(request.email())).willReturn(java.util.Optional.of(user));
+        given(passwordEncoder.encode(request.newPassword())).willReturn("newHash");
+        authService.resetPassword(request);
+        assertThat(user.getPassword()).isEqualTo("newHash");
+        verify(redisTokenService).deleteRefreshToken(10L);
+    }
+
+    @Test
+    void duplicateIdCheckUsesDatabaseAndValidatesInput() {
+        given(userRepository.existsByLoginId("tester01")).willReturn(true);
+        assertThat(authService.checkLoginId("tester01").available()).isFalse();
+        assertThat(authService.checkLoginId("unused01").available()).isTrue();
+        assertThatThrownBy(() -> authService.checkLoginId("!")).isInstanceOf(CustomException.class);
+    }
+
     @BeforeEach
     void setUp() {
         authService = new AuthService(

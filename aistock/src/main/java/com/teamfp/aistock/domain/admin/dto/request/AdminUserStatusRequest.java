@@ -11,6 +11,12 @@ import jakarta.validation.constraints.NotNull;
 public record AdminUserStatusRequest(
 
         @NotNull(message = "변경할 상태값은 필수입니다.")
-        UserStatus status
+        UserStatus status,
+        @jakarta.validation.constraints.NotBlank
+        @jakarta.validation.constraints.Size(max = 500)
+        String reason,
+        @jakarta.validation.constraints.Min(1)
+        @jakarta.validation.constraints.Max(365)
+        Integer durationDays
 ) {
 }

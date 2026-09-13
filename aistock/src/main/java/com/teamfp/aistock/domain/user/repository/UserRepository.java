@@ -19,6 +19,13 @@ import jakarta.persistence.LockModeType;
 
 public interface UserRepository extends JpaRepository<User, Long> {
 
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @Query("UPDATE User u SET u.status = com.teamfp.aistock.domain.user.entity.UserStatus.ACTIVE, "
+            + "u.suspensionReason = null, u.suspendedUntil = null WHERE "
+            + "u.status = com.teamfp.aistock.domain.user.entity.UserStatus.SUSPENDED "
+            + "AND u.suspendedUntil IS NOT NULL AND u.suspendedUntil <= :now AND u.isActive = true")
+    int releaseExpiredSuspensions(@Param("now") LocalDateTime now);
+
     Optional<User> findByLoginId(String loginId);
 
     Optional<User> findByEmail(String email);

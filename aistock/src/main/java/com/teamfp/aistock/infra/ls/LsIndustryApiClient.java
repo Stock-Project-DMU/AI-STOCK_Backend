@@ -45,7 +45,7 @@ public class LsIndustryApiClient extends LsApiClientSupport {
     @Value("${ls.industry-url}")
     private String industryUrl;
 
-    public LsIndustryApiClient(LsAccessTokenProvider accessTokenProvider, RestClient.Builder restClientBuilder) {
+    public LsIndustryApiClient(LsAccessTokenProvider accessTokenProvider, @org.springframework.beans.factory.annotation.Qualifier("lsRestClientBuilder") RestClient.Builder restClientBuilder) {
         super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
     }

@@ -190,6 +190,7 @@ class LiveGeminiManualCheck {
         Executor syncExecutor = Runnable::run;
 
         AiPlanningService aiPlanningService = new AiPlanningService(
+                org.mockito.Mockito.mock(com.teamfp.aistock.domain.ai.service.PlanningPreferencesService.class),
                 sessionRepository, messageRepository, userRepository, investmentProfileRepository,
                 accountService, holdingValuationService, rateLimiterService, aiToolCacheService,
                 geminiApiClient, dartApiClient, naverNewsApiClient, lsMarketDataApiClient,

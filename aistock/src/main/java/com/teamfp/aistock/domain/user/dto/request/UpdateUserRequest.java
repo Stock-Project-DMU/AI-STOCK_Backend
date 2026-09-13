@@ -18,6 +18,8 @@ public record UpdateUserRequest(
         @NotBlank(message = "이메일은 필수입니다.")
         @Email(message = "올바른 이메일 형식이 아닙니다.")
         @Size(max = 100, message = "이메일은 100자를 초과할 수 없습니다.")
-        String email
+        String email,
+        @jakarta.validation.constraints.Past java.time.LocalDate birthdate
 ) {
+    public UpdateUserRequest(String name, String email) { this(name, email, null); }
 }

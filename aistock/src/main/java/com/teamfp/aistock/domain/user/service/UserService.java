@@ -33,6 +33,15 @@ public class UserService {
     private final PasswordEncoder passwordEncoder;
     private final RedisTokenService redisTokenService;
 
+    @Transactional
+    public UserInfoResponse updateProfile(Long userId, com.teamfp.aistock.domain.user.dto.request.ProfileUpdateRequest request) {
+        matchOrThrow(request.currentPassword(), findUser(userId));
+        UserInfoResponse result = updateMyInfo(userId, request.user());
+        if (request.investment() != null) updateInvestmentProfile(userId, request.investment());
+        if (request.passwordChange() != null) changePassword(userId, request.passwordChange());
+        return result;
+    }
+
     @Transactional(readOnly = true)
     public UserInfoResponse getMyInfo(Long userId) {
         return UserInfoResponse.from(findUser(userId));
@@ -62,6 +71,7 @@ public class UserService {
             throw new CustomException(ErrorCode.DUPLICATE_EMAIL);
         }
         user.updateInfo(request.name(), request.email());
+        if (request.birthdate() != null) user.updateBirthdate(request.birthdate());
         return UserInfoResponse.from(user);
     }
 
@@ -69,6 +79,24 @@ public class UserService {
     // 들어올 때 걸리는 유니크 제약. DataIntegrityViolationException의 원인이 이 제약인지
     // 메시지로 구분한다(HoldingSettlementService.UNIQUE_CONSTRAINT_NAME과 동일한 패턴).
     private static final String UNIQUE_CONSTRAINT_NAME = "uq_user_profile";
+
+    @Transactional(readOnly = true)
+    public InvestmentProfileResponse getInvestmentProfile(Long userId) {
+        findUser(userId);
+        return investmentProfileRepository.findByUserId(userId).map(InvestmentProfileResponse::from).orElse(null);
+    }
+
+    @Transactional
+    public InvestmentProfileResponse updateInvestmentProfile(Long userId,
+            com.teamfp.aistock.domain.user.dto.request.InvestmentProfileUpdateRequest request) {
+        User user = findUser(userId);
+        InvestmentProfile profile = investmentProfileRepository.findByUserId(userId)
+                .orElseGet(() -> investmentProfileRepository.save(InvestmentProfile.builder().user(user)
+                        .investmentTendency(request.investmentTendency()).fundTendency(request.fundTendency())
+                        .investmentLevel(request.investmentLevel()).build()));
+        profile.updatePreferences(request.investmentTendency(), request.fundTendency(), request.investmentLevel());
+        return InvestmentProfileResponse.from(profile);
+    }
 
     /**
      * 투자성향 설문 저장. investment_profile은 1인 1행(uq_user_profile)이라 이미 있으면
@@ -81,6 +109,7 @@ public class UserService {
      */
     @Transactional
     public InvestmentProfileResponse saveSurvey(Long userId, SurveyRequest request) {
+        var investmentLevel = SurveyLevelEvaluator.evaluate(request.answers());
         // RedisStockCacheService의 다른 ObjectMapper 사용처와 동일하게, 직렬화 실패를 raw
         // 예외로 흘려보내지 않고 CustomException으로 감싼다(List<Integer> 특성상 실질적으로는
         // 거의 발생하지 않지만, 프로젝트 전체의 예외 처리 관례와 일관성을 맞춘다).
@@ -99,6 +128,7 @@ public class UserService {
                     .investmentTendency(request.investmentTendency())
                     .fundTendency(request.fundTendency())
                     .surveyAnswers(surveyAnswersJson)
+                    .investmentLevel(investmentLevel)
                     .build();
             try {
                 investmentProfileRepository.save(profile);
@@ -110,6 +140,7 @@ public class UserService {
             }
         } else {
             profile.updateSurvey(request.investmentTendency(), request.fundTendency(), surveyAnswersJson);
+            profile.updatePreferences(request.investmentTendency(), request.fundTendency(), investmentLevel);
         }
 
         return InvestmentProfileResponse.from(profile);

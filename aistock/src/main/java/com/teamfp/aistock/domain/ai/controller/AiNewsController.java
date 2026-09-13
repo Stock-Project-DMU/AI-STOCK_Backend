@@ -20,13 +20,31 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 /**
- * feature/ai-news(맞춤형 뉴스 브리핑) — 대화형 API가 아니다. 사용자는 언론사만 설정해두고,
+ * 맞춤형 뉴스 검색 채팅과 정기 브리핑 API. 채팅은 요청 시 뉴스를 검색하며,
  * 실제 브리핑은 AiNewsService.generateDailyBriefings()가 매일 정해진 시각에 만들어 둔다.
  */
 @RestController
 @RequestMapping("/api/ai/news")
 @RequiredArgsConstructor
 public class AiNewsController {
+    private final com.teamfp.aistock.domain.ai.service.NewsChatService newsChatService;
+
+    @org.springframework.web.bind.annotation.PostMapping("/chat")
+    public ApiResponse<com.teamfp.aistock.domain.ai.dto.response.NewsChatResponse> chat(
+            @Valid @RequestBody com.teamfp.aistock.domain.ai.dto.request.NewsChatRequest request) {
+        SecurityUtil.getCurrentUserId();
+        return ApiResponse.success(newsChatService.chat(request));
+    }
+
+    @GetMapping("/briefings")
+    public ApiResponse<List<NewsBriefingResponse>> getBriefingHistory() {
+        return ApiResponse.success(aiNewsService.getBriefingHistory(SecurityUtil.getCurrentUserId()));
+    }
+
+    @GetMapping("/briefings/{date}")
+    public ApiResponse<NewsBriefingResponse> getBriefing(@org.springframework.web.bind.annotation.PathVariable java.time.LocalDate date) {
+        return ApiResponse.success(aiNewsService.getBriefing(SecurityUtil.getCurrentUserId(), date));
+    }
 
     private final AiNewsService aiNewsService;
 
