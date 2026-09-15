@@ -36,8 +36,16 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>t1102 응답 필드명은 2026-08-07엔 문서 없이 추정으로 작성했는데(당시 삼성전자 실제가로
  * 검증 완료), 이후 LS 공식 API 카탈로그 문서를 확보해 필드명 전체(166개)를 대조한 결과
- * hname/price/sign/change/diff/volume 등 이미 쓰던 필드는 전부 정확했다. 이번엔 그 문서를
+ * hname/price/sign/change/diff/volume 등 이미 쓰던 필드명은 전부 정확했다. 이번엔 그 문서를
  * 근거로 PER/PBR/52주 최고·최저·상장주식수·소진율까지 추가로 파싱한다(2026-08-10).</p>
+ *
+ * <p>다만 sign 필드는 이름만 알고 있었을 뿐 실제로 읽어 쓰지는 않고 있었다 — change(등락액)가
+ * 부호 없는 크기로 오는 걸 그대로 changeAmount에 넣어, 하락 종목도 항상 양수로 저장되는 버그가
+ * 있었다(local-market-data-generator 작업 중 실제 LS 응답으로 실측: sign=5(하락)인데
+ * change=9500(양수), diff=-3.53(음수) — 서로 모순). {@link LsApiClientSupport#signedLong} 추가로
+ * 수정(2026-09-11) — 같은 버그가 t8407(이 클래스의 {@code getMultiStockPrices})과 다른 5개
+ * 클라이언트(LsEtfApiClient/LsHighItemApiClient/LsInvestInfoApiClient/LsIndustryApiClient/
+ * LsSectorApiClient)에도 있어 전부 같은 방식으로 함께 고쳤다.</p>
  *
  * <p>{@code getCurrentPrice()}만 {@code ls.mode=mock}에서 {@link LsLocalMarketDataReader}(로컬
  * 파일)로 전환된다(feature/ls-local-data, 2026-08-30). 이 클래스의 나머지 메서드(t1105/t1305/
@@ -111,7 +119,7 @@ public class LsMarketDataApiClient extends LsApiClientSupport {
             log.warn("LS 현재가 응답에서 price를 파싱하지 못함 - stockCode: {}, outBlock: {}", stockCode, outBlock);
             return Optional.empty();
         }
-        Long changeAmount = parseLong(outBlock.get("change"));
+        Long changeAmount = signedLong(outBlock.get("change"), outBlock.get("sign"));
         Long volume = parseLong(outBlock.get("volume"));
 
         return Optional.of(LsCurrentPriceDetailDto.builder()
@@ -283,7 +291,7 @@ public class LsMarketDataApiClient extends LsApiClientSupport {
                             .stockCode(stringOf(row.get("shcode")))
                             .stockName(stringOf(row.get("hname")))
                             .price(parseLong(row.get("price")))
-                            .changeAmount(parseLong(row.get("change")))
+                            .changeAmount(signedLong(row.get("change"), row.get("sign")))
                             .changeRate(parseDoubleOrZero(row.get("diff")))
                             .volume(parseLong(row.get("volume")))
                             .build())

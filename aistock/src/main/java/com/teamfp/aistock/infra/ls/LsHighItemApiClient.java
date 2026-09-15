@@ -25,6 +25,10 @@ import lombok.extern.slf4j.Slf4j;
  * 있는 데이터라, 호출 전 {@link com.teamfp.aistock.global.util.DateUtil#isAfterHoursTradingTime()}로
  * 게이트를 거는 건 이 클라이언트가 아니라 AiPlanningService(도구 실행 계층)의 책임이다 —
  * 이 클라이언트 자체는 "그 시간대가 아니면 호출하면 안 된다"를 모르고 그냥 조회만 한다.
+ *
+ * <p>7개 메서드 전부 row의 change(등락액)를 sign 없이 그대로 changeAmount에 넣고 있어, 하락
+ * 종목도 항상 양수로 저장되는 버그가 있었다(t1102와 동일 패턴, t1441/t1452 실제 응답으로 실측
+ * 확인). {@link LsApiClientSupport#signedLong}으로 전부 수정(2026-09-11).</p>
  */
 @Slf4j
 @Component
@@ -51,7 +55,7 @@ public class LsHighItemApiClient extends LsApiClientSupport {
                 .stockCode(stringOf(row.get("shcode")))
                 .stockName(stringOf(row.get("hname")))
                 .price(parseLong(row.get("price")))
-                .changeAmount(parseLong(row.get("change")))
+                .changeAmount(signedLong(row.get("change"), row.get("sign")))
                 .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
                 );
@@ -64,7 +68,7 @@ public class LsHighItemApiClient extends LsApiClientSupport {
                 .stockCode(stringOf(row.get("shcode")))
                 .stockName(stringOf(row.get("hname")))
                 .price(parseLong(row.get("price")))
-                .changeAmount(parseLong(row.get("change")))
+                .changeAmount(signedLong(row.get("change"), row.get("sign")))
                 .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
                 .extraInfo("시가총액 비중 %s%%".formatted(stringOf(row.get("rate"))))
@@ -80,7 +84,7 @@ public class LsHighItemApiClient extends LsApiClientSupport {
                 .stockCode(stringOf(row.get("shcode")))
                 .stockName(stringOf(row.get("hname")))
                 .price(parseLong(row.get("price")))
-                .changeAmount(parseLong(row.get("change")))
+                .changeAmount(signedLong(row.get("change"), row.get("sign")))
                 .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
                 );
@@ -95,7 +99,7 @@ public class LsHighItemApiClient extends LsApiClientSupport {
                 .stockCode(stringOf(row.get("shcode")))
                 .stockName(stringOf(row.get("hname")))
                 .price(parseLong(row.get("price")))
-                .changeAmount(parseLong(row.get("change")))
+                .changeAmount(signedLong(row.get("change"), row.get("sign")))
                 .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
                 .extraInfo("거래대금 %s백만원".formatted(stringOf(row.get("value"))))
@@ -111,7 +115,7 @@ public class LsHighItemApiClient extends LsApiClientSupport {
                 .stockCode(stringOf(row.get("shcode")))
                 .stockName(stringOf(row.get("hname")))
                 .price(parseLong(row.get("price")))
-                .changeAmount(parseLong(row.get("change")))
+                .changeAmount(signedLong(row.get("change"), row.get("sign")))
                 .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
                 .extraInfo("전일 동시각 대비 거래량 %s%% 증가".formatted(stringOf(row.get("voldiff"))))
@@ -128,7 +132,7 @@ public class LsHighItemApiClient extends LsApiClientSupport {
                 .stockCode(stringOf(row.get("shcode")))
                 .stockName(stringOf(row.get("hname")))
                 .price(parseLong(row.get("price")))
-                .changeAmount(parseLong(row.get("change")))
+                .changeAmount(signedLong(row.get("change"), row.get("sign")))
                 .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
                 );
@@ -144,7 +148,7 @@ public class LsHighItemApiClient extends LsApiClientSupport {
                 .stockCode(stringOf(row.get("shcode")))
                 .stockName(stringOf(row.get("hname")))
                 .price(parseLong(row.get("price")))
-                .changeAmount(parseLong(row.get("change")))
+                .changeAmount(signedLong(row.get("change"), row.get("sign")))
                 .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
                 );

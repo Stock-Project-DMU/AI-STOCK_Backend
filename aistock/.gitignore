@@ -46,6 +46,3 @@ out/
 
 ### Logs ###
 *.log
-
-### LS mock 시세 로컬 데이터 (feature/ls-local-data, ls.local-data-path 기본값) ###
-/local-market-data/

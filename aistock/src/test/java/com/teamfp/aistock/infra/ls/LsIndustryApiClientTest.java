@@ -82,5 +82,21 @@ class LsIndustryApiClientTest {
             assertThat(result.get().getExpectedIndexValue()).isEqualTo(2610.62);
             mockServer.verify();
         }
+
+        @Test
+        @DisplayName("sign이 하락(5)이면 change가 양수 크기로 와도 changeRate를 음수로 뒤집는다")
+        void success_negativeChangeRate_whenSignIndicatesDecline() {
+            when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+            mockServer.expect(requestTo(INDUSTRY_URL))
+                    .andRespond(withSuccess("""
+                            {"t1485OutBlock":{"pricejisu":"6880.99","sign":"5","change":"152.93","yupjo":2,"ydownjo":0}}""",
+                            MediaType.APPLICATION_JSON));
+
+            Optional<LsExpectedIndexDto> result = client.getExpectedIndex("코스피", "장전");
+
+            assertThat(result).isPresent();
+            assertThat(result.get().getChangeRate()).isEqualTo(-152.93);
+            mockServer.verify();
+        }
     }
 }

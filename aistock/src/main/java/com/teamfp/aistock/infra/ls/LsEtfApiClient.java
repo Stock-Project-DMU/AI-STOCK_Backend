@@ -50,7 +50,9 @@ public class LsEtfApiClient extends LsApiClientSupport {
             if (price == null) {
                 return Optional.empty();
             }
-            Long changeAmount = parseLong(outBlock.get("change"));
+            // change(등락액)가 부호 없는 크기로 오고 방향은 sign 필드로 오는 t1102와 동일한
+            // 버그가 여기(t1901)도 있었다 — LsApiClientSupport.signedLong으로 수정(2026-09-11).
+            Long changeAmount = signedLong(outBlock.get("change"), outBlock.get("sign"));
             Long volume = parseLong(outBlock.get("volume"));
             return Optional.of(LsCurrentPriceDetailDto.builder()
                     .stockCode(stockCode)

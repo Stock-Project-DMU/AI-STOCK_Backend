@@ -127,6 +127,28 @@ class LsSectorApiClientTest {
         }
 
         @Test
+        @DisplayName("sign이 하락(5)이면 change가 양수 크기로 와도 changeAmount를 음수로 뒤집는다")
+        void success_negativeChangeAmount_whenSignIndicatesDecline() {
+            when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+            mockServer.expect(requestTo(SECTOR_URL))
+                    .andRespond(withSuccess("""
+                            {"t8425OutBlock":[
+                              {"tmname":"반도체 장비","tmcode":"0012"}
+                            ]}""", MediaType.APPLICATION_JSON));
+            mockServer.expect(requestTo(SECTOR_URL))
+                    .andRespond(withSuccess("""
+                            {"t1537OutBlock1":[
+                              {"hname":"삼성전기","shcode":"009150","price":1388000,"sign":"5","change":"12000","diff":"-0.86","volume":458175}
+                            ]}""", MediaType.APPLICATION_JSON));
+
+            List<LsThemeConstituentDto> result = client.getThemeConstituentsByName("반도체");
+
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).getChangeAmount()).isEqualTo(-12000L);
+            mockServer.verify();
+        }
+
+        @Test
         @DisplayName("전체테마 목록에 일치하는 테마가 없으면 빈 리스트를 반환한다(t1537 호출 안 함)")
         void empty_whenNoMatchingTheme() {
             when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");

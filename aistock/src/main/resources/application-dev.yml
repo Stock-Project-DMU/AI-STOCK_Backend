@@ -51,6 +51,9 @@ ls:
   mode: ${LS_MODE:mock}
   websocket-url: ${LS_WEBSOCKET_URL:wss://openapi.ls-sec.co.kr:29443/websocket}
   # ls.mode=mock 전용 — 로컬 파일로 시세를 공급할 때 사용할 데이터 디렉토리 경로(프로젝트
-  # 상대경로, feature/ls-local-data). LsLocalMarketDataReader가 이 경로에서 {stockCode}.json
-  # 파일을 읽는다.
-  local-data-path: ${LS_LOCAL_DATA_PATH:./local-market-data}
+  # 상대경로, feature/ls-local-data). 여기서 "프로젝트 상대경로"는 백엔드 프로세스 실행
+  # 디렉토리(aistock/) 기준이 아니라, local-market-data-generator(별도 Python 프로젝트)의
+  # output/ 폴더를 절대경로로 직접 가리킨다 — 두 프로젝트가 서로 다른 폴더에서 실행되므로
+  # generator 쪽 .env(OUTPUT_DIR)도 반드시 이 경로와 같은 절대경로를 가리켜야 한다.
+  # LsLocalMarketDataReader가 이 경로의 market_data.json 단일 파일을 읽는다.
+  local-data-path: ${LS_LOCAL_DATA_PATH:C:\AI-STOCK\local-market-data-generator\output}

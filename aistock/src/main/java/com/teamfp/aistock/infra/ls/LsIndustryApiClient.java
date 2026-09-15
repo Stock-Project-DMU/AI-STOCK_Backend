@@ -138,9 +138,12 @@ public class LsIndustryApiClient extends LsApiClientSupport {
             }
             @SuppressWarnings("unchecked")
             Map<String, Object> outBlock = (Map<String, Object>) response.get("t1485OutBlock");
+            // t1485OutBlock에는 diff가 없고 change만 있는데, 이 change도 부호 없는 크기로 오고
+            // 방향은 sign 필드로 온다(t1102 등과 동일 패턴, 실측: sign=5인데 change="152.93" 양수).
+            // signedDoubleOrZero로 sign 기준 부호를 다시 매긴다(2026-09-11).
             return Optional.of(LsExpectedIndexDto.builder()
                     .expectedIndexValue(parseDoubleOrZero(outBlock.get("pricejisu")))
-                    .changeRate(parseDoubleOrZero(outBlock.get("change")))
+                    .changeRate(signedDoubleOrZero(outBlock.get("change"), outBlock.get("sign")))
                     .upperLimitStockCount(parseLongPrimitive(outBlock.get("yupjo")))
                     .lowerLimitStockCount(parseLongPrimitive(outBlock.get("ydownjo")))
                     .build());

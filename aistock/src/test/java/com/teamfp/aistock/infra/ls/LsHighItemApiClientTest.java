@@ -67,6 +67,23 @@ class LsHighItemApiClientTest {
         }
 
         @Test
+        @DisplayName("sign이 하락(5)이면 change가 양수 크기로 와도 changeAmount를 음수로 뒤집는다")
+        void success_negativeChangeAmount_whenSignIndicatesDecline() {
+            when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+            mockServer.expect(requestTo(HIGH_ITEM_URL))
+                    .andRespond(withSuccess("""
+                            {"t1441OutBlock1":[
+                              {"hname":"하드웰옵틱스","shcode":"000230","price":6140,"sign":"5","change":"70","diff":"-1.13","volume":7691}
+                            ]}""", MediaType.APPLICATION_JSON));
+
+            List<LsRankingItemDto> result = client.getTopPriceChangeRate();
+
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).getChangeAmount()).isEqualTo(-70L);
+            mockServer.verify();
+        }
+
+        @Test
         @DisplayName("t1441OutBlock1이 없으면 빈 리스트를 반환한다")
         void empty_whenOutBlockMissing() {
             when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");

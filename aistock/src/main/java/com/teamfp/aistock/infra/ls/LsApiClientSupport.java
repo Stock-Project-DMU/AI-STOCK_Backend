@@ -79,4 +79,28 @@ abstract class LsApiClientSupport {
             return 0.0;
         }
     }
+
+    // change/diff와 별개로 등락 방향을 나타내는 sign 필드(1=상한/2=상승/3=보합/4=하한/5=하락)를
+    // 쓰는 TR이 여럿이라(t1102/t8407/t1901/t1441 등 다수) 여기 공통으로 둔다. change 값 자체가
+    // 부호 없는 크기로만 오는 TR이 대다수지만(t1102 실측: sign=5인데 change=9500 양수),
+    // 이미 부호가 붙어 오는 TR도 있다(t3521 해외지수: sign=5, change=-316.56 이미 음수). 절대값을
+    // 취한 뒤 sign 기준으로 다시 부호를 매기면 두 경우 모두 동일하게 안전히 처리된다 —
+    // local-market-data-generator 작업 중 실제 LS 응답으로 실측 확인(2026-09-11).
+    protected Long signedLong(Object value, Object signValue) {
+        Long magnitude = parseLong(value);
+        if (magnitude == null) {
+            return null;
+        }
+        return isDeclineSign(signValue) ? -Math.abs(magnitude) : Math.abs(magnitude);
+    }
+
+    protected double signedDoubleOrZero(Object value, Object signValue) {
+        double magnitude = parseDoubleOrZero(value);
+        return isDeclineSign(signValue) ? -Math.abs(magnitude) : Math.abs(magnitude);
+    }
+
+    private boolean isDeclineSign(Object signValue) {
+        String sign = stringOf(signValue);
+        return "4".equals(sign) || "5".equals(sign);
+    }
 }

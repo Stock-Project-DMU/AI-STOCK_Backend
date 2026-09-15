@@ -226,6 +226,22 @@ class LsInvestInfoApiClientTest {
         }
 
         @Test
+        @DisplayName("change가 이미 음수로 와도(t3521 실제 응답 형태) sign 기준으로 재정규화해 changeAmount는 그대로 음수를 유지한다")
+        void success_negativeChangeAmount_whenChangeAlreadySigned() {
+            when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+            mockServer.expect(requestTo(INVESTINFO_URL))
+                    .andRespond(withSuccess("""
+                            {"t3521OutBlock":{"symbol":"DJI@DJI","hname":"다우 산업","close":"52064.10","sign":"5","change":"-316.56","diff":"-0.60","date":"20260910"}}""",
+                            MediaType.APPLICATION_JSON));
+
+            Optional<LsOverseasIndexDto> result = client.getOverseasIndex("S", "DJI@DJI");
+
+            assertThat(result).isPresent();
+            assertThat(result.get().getChangeAmount()).isEqualTo(-316.56);
+            mockServer.verify();
+        }
+
+        @Test
         @DisplayName("t3521OutBlock이 없으면 빈 값을 반환한다")
         void empty_whenOutBlockMissing() {
             when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");

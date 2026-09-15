@@ -302,7 +302,10 @@ public class LsInvestInfoApiClient extends LsApiClientSupport {
                 .symbol(symbol)
                 .name(stringOf(outBlock.get("hname")))
                 .price(parseDoubleOrZero(outBlock.get("close")))
-                .changeAmount(parseDoubleOrZero(outBlock.get("change")))
+                // change가 이미 부호 붙어 오는 경우도 있고(t3521 실측: sign=5, change=-316.56)
+                // 부호 없이 오는 경우도 있어(다른 TR들), signedDoubleOrZero로 sign 기준 재정규화
+                // 한다 — 절대값 후 재부호이므로 어느 쪽이든 안전하다(2026-09-11).
+                .changeAmount(signedDoubleOrZero(outBlock.get("change"), outBlock.get("sign")))
                 .changeRate(parseDoubleOrZero(outBlock.get("diff")))
                 .date(stringOf(outBlock.get("date")))
                 .build());

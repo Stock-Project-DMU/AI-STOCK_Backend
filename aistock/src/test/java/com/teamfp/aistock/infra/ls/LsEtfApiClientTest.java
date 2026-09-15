@@ -66,6 +66,22 @@ class LsEtfApiClientTest {
         }
 
         @Test
+        @DisplayName("sign이 하락(5)이면 change가 양수 크기로 와도 changeAmount를 음수로 뒤집는다")
+        void success_negativeChangeAmount_whenSignIndicatesDecline() {
+            when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+            mockServer.expect(requestTo(ETF_URL))
+                    .andRespond(withSuccess("""
+                            {"t1901OutBlock":{"hname":"KODEX 200","price":108855,"sign":"5","change":"3010","diff":"-2.69","volume":"19728617"}}""",
+                            MediaType.APPLICATION_JSON));
+
+            Optional<LsCurrentPriceDetailDto> result = client.getCurrentPrice(STOCK_CODE);
+
+            assertThat(result).isPresent();
+            assertThat(result.get().getChangeAmount()).isEqualTo(-3010L);
+            mockServer.verify();
+        }
+
+        @Test
         @DisplayName("t1901OutBlock이 없으면 빈 값을 반환한다")
         void empty_whenOutBlockMissing() {
             when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");

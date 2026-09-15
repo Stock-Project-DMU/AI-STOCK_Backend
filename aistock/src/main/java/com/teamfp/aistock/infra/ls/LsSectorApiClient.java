@@ -116,7 +116,9 @@ public class LsSectorApiClient extends LsApiClientSupport {
                             .stockCode(stringOf(row.get("shcode")))
                             .stockName(stringOf(row.get("hname")))
                             .price(parseLong(row.get("price")))
-                            .changeAmount(parseLong(row.get("change")))
+                            // change가 부호 없는 크기로 오는 t1102와 동일 패턴(t1537 실측:
+                            // sign=5인데 change=12000 양수) — signedLong으로 수정(2026-09-11).
+                            .changeAmount(signedLong(row.get("change"), row.get("sign")))
                             .changeRate(parseDoubleOrZero(row.get("diff")))
                             .volume(parseLong(row.get("volume")))
                             .build())

@@ -87,6 +87,41 @@ class LsMarketDataApiClientTest {
     }
 
     @Test
+    @DisplayName("sign이 하락(5)이면 change가 양수 크기로 와도 changeAmount를 음수로 뒤집는다")
+    void success_negativeChangeAmount_whenSignIndicatesDecline() {
+        when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+        mockServer.expect(requestTo(MARKET_DATA_URL))
+                .andRespond(withSuccess("""
+                        {"t1102OutBlock":{
+                          "hname":"삼성전자","price":"259500","sign":"5","change":"9500","diff":"-3.53","volume":"9966543"
+                        }}""", MediaType.APPLICATION_JSON));
+
+        Optional<LsCurrentPriceDetailDto> result = client.getCurrentPrice(STOCK_CODE);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getChangeAmount()).isEqualTo(-9500L);
+        assertThat(result.get().getChangeRate()).isEqualTo(-3.53);
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("sign이 하한(4)이어도 changeAmount를 음수로 뒤집는다")
+    void success_negativeChangeAmount_whenSignIndicatesLowerLimit() {
+        when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+        mockServer.expect(requestTo(MARKET_DATA_URL))
+                .andRespond(withSuccess("""
+                        {"t1102OutBlock":{
+                          "hname":"삼성전자","price":"50000","sign":"4","change":"7500","diff":"-13.04","volume":"1000000"
+                        }}""", MediaType.APPLICATION_JSON));
+
+        Optional<LsCurrentPriceDetailDto> result = client.getCurrentPrice(STOCK_CODE);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getChangeAmount()).isEqualTo(-7500L);
+        mockServer.verify();
+    }
+
+    @Test
     @DisplayName("PER/PBR/소진율 필드가 응답에 없으면 0으로 뭉개지 않고 null로 남긴다")
     void success_missingRatioFields_areNullNotZero() {
         when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");

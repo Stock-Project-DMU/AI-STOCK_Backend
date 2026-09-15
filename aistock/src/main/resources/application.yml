@@ -73,8 +73,11 @@ ls:
   industry-url: ${LS_INDUSTRY_URL:https://openapi.ls-sec.co.kr:8080/indtp/market-data}
   # ls.mode=mock 전용 — LS 실시간 시세 대신 로컬 파일로 시세를 공급하기 위한 데이터 디렉토리
   # 경로(feature/ls-local-data). LsLocalMarketDataReader(ls.mode=mock에서만 빈 생성)가 이
-  # 경로에서 {stockCode}.json 파일을 읽어 LsMarketDataApiClient.getCurrentPrice()에 공급한다.
-  # real 모드에서는 쓰이지 않으므로 application-prod.yml에는 이 키를 두지 않는다.
+  # 경로의 market_data.json 단일 파일(종목코드를 키로 하는 맵)을 읽어
+  # LsMarketDataApiClient.getCurrentPrice()에 공급한다. local-market-data-generator(별도
+  # Python 스크립트, AI-STOCK_Backend/Frontend와 같은 레벨의 독립 프로젝트)가 이 파일을
+  # 주기적으로 갱신한다. real 모드에서는 쓰이지 않으므로 application-prod.yml에는 이 키를
+  # 두지 않는다.
   local-data-path: ${LS_LOCAL_DATA_PATH:}
 
 # 회원가입 이메일 인증코드 발신자 주소 (spring.mail과 별개 커스텀 프로퍼티)
