@@ -24,3 +24,6 @@ Thumbs.db
 
 ### Review tool temp files ###
 .review_tmp/
+
+### 로컬 전용 docker-compose 오버라이드 (예: 포트 충돌 회피) ###
+docker-compose.override.yml

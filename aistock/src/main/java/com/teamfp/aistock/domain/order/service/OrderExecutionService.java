@@ -11,6 +11,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.teamfp.aistock.domain.account.entity.Account;
+import com.teamfp.aistock.domain.account.entity.AccountTransactionType;
+import com.teamfp.aistock.domain.account.service.AccountTransactionService;
 import com.teamfp.aistock.domain.notification.entity.NotificationType;
 import com.teamfp.aistock.domain.notification.service.NotificationService;
 import com.teamfp.aistock.domain.order.dto.PendingOrderDto;
@@ -45,6 +47,8 @@ public class OrderExecutionService {
     private final HoldingSettlementService holdingSettlementService;
     // 지정가 주문 체결 시 알림 발송 — 도메인 간 직접 참조 대신 서비스 계층을 통해 호출한다.
     private final NotificationService notificationService;
+    // 잔고 변동 원장 기록(ADMIN_API_BACKEND_HANDOFF.md 4.3).
+    private final AccountTransactionService accountTransactionService;
 
     // execute()의 @Transactional은 Spring AOP 프록시를 거쳐야만 실제로 트랜잭션을 연다.
     // checkAndExecute()가 같은 클래스 안에서 execute(...)를 그냥 호출하면(self-invocation)
@@ -190,10 +194,22 @@ public class OrderExecutionService {
     private void executeBuy(Order order, Account account, long currentPrice) {
         long frozenAmount = order.getOrderPrice() * order.getQuantity();
         long actualAmount = currentPrice * order.getQuantity();
+        long balanceBefore = account.getBalance();
         // 지정가 매수는 "현재가 <= 지정가"일 때만 체결되므로 actualAmount는 항상 frozenAmount
         // 이하다 — 주문 등록 시 이미 최대 금액을 frozenBalance로 묶어뒀으므로 잔고 부족 걱정 없이
         // 그대로 정산(해제 + 차액 환급)만 하면 된다.
         account.settleFrozenOrder(frozenAmount, actualAmount);
+
+        // 원장 기록(4.3) — "매수 지출" 자체는 이미 등록 시점(OrderService.createLimitOrder())에
+        // ORDER_BUY로 기록했으므로, 여기서는 체결가가 지정가보다 낮아 생긴 차액 환급분만
+        // ORDER_REFUND로 남긴다. 지정가와 체결가가 같아 환급이 없으면(refundAmount == 0) 실제
+        // 잔고 변동이 없는 것이므로 빈 원장 행을 남기지 않는다.
+        long refundAmount = frozenAmount - actualAmount;
+        if (refundAmount > 0) {
+            accountTransactionService.record(account, AccountTransactionType.ORDER_REFUND, refundAmount, balanceBefore,
+                    order.getOrderId(), null, null, "지정가 매수 체결 차액 환급(지정가-체결가)");
+        }
+
         holdingSettlementService.increaseOrCreate(account, order.getStockCode(), order.getStockName(), order.getQuantity(), currentPrice);
     }
 
@@ -207,7 +223,11 @@ public class OrderExecutionService {
         }
 
         holdingSettlementService.decrease(holdingOpt.get(), order.getQuantity());
-        account.applySellOrder(currentPrice * order.getQuantity());
+        long sellAmount = currentPrice * order.getQuantity();
+        long balanceBefore = account.getBalance();
+        account.applySellOrder(sellAmount);
+        accountTransactionService.record(account, AccountTransactionType.ORDER_SELL, sellAmount, balanceBefore,
+                order.getOrderId(), null, null, "지정가 매도 체결");
         return true;
     }
 }

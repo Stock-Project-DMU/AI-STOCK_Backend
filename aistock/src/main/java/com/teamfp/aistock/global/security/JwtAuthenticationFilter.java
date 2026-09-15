@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -33,19 +34,23 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         // 로그아웃 시 블랙리스트에 등록된 토큰은 만료 전이라도 인증에서 제외한다.
         if (StringUtils.hasText(token) && jwtProvider.validateToken(token) && !redisTokenService.isBlacklisted(token)) {
-            authenticate(token);
+            authenticate(token, request);
         }
 
         filterChain.doFilter(request, response);
     }
 
-    private void authenticate(String token) {
+    private void authenticate(String token, HttpServletRequest request) {
         try {
             Long userId = jwtProvider.getUserId(token);
             CustomUserDetails userDetails = customUserDetailsService.loadUserByUsername(String.valueOf(userId));
 
             UsernamePasswordAuthenticationToken authentication =
                     new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+            // 요청 IP를 Authentication.details에 담아둔다(코드리뷰 반영, 2026-09) — 감사 로그
+            // (AuditLogService.record())가 어느 서비스 메서드 시그니처도 바꾸지 않고
+            // SecurityContextHolder를 통해 요청 IP를 꺼낼 수 있게 하기 위함이다.
+            authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
             SecurityContextHolder.getContext().setAuthentication(authentication);
         } catch (CustomException e) {

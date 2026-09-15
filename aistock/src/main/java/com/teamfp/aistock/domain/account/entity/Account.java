@@ -163,4 +163,25 @@ public class Account {
         this.baseBalance += chargeAmount;
         this.chargeCount += 1;
     }
+
+    /**
+     * 관리자 승인 충전(ADMIN_API_BACKEND_HANDOFF.md 4.2)/조정. chargeBalance()와 달리
+     * chargeCount를 올리지 않는다 — chargeCount는 "자동 충전 3회 한도" 전용 카운터라, 한도 초과
+     * 후 관리자가 별도로 승인해주는 충전과는 별개 개념이다(정확히는 한도를 초과했기 때문에
+     * 이 메서드를 타게 되는 경우가 대부분).
+     */
+    public void applyAdminCharge(long amount) {
+        this.balance += amount;
+        this.baseBalance += amount;
+    }
+
+    /**
+     * 관리자 잔고 차감 조정(ADMIN_API_BACKEND_HANDOFF.md 4.3 POST .../adjustments,
+     * type=ADMIN_DEDUCTION). applyAdminCharge()와 대칭 — baseBalance도 함께 낮춰야 수익률
+     * 계산식(총자산-baseBalance)/baseBalance가 왜곡되지 않는다.
+     */
+    public void applyAdminDeduction(long amount) {
+        this.balance -= amount;
+        this.baseBalance -= amount;
+    }
 }

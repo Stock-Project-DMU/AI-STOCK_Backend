@@ -1,9 +1,12 @@
 package com.teamfp.aistock.domain.user.service;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.teamfp.aistock.domain.user.dto.request.PasswordChangeRequest;
+import com.teamfp.aistock.domain.user.dto.request.PasswordVerifyRequest;
 import com.teamfp.aistock.domain.user.dto.request.SurveyRequest;
 import com.teamfp.aistock.domain.user.dto.request.UpdateUserRequest;
 import com.teamfp.aistock.domain.user.dto.response.InvestmentProfileResponse;
@@ -14,6 +17,7 @@ import com.teamfp.aistock.domain.user.repository.InvestmentProfileRepository;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
+import com.teamfp.aistock.global.redis.RedisTokenService;
 
 import lombok.RequiredArgsConstructor;
 import tools.jackson.core.JacksonException;
@@ -26,6 +30,8 @@ public class UserService {
     private final UserRepository userRepository;
     private final InvestmentProfileRepository investmentProfileRepository;
     private final ObjectMapper objectMapper;
+    private final PasswordEncoder passwordEncoder;
+    private final RedisTokenService redisTokenService;
 
     @Transactional(readOnly = true)
     public UserInfoResponse getMyInfo(Long userId) {
@@ -107,6 +113,42 @@ public class UserService {
         }
 
         return InvestmentProfileResponse.from(profile);
+    }
+
+    // 비밀번호 확인(ADMIN_API_BACKEND_HANDOFF.md 5.3). 실패해도 예외만 던지고 별도 반환값은
+    // 없다 — 컨트롤러가 "예외 없이 통과 = 확인 성공"으로 응답한다(AuthService.login()의
+    // 비밀번호 검증과 동일한 방식).
+    @Transactional(readOnly = true)
+    public void verifyPassword(Long userId, PasswordVerifyRequest request) {
+        matchOrThrow(request.password(), findUser(userId));
+    }
+
+    /**
+     * 비밀번호 변경. 현재 비밀번호를 먼저 확인한 뒤 새 비밀번호로 교체하고, 변경 성공 시 기존
+     * Refresh Token을 폐기한다(handoff 문서 5.3 요구사항 — 비밀번호가 바뀌면 그 전에 발급된
+     * 세션은 더 이상 유효하지 않아야 하므로, AuthService.logout()과 동일하게
+     * RedisTokenService.deleteRefreshToken()을 호출한다). Access Token까지 즉시 무효화하려면
+     * 블랙리스트 등록이 필요하지만, 이 메서드는 Access Token 문자열 자체를 받지 않으므로(요청
+     * 헤더가 필요) 그 부분은 다루지 않는다 — 다음 재발급(refresh) 시점에 자연히 막힌다.
+     */
+    @Transactional
+    public void changePassword(Long userId, PasswordChangeRequest request) {
+        User user = findUser(userId);
+        matchOrThrow(request.currentPassword(), user);
+        user.changePassword(passwordEncoder.encode(request.newPassword()));
+        redisTokenService.deleteRefreshToken(userId);
+    }
+
+    // 소셜 로그인 전용 계정(password == null)이 확인/변경을 시도하면 PasswordEncoder.matches()가
+    // NPE 대신 IllegalArgumentException("encoded password cannot be null")을 던지므로, 그 전에
+    // 명확한 PASSWORD_NOT_SET으로 막는다.
+    private void matchOrThrow(String rawPassword, User user) {
+        if (user.getPassword() == null) {
+            throw new CustomException(ErrorCode.PASSWORD_NOT_SET);
+        }
+        if (!passwordEncoder.matches(rawPassword, user.getPassword())) {
+            throw new CustomException(ErrorCode.INVALID_PASSWORD);
+        }
     }
 
     private boolean isUniqueConstraintViolation(DataIntegrityViolationException e) {

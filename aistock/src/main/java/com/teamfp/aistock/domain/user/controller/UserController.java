@@ -7,6 +7,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.teamfp.aistock.domain.user.dto.request.PasswordChangeRequest;
+import com.teamfp.aistock.domain.user.dto.request.PasswordVerifyRequest;
 import com.teamfp.aistock.domain.user.dto.request.SurveyRequest;
 import com.teamfp.aistock.domain.user.dto.request.UpdateUserRequest;
 import com.teamfp.aistock.domain.user.dto.response.InvestmentProfileResponse;
@@ -41,5 +43,19 @@ public class UserController {
     public ApiResponse<InvestmentProfileResponse> saveSurvey(@Valid @RequestBody SurveyRequest request) {
         Long userId = SecurityUtil.getCurrentUserId();
         return ApiResponse.success("투자성향 설문이 저장되었습니다.", userService.saveSurvey(userId, request));
+    }
+
+    @PostMapping("/me/password/verify")
+    public ApiResponse<Void> verifyPassword(@Valid @RequestBody PasswordVerifyRequest request) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        userService.verifyPassword(userId, request);
+        return ApiResponse.success("비밀번호가 확인되었습니다.", null);
+    }
+
+    @PatchMapping("/me/password")
+    public ApiResponse<Void> changePassword(@Valid @RequestBody PasswordChangeRequest request) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        userService.changePassword(userId, request);
+        return ApiResponse.success("비밀번호가 변경되었습니다.", null);
     }
 }

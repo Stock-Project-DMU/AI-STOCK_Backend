@@ -62,6 +62,9 @@ class OrderExecutionServiceTest {
     @Mock
     private NotificationService notificationService;
 
+    @Mock
+    private com.teamfp.aistock.domain.account.service.AccountTransactionService accountTransactionService;
+
     @InjectMocks
     private OrderExecutionService orderExecutionService;
 

@@ -9,12 +9,17 @@ import org.springframework.boot.test.context.SpringBootTest;
 
 import com.teamfp.aistock.domain.account.entity.Account;
 import com.teamfp.aistock.domain.account.repository.AccountRepository;
+import com.teamfp.aistock.domain.admin.entity.AuditLog;
+import com.teamfp.aistock.domain.admin.repository.AuditLogRepository;
+import com.teamfp.aistock.domain.admin.service.AuditLogService;
 import com.teamfp.aistock.domain.order.dto.request.CreateOrderRequest;
 import com.teamfp.aistock.domain.order.dto.response.CreateOrderResponse;
 import com.teamfp.aistock.domain.order.entity.Holding;
+import com.teamfp.aistock.domain.order.entity.Order;
 import com.teamfp.aistock.domain.order.entity.OrderType;
 import com.teamfp.aistock.domain.order.entity.PriceType;
 import com.teamfp.aistock.domain.order.repository.HoldingRepository;
+import com.teamfp.aistock.domain.order.repository.OrderRepository;
 import com.teamfp.aistock.domain.stock.dto.StockPriceDto;
 import com.teamfp.aistock.domain.user.entity.Role;
 import com.teamfp.aistock.domain.user.entity.User;
@@ -53,6 +58,12 @@ class OrderServiceIntegrationTest {
 
     @Autowired
     private RedisStockCacheService redisStockCacheService;
+
+    @Autowired
+    private OrderRepository orderRepository;
+
+    @Autowired
+    private AuditLogRepository auditLogRepository;
 
     @Test
     void 실제_DB와_Redis로_현재가_매수주문이_체결된다() {
@@ -112,5 +123,61 @@ class OrderServiceIntegrationTest {
         assertThat(holdings).hasSize(1);
         assertThat(holdings.get(0).getQuantity()).isEqualTo(10);
         assertThat(holdings.get(0).getAvgPrice()).isEqualTo(70_000L);
+    }
+
+    /**
+     * 코드리뷰 반영(2026-09) — OrderService.adminCancelOrder()가 admin의 AuditLogService를
+     * 직접 호출하지 않고 AdminOrderCancelledEvent만 발행하도록 바꿨는데(순환 의존 해소),
+     * 단위 테스트는 ApplicationEventPublisher를 Mockito로 대체해서 "이벤트를 발행했는지"만
+     * 확인할 뿐 "발행한 이벤트가 실제로 AdminAuditEventListener까지 도달해서 감사 로그가
+     * DB에 남는지"는 검증하지 못한다. 실제 스프링 컨텍스트(이벤트 리스너가 실제 빈으로
+     * 등록된 상태)로 그 전체 배선을 확인한다.
+     */
+    @Test
+    @org.springframework.transaction.annotation.Transactional
+    void adminCancelOrder는_이벤트를_거쳐_실제로_감사로그를_남긴다() {
+        long uniqueSuffix = System.nanoTime();
+
+        User user = userRepository.save(User.builder()
+                .loginId("audit-event-test-user-" + uniqueSuffix)
+                .name("이벤트테스트유저")
+                .role(Role.USER)
+                .isActive(true)
+                .build());
+        User admin = userRepository.save(User.builder()
+                .loginId("audit-event-test-admin-" + uniqueSuffix)
+                .name("이벤트테스트관리자")
+                .role(Role.ADMIN)
+                .isActive(true)
+                .build());
+        Account account = accountRepository.save(Account.builder()
+                .user(user)
+                .accountName("이벤트테스트계좌")
+                .accountNumber("E" + (uniqueSuffix % 10_000_000L))
+                .openedAt(LocalDate.now())
+                .baseBalance(1_000_000L)
+                .balance(1_000_000L)
+                .build());
+        Order pendingOrder = orderRepository.save(Order.builder()
+                .account(account)
+                .stockCode("005930")
+                .stockName("삼성전자")
+                .orderType(OrderType.BUY)
+                .priceType(PriceType.LIMIT)
+                .orderPrice(70_000L)
+                .quantity(1)
+                .build());
+
+        orderService.adminCancelOrder(admin.getUserId(), pendingOrder.getOrderId(), "통합테스트 취소 사유");
+
+        List<AuditLog> logs = auditLogRepository.search(
+                        AuditLogService.ACTION_ORDER_CANCEL, admin.getUserId(), AuditLogService.TARGET_ORDER,
+                        pendingOrder.getOrderId(), null, null,
+                        org.springframework.data.domain.PageRequest.of(0, 10))
+                .getContent();
+
+        assertThat(logs).hasSize(1);
+        assertThat(logs.get(0).getReason()).isEqualTo("통합테스트 취소 사유");
+        assertThat(logs.get(0).getAdminLoginId()).isEqualTo(admin.getLoginId());
     }
 }
