@@ -34,7 +34,7 @@ import com.teamfp.aistock.domain.stock.dto.StockPriceDto;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.redis.RedisPendingOrderService;
-import com.teamfp.aistock.global.redis.RedisStockCacheService;
+import com.teamfp.aistock.domain.stock.service.StockQuoteService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -55,12 +55,8 @@ public class OrderService {
     // getMyHoldings()의 "보유종목 조회 + 시세 배치 조회 + 평단가 폴백"은 AccountService.
     // getProfit()과 똑같은 절차라 HoldingValuationService로 공용화했다(코드리뷰 반영).
     private final HoldingValuationService holdingValuationService;
-    // 현재가는 도메인 간 서비스 호출(domain.stock.StockService)이 아니라
-    // global/redis 서비스를 직접 조회한다 — feature/stock-price가 아직 구현 전이라
-    // StockService에 의존하면 이 기능이 그쪽 완료를 기다려야 하고, CLAUDE.md 7번
-    // 규칙상 Redis 접근은 어차피 global/redis 서비스를 통해서만 하도록 되어 있어
-    // 직접 주입이 규칙에도 어긋나지 않는다.
-    private final RedisStockCacheService redisStockCacheService;
+    // 실시간 캐시가 없으면 LS REST 조회로 서버 검증된 시세와 종목명을 얻는다.
+    private final StockQuoteService stockQuoteService;
     // 지정가 미체결 주문 대기 목록(pending:orders:{stockCode}) 관리도 같은 이유로
     // global/redis 서비스를 직접 주입받아 쓴다.
     private final RedisPendingOrderService redisPendingOrderService;
@@ -87,7 +83,7 @@ public class OrderService {
      * NAMING.md 8-5 v8 항목: 진입 시 account.getStatus()가 SUSPENDED(관리자에 의한 계좌 거래
      * 정지)면 CustomException(ErrorCode.ACCOUNT_SUSPENDED)를 던진다.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public CreateOrderResponse createMarketOrder(Long userId, CreateOrderRequest request) {
         Account account = accountService.getOwnedAccount(userId, request.accountId());
         if (account.getStatus() == AccountStatus.SUSPENDED) {
@@ -95,14 +91,14 @@ public class OrderService {
         }
 
         // 캐시(TTL 5초)에 최근 tick이 없으면 null — 종목 자체가 없는 게 아니라 시세를 일시적으로
-        // 못 가져오는 상황이므로 STOCK_NOT_FOUND(종목 없음)와 구분되는 전용 코드를 쓴다.
-        StockPriceDto priceDto = redisStockCacheService.getStockPrice(request.stockCode());
+        // REST 조회도 실패하면 종목 없음과 구분되는 시세 조회 오류를 반환한다.
+        StockPriceDto priceDto = stockQuoteService.getStockPrice(request.stockCode());
         if (priceDto == null) {
             throw new CustomException(ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
         }
 
         long currentPrice = priceDto.getCurrentPrice();
-        long totalAmount = currentPrice * request.quantity();
+        long totalAmount = calculateTotal(currentPrice, request.quantity());
         long balanceBefore = account.getBalance();
 
         if (request.orderType() == OrderType.BUY) {
@@ -155,7 +151,8 @@ public class OrderService {
     private void executeSell(Account account, CreateOrderRequest request, long totalAmount) {
         Holding holding = findHolding(account, request.stockCode())
                 .orElseThrow(() -> new CustomException(ErrorCode.INSUFFICIENT_HOLDING));
-        if (holding.getQuantity() < request.quantity()) {
+        int reserved = orderRepository.sumPendingSellQuantity(account.getAccountId(), request.stockCode());
+        if (holding.getQuantity() - reserved < request.quantity()) {
             throw new CustomException(ErrorCode.INSUFFICIENT_HOLDING);
         }
 
@@ -163,6 +160,11 @@ public class OrderService {
         holdingSettlementService.decrease(holding, request.quantity());
     }
 
+    private long calculateTotal(long price, int quantity) {
+        if (price <= 0 || quantity <= 0) throw new CustomException(ErrorCode.INVALID_INPUT);
+        try { return Math.multiplyExact(price, (long) quantity); }
+        catch (ArithmeticException e) { throw new CustomException(ErrorCode.INVALID_INPUT); }
+    }
     private Optional<Holding> findHolding(Account account, String stockCode) {
         return holdingRepository.findByAccountIdAndStockCode(account.getAccountId(), stockCode);
     }
@@ -203,7 +205,7 @@ public class OrderService {
             throw new CustomException(ErrorCode.INVALID_INPUT);
         }
 
-        long totalAmount = request.orderPrice() * request.quantity();
+        long totalAmount = calculateTotal(request.orderPrice(), request.quantity());
         long balanceBefore = account.getBalance();
         String stockName;
 
@@ -220,7 +222,7 @@ public class OrderService {
             if (existingHolding.isPresent()) {
                 stockName = existingHolding.get().getStockName();
             } else {
-                StockPriceDto priceDto = redisStockCacheService.getStockPrice(request.stockCode());
+                StockPriceDto priceDto = stockQuoteService.getStockPrice(request.stockCode());
                 if (priceDto == null) {
                     throw new CustomException(ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
                 }

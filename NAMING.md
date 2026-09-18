@@ -1512,3 +1512,36 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 > 요청이 그대로 통과해 전체 테이블을 한 번에 긁어올 수 있었다. 컨트롤러마다 검증을 반복하는
 > 대신 `application.yml`의 `spring.data.web.pageable.max-page-size: 100`으로 전역 상한을 건다
 > (Spring Data Web `PageableHandlerMethodArgumentResolver`가 요청 `size`를 이 값으로 clamp).
+# 프론트 기능 완성 API (2026-09-09)
+
+- `RealizedReturnService.getReturns/calculateReturns`, `RealizedReturnController`, `RealizedReturnResponse(orderId, stockCode, stockName, quantity, averageCost, sellPrice, profitAmount, profitRate, executedAt)`: GET `/api/accounts/{accountId}/returns`. 체결 순서대로 매수 평균단가(원 단위 내림)를 재현하여 매도 실현손익 계산. 수수료·배당·이자는 현재 모의주문 원장에 없어 계산에 포함하지 않는다.
+
+- `RedisAuthCodeService.VERIFY_EMAIL_SCRIPT`: 인증 코드 검증·실패횟수 제한·원자적 소비. 신규 API 복구 요청의 인증코드 재사용 및 무제한 추측 방지.
+- `SignupRequest.investmentLevel`: 가입 화면에서 선택한 투자 경험을 기존 투자 프로필에 저장.
+
+- `UserWithdrawalService.withdraw`: DELETE `/api/users/me`, `PasswordVerifyRequest`로 현재 비밀번호 확인. 계좌 잠금, 자식 데이터 삭제, 개인정보 익명화, Redis 주문/인증 정리. 마지막 활성 관리자 탈퇴 방지.
+
+- `MarketQueryService.getIndexes`, `getResearch`: GET `/api/market/indexes`, GET `/api/market/stocks/{stockCode}/research?section=finance|earnings|dividend|peers|analysts`. DART/LS 실데이터로 조회, 자료가 없으면 빈 목록 또는 명시적 오류 응답.
+
+- `PlanningPreferences` / Repository / Service / Controller, `PlanningPreferencesRequest(savedBriefingDates, linkedBriefingDates, linkedGoalPlanIds)`: GET/PUT `/api/ai/planning/preferences`. 본인 브리핑 저장과 AI 자료 연동 설정. `getPreferences`, `savePreferences`, `describeConnections`, `updateSelections`. 사용자 소유권 검증, 목록 개수 제한, 낙관적 잠금 적용.
+
+- `MarketQueryController`, `MarketQueryService`: GET `/api/market/rankings?sort=volume|value|change|market-cap`, GET `/api/market/stocks/{stockCode}/history?months=12`, GET `/api/market/stocks/{stockCode}/detail`, GET `/api/market/news?query=`. 기존 LS/네이버 클라이언트 재사용. `getRankings`, `getHistory`, `getDetail`, `getNews`.
+- `AiNewsService.getBriefingHistory`, `getBriefing`, `NewsBriefingRepository.findTop100ByUserUserIdOrderByBriefingDateDesc`: GET `/api/ai/news/briefings`, GET `/api/ai/news/briefings/{date}`. 날짜별 본인 소유 브리핑만 조회.
+
+- `GoalPlan`, `GoalPlanRepository`, `GoalPlanService`, `GoalPlanController`, `GoalPlanRequest(goal, monthlyPayment, years, annualReturn, aggressive)`, `GoalPlanResponse(planId, settings, futureValue, aggressiveFutureValue, saved, createdAt)`.
+- `/api/goal-plans`: POST 계산·저장, GET 본인 목록, PATCH `/{planId}/saved` 북마크, DELETE `/{planId}` 삭제. 기존 단일종목 12개월 시뮬레이션과 분리한 장기 적립식 계산. `calculateFutureValue`, `createPlan`, `getPlans`, `savePlan`, `deletePlan`.
+
+- `UserService.getInvestmentProfile`, `updateInvestmentProfile`, `InvestmentProfile.updatePreferences`, `InvestmentProfileUpdateRequest(investmentTendency, fundTendency, investmentLevel)`: GET/PUT `/api/users/me/investment-profile`.
+- `UserInfoResponse.birthdate`, `UpdateUserRequest.birthdate`, `User.updateBirthdate`: 생년월일 조회/수정.
+
+- `AuthController` / `AuthService`: `checkLoginId`, `findLoginId`, `resetPassword`.
+- `LoginIdCheckResponse(loginId, available)`: GET `/api/auth/login-id/availability?loginId=`.
+- `AccountRecoveryRequest(loginId, name, email, birthdate, code, newPassword)`: POST `/api/auth/find-id`, POST `/api/auth/password/reset`. 이메일 인증코드를 직접 소비하며 계정 정보 일치를 확인한다.
+- `findLoginId` 응답은 인증된 본인의 아이디 문자열. `resetPassword`는 기존 Refresh Token을 폐기한다.
+# 2026-09-09 UI 연동 추가 등록
+
+- MarketQueryService.getExchangeRate / MarketQueryController.getExchangeRate: 원/달러 환율 실응답(LS t3521 R/USDKRWSMBS), 미설정 시 MARKET_NOT_CONFIGURED.
+
+- OAuthProviderClient: authorizationUrl, getUserInfo — 제공자 실제 인증 URL/토큰/프로필 연동. OAuthAuthorizationController: authorize — 브라우저 세션에 state(10분) 보관, consumeState — 콜백 일회 검증.
+- ProfileUpdateRequest / UserService.updateProfile: 개인정보·성향·선택적 비밀번호를 한 트랜잭션에서 저장.
+- MarketQueryService.searchStock / MarketQueryController.searchStock: 종목명 또는 6자리 코드 검색.

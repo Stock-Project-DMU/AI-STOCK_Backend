@@ -46,7 +46,7 @@ public class LsInvestInfoApiClient extends LsApiClientSupport {
     @Value("${ls.investinfo-url}")
     private String investInfoUrl;
 
-    public LsInvestInfoApiClient(LsAccessTokenProvider accessTokenProvider, RestClient.Builder restClientBuilder) {
+    public LsInvestInfoApiClient(LsAccessTokenProvider accessTokenProvider, @org.springframework.beans.factory.annotation.Qualifier("lsRestClientBuilder") RestClient.Builder restClientBuilder) {
         super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
     }

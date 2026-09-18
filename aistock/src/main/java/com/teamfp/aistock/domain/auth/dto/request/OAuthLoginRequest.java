@@ -15,4 +15,7 @@ public class OAuthLoginRequest {
 
     @NotBlank(message = "인증 코드는 필수 입력 값입니다.")
     private String code;
+
+    @NotBlank(message = "인증 상태 값은 필수입니다.")
+    private String state;
 }

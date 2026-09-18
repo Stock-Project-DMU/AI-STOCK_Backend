@@ -29,7 +29,7 @@ public class LsEtfApiClient extends LsApiClientSupport {
     @Value("${ls.etf-url}")
     private String etfUrl;
 
-    public LsEtfApiClient(LsAccessTokenProvider accessTokenProvider, RestClient.Builder restClientBuilder) {
+    public LsEtfApiClient(LsAccessTokenProvider accessTokenProvider, @org.springframework.beans.factory.annotation.Qualifier("lsRestClientBuilder") RestClient.Builder restClientBuilder) {
         super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
     }

@@ -16,6 +16,7 @@ import java.time.LocalDate;
 public class SignupRequest {
 
     @NotBlank(message = "아이디는 필수 입력 값입니다.")
+    @Pattern(regexp = "[A-Za-z0-9_]{4,50}", message = "아이디는 영문, 숫자, 밑줄 4~50자입니다.")
     private String loginId;
 
     @NotBlank(message = "비밀번호는 필수 입력 값입니다.")
@@ -44,4 +45,5 @@ public class SignupRequest {
 
     // role=ADMIN일 때만 필수 (서비스 계층에서 ADMIN_SIGNUP_CODE와 대조)
     private String adminCode;
+    private com.teamfp.aistock.domain.user.entity.InvestmentLevel investmentLevel;
 }

@@ -10,7 +10,8 @@ public record UserInfoResponse(
         String name,
         String email,
         Role role,
-        UserStatus status
+        UserStatus status,
+        java.time.LocalDate birthdate
 ) {
 
     public static UserInfoResponse from(User user) {
@@ -20,7 +21,8 @@ public record UserInfoResponse(
                 user.getName(),
                 user.getEmail(),
                 user.getRole(),
-                user.getStatus()
+                user.getStatus(),
+                user.getBirthdate()
         );
     }
 }

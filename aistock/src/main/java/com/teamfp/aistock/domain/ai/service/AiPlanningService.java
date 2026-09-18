@@ -103,6 +103,7 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @RequiredArgsConstructor
 public class AiPlanningService {
+    private final PlanningPreferencesService planningPreferencesService;
 
     // DART 사업보고서는 회계연도가 끝난 다음 해에 공시되므로, 안정적으로 존재하는 "작년" 실적을 조회한다.
     private static final int DART_YEAR_OFFSET = 1;
@@ -2415,6 +2416,7 @@ public class AiPlanningService {
         findPrimaryHolding(userId).ifPresent(holding ->
                 promptBuilder.append("[보유종목]\n").append(describeHolding(holding)).append('\n'));
 
+        promptBuilder.append(planningPreferencesService.describeConnections(userId));
         promptBuilder.append("[사용자 질문]\n").append(userContent);
         return promptBuilder.toString();
     }

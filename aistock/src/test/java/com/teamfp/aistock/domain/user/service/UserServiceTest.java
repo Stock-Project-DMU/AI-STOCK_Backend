@@ -79,6 +79,20 @@ class UserServiceTest {
                 .build();
     }
 
+    @Test
+    @DisplayName("기본 정보만 저장하면 설문 결과를 조회하거나 변경하지 않는다")
+    void updateProfileWithoutInvestmentPreservesSurvey() {
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("current-password", "encoded-old-password")).thenReturn(true);
+        var request = new com.teamfp.aistock.domain.user.dto.request.ProfileUpdateRequest(
+                "current-password", new UpdateUserRequest("새이름", "old@example.com"), null, null);
+
+        UserInfoResponse response = userService.updateProfile(USER_ID, request);
+
+        assertThat(response.name()).isEqualTo("새이름");
+        org.mockito.Mockito.verifyNoInteractions(investmentProfileRepository);
+    }
+
     @Nested
     @DisplayName("내 정보 조회")
     class GetMyInfo {
@@ -162,7 +176,7 @@ class UserServiceTest {
     class SaveSurvey {
 
         private SurveyRequest requestOf(int investmentTendency, int fundTendency) {
-            return new SurveyRequest(List.of(1, 2, 3), investmentTendency, fundTendency);
+            return new SurveyRequest(List.of(1, 2, 3, 1, 4, 5, 3, 3), investmentTendency, fundTendency);
         }
 
         @Test
@@ -174,6 +188,7 @@ class UserServiceTest {
             InvestmentProfileResponse response = userService.saveSurvey(USER_ID, requestOf(4, 2));
 
             assertThat(response.investmentTendency()).isEqualTo(4);
+            assertThat(response.investmentLevel()).isEqualTo(com.teamfp.aistock.domain.user.entity.InvestmentLevel.EXPERT);
             assertThat(response.fundTendency()).isEqualTo(2);
             verify(investmentProfileRepository).save(any(InvestmentProfile.class));
         }
@@ -192,6 +207,7 @@ class UserServiceTest {
             InvestmentProfileResponse response = userService.saveSurvey(USER_ID, requestOf(5, 3));
 
             assertThat(response.investmentTendency()).isEqualTo(5);
+            assertThat(response.investmentLevel()).isEqualTo(com.teamfp.aistock.domain.user.entity.InvestmentLevel.EXPERT);
             assertThat(response.fundTendency()).isEqualTo(3);
             verify(investmentProfileRepository, never()).save(any(InvestmentProfile.class));
             verify(userRepository, never()).findById(anyLong()); // 갱신 시엔 User를 다시 조회할 필요가 없다

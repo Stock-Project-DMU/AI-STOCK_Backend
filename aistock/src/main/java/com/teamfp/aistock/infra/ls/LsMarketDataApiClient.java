@@ -51,7 +51,7 @@ public class LsMarketDataApiClient extends LsApiClientSupport {
     @Value("${ls.market-data-url}")
     private String marketDataUrl;
 
-    public LsMarketDataApiClient(LsAccessTokenProvider accessTokenProvider, RestClient.Builder restClientBuilder) {
+    public LsMarketDataApiClient(LsAccessTokenProvider accessTokenProvider, @org.springframework.beans.factory.annotation.Qualifier("lsRestClientBuilder") RestClient.Builder restClientBuilder) {
         super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
     }

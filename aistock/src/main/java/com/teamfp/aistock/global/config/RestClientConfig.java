@@ -23,11 +23,20 @@ public class RestClientConfig {
     private static final int READ_TIMEOUT_MS = 30_000;
 
     @Bean
+    @org.springframework.context.annotation.Primary
     public RestClient.Builder restClientBuilder() {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(CONNECT_TIMEOUT_MS);
         requestFactory.setReadTimeout(READ_TIMEOUT_MS);
 
         return RestClient.builder().requestFactory(requestFactory);
+    }
+
+    @Bean("lsRestClientBuilder")
+    public RestClient.Builder lsRestClientBuilder() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(1_000);
+        factory.setReadTimeout(3_000);
+        return RestClient.builder().requestFactory(factory);
     }
 }
