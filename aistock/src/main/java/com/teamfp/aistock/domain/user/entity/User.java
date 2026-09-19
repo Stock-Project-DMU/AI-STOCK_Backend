@@ -68,6 +68,23 @@ public class User {
     @Builder.Default
     private UserStatus status = UserStatus.ACTIVE;
 
+    @Column(name = "suspension_reason", length = 500)
+    private String suspensionReason;
+
+    @Column(name = "suspended_until")
+    private LocalDateTime suspendedUntil;
+
+    public UserStatus getStatus() {
+        return status == UserStatus.SUSPENDED && suspendedUntil != null
+                && !suspendedUntil.isAfter(LocalDateTime.now(java.time.ZoneId.of("Asia/Seoul")))
+                ? UserStatus.ACTIVE : status;
+    }
+
+    public void setSuspensionDetails(String reason, LocalDateTime until) {
+        this.suspensionReason = reason;
+        this.suspendedUntil = until;
+    }
+
     @Column(name = "is_active", nullable = false)
     private boolean isActive;
 
@@ -113,6 +130,8 @@ public class User {
 
     public void activate() {
         this.status = UserStatus.ACTIVE;
+        this.suspensionReason = null;
+        this.suspendedUntil = null;
     }
 
     /**
@@ -123,6 +142,8 @@ public class User {
         this.name = name;
         this.email = email;
     }
+
+    public void updateBirthdate(LocalDate birthdate) { this.birthdate = birthdate; }
 
     /**
      * 비밀번호 변경(ADMIN_API_BACKEND_HANDOFF.md 5.3). 이미 인코딩된 값을 그대로 저장한다 —

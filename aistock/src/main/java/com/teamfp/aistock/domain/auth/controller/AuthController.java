@@ -22,6 +22,22 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 public class AuthController {
 
+    @GetMapping("/login-id/availability")
+    public ApiResponse<com.teamfp.aistock.domain.auth.dto.response.LoginIdCheckResponse> checkLoginId(@RequestParam String loginId) {
+        return ApiResponse.success("아이디 중복 확인 결과입니다.", authService.checkLoginId(loginId));
+    }
+
+    @PostMapping("/find-id")
+    public ApiResponse<String> findLoginId(@Valid @RequestBody com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest request) {
+        return ApiResponse.success("아이디를 확인했습니다.", authService.findLoginId(request));
+    }
+
+    @PostMapping("/password/reset")
+    public ApiResponse<Void> resetPassword(@Valid @RequestBody com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest request) {
+        authService.resetPassword(request);
+        return ApiResponse.success("비밀번호가 변경되었습니다.", null);
+    }
+
     private final AuthService authService;
     private final JwtProvider jwtProvider;
 
@@ -38,7 +54,8 @@ public class AuthController {
      * 소셜 로그인 API (카카오, 네이버, 구글 통합)
      */
     @PostMapping("/oauth/login")
-    public ApiResponse<LoginResponse> socialLogin(@Valid @RequestBody OAuthLoginRequest request) {
+    public ApiResponse<LoginResponse> socialLogin(@Valid @RequestBody OAuthLoginRequest request, jakarta.servlet.http.HttpServletRequest servletRequest) {
+        OAuthAuthorizationController.consumeState(servletRequest.getSession(false), request.getProvider(), request.getState());
         LoginResponse response = authService.socialLogin(request);
         return ApiResponse.success("소셜 로그인에 성공했습니다.", response);
     }

@@ -18,6 +18,8 @@ import com.teamfp.aistock.global.util.ExternalApiInvoker;
 abstract class LsApiClientSupport {
 
     protected final RestClient restClient;
+    private final LsQuoteCache quoteCache = new LsQuoteCache(java.time.Clock.systemUTC());
+    private record QueryKey(String url, String tr, Map<String, Object> body, Map<String, String> headers) {}
 
     protected LsApiClientSupport(RestClient.Builder restClientBuilder) {
         this.restClient = restClientBuilder.build();
@@ -35,7 +37,16 @@ abstract class LsApiClientSupport {
     protected Map<String, Object> call(
             String url, String trCd, Map<String, Object> requestBody, String token, String errorLabel,
             Map<String, String> extraHeaders) {
-        return ExternalApiInvoker.call(() -> {
+        long ttl = switch (trCd) {
+            case "t1102", "t1511", "t1901" -> 2_000;
+            case "t1452", "t1463", "t1441", "t1444" -> 10_000;
+            case "t1305" -> 60_000;
+            default -> 0;
+        };
+        QueryKey key = new QueryKey(url, trCd, requestBody, extraHeaders);
+        Map<String, Object> cached = ttl > 0 ? quoteCache.get(key) : null;
+        if (cached != null) return cached;
+        Map<String, Object> result = ExternalApiInvoker.call(() -> {
             RestClient.RequestBodySpec spec = restClient.post()
                     .uri(url)
                     .header("Authorization", "Bearer " + token)
@@ -47,6 +58,8 @@ abstract class LsApiClientSupport {
                     .retrieve()
                     .body(new ParameterizedTypeReference<Map<String, Object>>() { });
         }, errorLabel);
+        quoteCache.put(key, result, ttl);
+        return result;
     }
 
     protected String stringOf(Object value) {

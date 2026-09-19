@@ -7,8 +7,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotEmpty;
 
 /**
- * 투자성향 설문 결과 제출 요청 DTO. investmentLevel(초보자/중급자/전문가)은 이 설문으로
- * 바꾸지 않는다 — 별도 평가 로직은 이번 범위 밖이라 기존 값(신규 작성 시 기본 BEGINNER)을 유지한다.
+ * 투자성향 설문 결과 제출 요청 DTO. 투자 레벨은 서버에서 금융 지식과 경험 기간 응답으로 계산한다.
  */
 public record SurveyRequest(
 

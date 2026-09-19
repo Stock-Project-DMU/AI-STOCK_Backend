@@ -178,6 +178,19 @@ public class AiNewsService {
         return NewsBriefingResponse.from(briefing, deserializeSourceLinks(briefing.getSourceLinksJson()));
     }
 
+    @Transactional(readOnly = true)
+    public List<NewsBriefingResponse> getBriefingHistory(Long userId) {
+        return newsBriefingRepository.findTop100ByUserUserIdOrderByBriefingDateDesc(userId).stream()
+                .map(briefing -> NewsBriefingResponse.from(briefing, deserializeSourceLinks(briefing.getSourceLinksJson()))).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public NewsBriefingResponse getBriefing(Long userId, LocalDate date) {
+        NewsBriefing briefing = newsBriefingRepository.findByUserIdAndBriefingDate(userId, date)
+                .orElseThrow(() -> new CustomException(ErrorCode.NEWS_BRIEFING_NOT_FOUND));
+        return NewsBriefingResponse.from(briefing, deserializeSourceLinks(briefing.getSourceLinksJson()));
+    }
+
     private void validateOutlet(String outletDomain) {
         if (!NewsRelevanceMatcher.OUTLET_NAMES.containsKey(outletDomain)
                 || UNRELIABLE_BRIEFING_OUTLET_DOMAINS.contains(outletDomain)) {

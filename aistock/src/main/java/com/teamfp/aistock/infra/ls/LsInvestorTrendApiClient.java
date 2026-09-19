@@ -55,7 +55,7 @@ public class LsInvestorTrendApiClient extends LsApiClientSupport {
     @Value("${ls.frgr-itt-url}")
     private String frgrIttUrl;
 
-    public LsInvestorTrendApiClient(LsAccessTokenProvider accessTokenProvider, RestClient.Builder restClientBuilder) {
+    public LsInvestorTrendApiClient(LsAccessTokenProvider accessTokenProvider, @org.springframework.beans.factory.annotation.Qualifier("lsRestClientBuilder") RestClient.Builder restClientBuilder) {
         super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
     }

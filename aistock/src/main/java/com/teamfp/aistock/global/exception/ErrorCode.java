@@ -72,6 +72,9 @@ public enum ErrorCode {
     EXTERNAL_API_ERROR(HttpStatus.BAD_GATEWAY, "EXTERNAL_API_ERROR", "외부 API 연동 중 에러가 발생했습니다."),
 
     // 503 Service Unavailable
+    MARKET_NOT_CONFIGURED(HttpStatus.SERVICE_UNAVAILABLE, "MARKET_NOT_CONFIGURED", "시장 데이터 제공자 설정이 아직 완료되지 않았습니다."),
+    OAUTH_NOT_CONFIGURED(HttpStatus.SERVICE_UNAVAILABLE, "OAUTH_NOT_CONFIGURED", "소셜 로그인 제공자 설정이 아직 완료되지 않았습니다."),
+    OAUTH_EMAIL_REQUIRED(HttpStatus.BAD_REQUEST, "OAUTH_EMAIL_REQUIRED", "소셜 로그인에는 인증된 이메일 제공 동의가 필요합니다."),
     STOCK_PRICE_NOT_AVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "STOCK_PRICE_NOT_AVAILABLE", "현재가 정보를 일시적으로 가져올 수 없습니다. 잠시 후 다시 시도해 주세요.");
 
     private final HttpStatus status;

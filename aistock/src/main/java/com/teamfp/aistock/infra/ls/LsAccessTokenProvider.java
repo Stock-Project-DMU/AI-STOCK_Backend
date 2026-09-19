@@ -20,15 +20,16 @@ import com.teamfp.aistock.infra.ls.dto.LsTokenResponse;
  * 복붙해 갖고 있던 걸 하나로 모았다 — REST 조회 클라이언트가 하나둘 늘어날 때마다 같은 로직이
  * 계속 늘어나는 걸 막기 위함이다.
  *
- * <p>{@link LsWebSocketClient}는 이 컴포넌트를 쓰지 않는다 — WebSocket은 연결 시점에 한 번만
- * 토큰을 받아 세션 내내 재사용하는 반면, 이 REST 조회들은 매 요청마다 새로 토큰을 발급받는
- * 단발성 호출이라 성격이 다르고, {@code ls.mode}(모의/실전) 조건과도 무관하게 항상 동작해야
- * 하기 때문이다(LsMarketDataApiClient 클래스 주석 참고).</p>
+ * <p>REST 조회는 만료 60초 전까지 토큰을 공유하며 동시 재발급을 직렬화한다.
+ * WebSocket 연결용 토큰은 기존 연결 생명주기를 유지한다.
  */
 @Component
 public class LsAccessTokenProvider {
 
     private final RestClient restClient;
+    private String cachedToken;
+    private long refreshAt;
+    private long retryAt;
 
     @Value("${ls.token-url}")
     private String tokenUrl;
@@ -39,11 +40,16 @@ public class LsAccessTokenProvider {
     @Value("${ls.app-secret}")
     private String appSecret;
 
-    public LsAccessTokenProvider(RestClient.Builder restClientBuilder) {
+    public LsAccessTokenProvider(@org.springframework.beans.factory.annotation.Qualifier("lsRestClientBuilder") RestClient.Builder restClientBuilder) {
         this.restClient = restClientBuilder.build();
     }
 
-    public String issueAccessToken() {
+    public synchronized String issueAccessToken() {
+        long now = System.currentTimeMillis();
+        if (cachedToken != null && now < refreshAt) return cachedToken;
+        if (now < retryAt) throw new CustomException(ErrorCode.EXTERNAL_API_ERROR);
+        // Serialize refreshes, including a short cooldown when LS is unavailable.
+        retryAt = now + 5_000;
         String formBody = "grant_type=client_credentials"
                 + "&appkey=" + URLEncoder.encode(appKey, StandardCharsets.UTF_8)
                 + "&appsecretkey=" + URLEncoder.encode(appSecret, StandardCharsets.UTF_8)
@@ -55,9 +61,13 @@ public class LsAccessTokenProvider {
                         .retrieve()
                         .body(LsTokenResponse.class),
                 "LS 토큰 발급 실패");
-        if (response == null || response.getAccessToken() == null) {
+        if (response == null || response.getAccessToken() == null || response.getAccessToken().isBlank()) {
             throw new CustomException(ErrorCode.EXTERNAL_API_ERROR);
         }
-        return response.getAccessToken();
+        cachedToken = response.getAccessToken();
+        long ttlSeconds = Math.max(0, response.getExpiresIn() - 60);
+        refreshAt = now + ttlSeconds * 1_000;
+        retryAt = 0;
+        return cachedToken;
     }
 }

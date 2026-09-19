@@ -69,7 +69,7 @@ public class LsMarketDataApiClient extends LsApiClientSupport {
     public LsMarketDataApiClient(
             LsAccessTokenProvider accessTokenProvider,
             Optional<LsLocalMarketDataReader> localMarketDataReader,
-            RestClient.Builder restClientBuilder) {
+            @org.springframework.beans.factory.annotation.Qualifier("lsRestClientBuilder") RestClient.Builder restClientBuilder) {
         super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
         this.localMarketDataReader = localMarketDataReader;
