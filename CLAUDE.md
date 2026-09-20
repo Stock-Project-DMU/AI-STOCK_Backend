@@ -229,9 +229,10 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
 - **서버 시작 순서**: `@PostConstruct`로 DB PENDING 주문 Redis 재적재 완료 후 LS WebSocket 연결
 - **LS 재연결**: 지수 백오프 (1→2→4→최대 30초)
 - **LS mock 모드**: `ls.mode=mock`이면 `LsMarketDataApiClient.getCurrentPrice()`가 실제 LS API
-  대신 `LsLocalMarketDataReader`(`ls.local-data-path` 디렉토리의 `{stockCode}.json` 파일)로
-  시세를 공급한다. mock 전환 대상은 현재 `getCurrentPrice()` 하나뿐이며, 나머지 LS REST
-  메서드와 `LsAccessTokenProvider`는 `ls.mode`와 무관하게 항상 실제 LS API를 호출한다.
+  대신 `LsLocalMarketDataReader`(`ls.local-data-path` 디렉토리의 `market_data.json` 단일 파일 —
+  종목코드를 키로 하는 맵, local-market-data-generator가 생성)로 시세를 공급한다. mock 전환
+  대상은 현재 `getCurrentPrice()` 하나뿐이며, 나머지 LS REST 메서드와 `LsAccessTokenProvider`는
+  `ls.mode`와 무관하게 항상 실제 LS API를 호출한다.
 - **Gemini 호출 전** 반드시 `RedisRateLimiterService` 통과, 초과 시 429 즉시 반환
 - **온라인 추적**: `StompAuthInterceptor`의 CONNECT/DISCONNECT 시점에 `RedisOnlineStatusService`로
   `admin:online:users` 갱신. 클라이언트가 비정상 종료해 DISCONNECT 프레임 없이 끊기는 경우를

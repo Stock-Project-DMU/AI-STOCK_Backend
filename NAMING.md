@@ -775,11 +775,13 @@ confirmedCurrentPrices`(`executeTool()`이 `aiToolTaskExecutor`로 동시 실행
 **`LsLocalMarketDataReader`(`infra/ls`, feature/ls-local-data, 2026-08-30 추가)** — `ls.mode=mock`에서
 LS 실시간 시세 대신 로컬 파일로 시세를 공급하는 컴포넌트. 위 10개 REST 클라이언트와 달리 LS API를
 호출하지 않으므로(TR코드/`Authorization` 헤더 없음) `LsApiClientSupport`를 상속하지 않는다.
-`${ls.local-data-path}` 디렉토리에서 `{stockCode}.json` 파일을 읽어 `LsCurrentPriceDetailDto`로
-반환한다 — 파일은 LS 원본 TR 필드(hname/price/...)가 아니라 DTO 필드명(stockCode/currentPrice/...)으로
-이미 매핑된 형태를 그대로 역직렬화한다. 공개 메서드: `getCurrentPrice(String stockCode)` — 파일이
-없거나 파싱에 실패하면 다른 REST 클라이언트와 동일하게 `Optional.empty()`를 반환한다(예외를
-던지지 않음).
+`${ls.local-data-path}` 디렉토리에서 `market_data.json` 단일 파일(종목코드를 키로, 값은
+`LsCurrentPriceDetailDto` 필드로 매핑된 맵 — local-market-data-generator가 코스피·코스닥 상위
+100종목을 이 파일 하나에 통합 저장)을 읽어 종목코드 키의 값을 꺼낸다 — 파일은 LS 원본 TR
+필드(hname/price/...)가 아니라 DTO 필드명(stockCode/currentPrice/...)으로 이미 매핑된 형태를
+그대로 역직렬화한다. 공개 메서드: `getCurrentPrice(String stockCode)` — 파일이 없거나 파싱에
+실패하거나 해당 종목코드 키가 없으면 다른 REST 클라이언트와 동일하게 `Optional.empty()`를
+반환한다(예외를 던지지 않음).
 
 `@ConditionalOnProperty(name = "ls.mode", havingValue = "mock")`로 `ls.mode=mock`일 때만 빈으로
 생성된다(`LsWebSocketClient`의 real 전용 조건과 정반대, A-4 2026-08-30 추가). `LsMarketDataApiClient`가
