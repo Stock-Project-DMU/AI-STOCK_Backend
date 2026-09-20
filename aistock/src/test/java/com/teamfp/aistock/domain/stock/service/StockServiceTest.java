@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.DisplayName;
@@ -16,17 +17,20 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.teamfp.aistock.domain.stock.dto.HogaDto;
 import com.teamfp.aistock.domain.stock.dto.PriceDirection;
 import com.teamfp.aistock.domain.stock.dto.StockPriceDto;
+import com.teamfp.aistock.domain.stock.dto.response.HogaResponse;
 import com.teamfp.aistock.domain.stock.dto.response.StockPriceResponse;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.redis.RedisStockCacheService;
 import com.teamfp.aistock.infra.ls.LsLocalMarketDataReader;
 import com.teamfp.aistock.infra.ls.dto.LsCurrentPriceDetailDto;
+import com.teamfp.aistock.infra.ls.dto.LsHogaData;
 
 /**
- * StockService.getCurrentPrice()의 ls.mode=mock/real 분기 단위 테스트
+ * StockService.getCurrentPrice()/getHoga()의 ls.mode=mock/real 분기 단위 테스트
  * (feature/ls-local-data). LsMarketDataApiClientTest의 GetCurrentPriceMockBranch와 동일하게,
  * localMarketDataReader 주입 여부(Optional.empty()=real, Optional.of(...)=mock)로 분기를 갈라
  * 검증한다.
@@ -119,6 +123,85 @@ class StockServiceTest {
                     .isEqualTo(ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
 
             verify(redisStockCacheService, never()).getStockPrice(STOCK_CODE);
+        }
+    }
+
+    @Nested
+    @DisplayName("호가 조회 real 분기 (ls.mode=real, localMarketDataReader 없음)")
+    class GetHogaRealBranch {
+
+        @Test
+        @DisplayName("Redis 캐시에 호가가 있으면 그 값을 그대로 응답으로 변환한다")
+        void success_returnsRedisCachedHoga() {
+            StockService service = new StockService(redisStockCacheService, Optional.empty());
+            HogaDto cached = HogaDto.builder()
+                    .stockCode(STOCK_CODE)
+                    .askPrices(List.of(71100L, 71200L))
+                    .askVolumes(List.of(100L, 200L))
+                    .bidPrices(List.of(71000L, 70900L))
+                    .bidVolumes(List.of(150L, 250L))
+                    .build();
+            when(redisStockCacheService.getHogaData(STOCK_CODE)).thenReturn(cached);
+
+            HogaResponse result = service.getHoga(STOCK_CODE);
+
+            assertThat(result.stockCode()).isEqualTo(STOCK_CODE);
+            assertThat(result.askPrices()).isEqualTo(List.of(71100L, 71200L));
+        }
+
+        @Test
+        @DisplayName("Redis 캐시가 비어있으면 STOCK_PRICE_NOT_AVAILABLE을 던진다")
+        void throws_whenRedisCacheMiss() {
+            StockService service = new StockService(redisStockCacheService, Optional.empty());
+            when(redisStockCacheService.getHogaData(STOCK_CODE)).thenReturn(null);
+
+            assertThatThrownBy(() -> service.getHoga(STOCK_CODE))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
+        }
+    }
+
+    @Nested
+    @DisplayName("호가 조회 mock 분기 (ls.mode=mock, localMarketDataReader 존재)")
+    class GetHogaMockBranch {
+
+        @Mock
+        private LsLocalMarketDataReader localMarketDataReader;
+
+        @Test
+        @DisplayName("localMarketDataReader가 값을 반환하면 Redis를 거치지 않고 그 값을 응답으로 변환한다")
+        void success_usesLocalReader_andSkipsRedis() {
+            StockService service = new StockService(redisStockCacheService, Optional.of(localMarketDataReader));
+            LsHogaData local = LsHogaData.builder()
+                    .stockCode(STOCK_CODE)
+                    .askPrices(List.of(78600L, 78700L, 78800L, 78900L, 79000L))
+                    .askVolumes(List.of(100L, 200L, 300L, 400L, 500L))
+                    .bidPrices(List.of(78500L, 78400L, 78300L, 78200L, 78100L))
+                    .bidVolumes(List.of(150L, 250L, 350L, 450L, 550L))
+                    .build();
+            when(localMarketDataReader.getHoga(STOCK_CODE)).thenReturn(Optional.of(local));
+
+            HogaResponse result = service.getHoga(STOCK_CODE);
+
+            assertThat(result.stockCode()).isEqualTo(STOCK_CODE);
+            assertThat(result.askPrices()).isEqualTo(List.of(78600L, 78700L, 78800L, 78900L, 79000L));
+            assertThat(result.bidVolumes()).isEqualTo(List.of(150L, 250L, 350L, 450L, 550L));
+            verifyNoInteractions(redisStockCacheService);
+        }
+
+        @Test
+        @DisplayName("localMarketDataReader가 빈 값을 반환하면 Redis로 폴백하지 않고 STOCK_PRICE_NOT_AVAILABLE을 던진다")
+        void throws_whenLocalReaderEmpty_noFallbackToRedis() {
+            StockService service = new StockService(redisStockCacheService, Optional.of(localMarketDataReader));
+            when(localMarketDataReader.getHoga(STOCK_CODE)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.getHoga(STOCK_CODE))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
+
+            verify(redisStockCacheService, never()).getHogaData(STOCK_CODE);
         }
     }
 }
