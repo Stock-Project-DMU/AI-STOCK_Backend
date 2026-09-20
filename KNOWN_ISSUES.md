@@ -62,3 +62,25 @@
   검토가 필요하다.
 - **후속 조치**: `real` 모드로 실제 운영 부하를 겪어보고 지연·롤백이 실제로 문제가 되면
   별도 브랜치에서 트랜잭션 분리를 진행한다.
+
+---
+
+## 4. `/api/stocks/{code}/hoga`는 ls.mode=mock에서 여전히 STOCK_PRICE_NOT_AVAILABLE
+
+- **등록**: `StockService.getCurrentPrice()`를 mock 모드에서 `LsLocalMarketDataReader`로
+  대체한 브랜치(2번 항목과 별개 이슈로 분리 등록)
+- **현상**: `getCurrentPrice()`는 mock 모드에서 `LsLocalMarketDataReader`(local-market-data-
+  generator가 만드는 `market_data.json`)로 대체했지만, `getHoga()`는 그대로 Redis
+  (`stock:hoga:{stockCode}`)만 본다. `market_data.json`의 값 타입인
+  `LsCurrentPriceDetailDto`에는 애초에 매수/매도 5단계 호가(HogaDto: askPrices/bidPrices 등)
+  필드 자체가 없어 대체할 데이터 소스가 없다.
+- **영향**: mock 모드(dev 기본값)에서 `/api/stocks/{code}/hoga`는 항상 503
+  (STOCK_PRICE_NOT_AVAILABLE)을 반환한다. 프론트 종목 상세 화면의 실시간 호가창은
+  이 API 실패 시 화면 자체 샘플 데이터로 대체 표시된다.
+- **이번 브랜치 처리**: 수정하지 않는다(범위 밖). 없는 데이터를 임의로 합성해 보여주면
+  실제 시세를 왜곡하게 되므로, 명확한 데이터 소스 없이 fallback을 만들지 않았다.
+- **후속 조치**: 2번 항목의 `MockLsDataGenerator`를 만들 때 호가 5단계까지 함께
+  생성하도록 범위를 넉넉히 잡거나(가장 근본적인 해결), 그전까지 필요하면
+  `local-market-data-generator`가 `market_data.json`에 `askPrices`/`bidPrices` 등을
+  추가로 채워 넣고 `LsLocalMarketDataReader`/`HogaDto` 양쪽에 매핑을 추가하는 방향도
+  검토할 수 있다.
