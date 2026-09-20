@@ -14,6 +14,7 @@ import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.redis.RedisStockCacheService;
 import com.teamfp.aistock.infra.ls.LsLocalMarketDataReader;
 import com.teamfp.aistock.infra.ls.dto.LsCurrentPriceDetailDto;
+import com.teamfp.aistock.infra.ls.dto.LsHogaData;
 
 import lombok.RequiredArgsConstructor;
 
@@ -67,17 +68,37 @@ public class StockService {
     }
 
     /**
-     * 호가 조회. getCurrentPrice()와 동일한 이유로 캐시 미스는 STOCK_PRICE_NOT_AVAILABLE로 처리한다.
+     * 호가 조회.
      *
-     * ls.mode=mock이어도 이 메서드는 getCurrentPrice()와 달리 여전히 Redis만 본다 —
-     * market_data.json(LsCurrentPriceDetailDto)에는 매수/매도 호가 데이터 자체가 없어
-     * LsLocalMarketDataReader로 대체할 수 없다(KNOWN_ISSUES.md 4번).
+     * ls.mode=real이면 기존과 동일하게 Redis 캐시(TTL 2초)에서 읽으며, 캐시 미스는
+     * getCurrentPrice()와 동일한 이유로 STOCK_PRICE_NOT_AVAILABLE로 처리한다.
+     *
+     * ls.mode=mock이면 getCurrentPrice()와 동일하게 Redis 대신 LsLocalMarketDataReader로
+     * market_data.json의 호가 필드(askPrices 등, local-market-data-generator가 t1101로 채운다)를
+     * 직접 읽는다 — mock 모드에서는 LsWebSocketClient가 없어 Redis 호가 캐시도 애초에 채워지지
+     * 않기 때문이다(KNOWN_ISSUES.md 2번).
      */
     public HogaResponse getHoga(String stockCode) {
+        if (localMarketDataReader.isPresent()) {
+            LsHogaData local = localMarketDataReader.get().getHoga(stockCode)
+                    .orElseThrow(() -> new CustomException(ErrorCode.STOCK_PRICE_NOT_AVAILABLE));
+            return toHogaResponse(local);
+        }
+
         HogaDto dto = redisStockCacheService.getHogaData(stockCode);
         if (dto == null) {
             throw new CustomException(ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
         }
         return HogaResponse.from(dto);
+    }
+
+    private HogaResponse toHogaResponse(LsHogaData dto) {
+        return new HogaResponse(
+                dto.getStockCode(),
+                dto.getAskPrices(),
+                dto.getAskVolumes(),
+                dto.getBidPrices(),
+                dto.getBidVolumes()
+        );
     }
 }
