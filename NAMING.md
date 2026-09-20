@@ -772,23 +772,27 @@ confirmedCurrentPrices`(`executeTool()`이 `aiToolTaskExecutor`로 동시 실행
 | `LsEtcApiClient` | `etc-url` | `getCollateralLoanEligibility(String stockCode)`→`CLNAQ00100`(예탁담보융자가능종목현황조회), `getMarginRequirement(String stockCode)`→t1411(증거금율별종목조회), `getMarginTradingTrend(String stockCode)`→t1921(신용거래동향, 최근 5일 — LS API 자체에 기간 파라미터가 없어 확장 불가, 2026-08-13 전수조사로 확인), `getSecuritiesLendingTrend(String stockCode)`/`getSecuritiesLendingTrend(String stockCode, Integer periodMonths)`→t1941(종목별대차거래일간추이, periodMonths 없으면 최근 7일·최대 5건, 있으면 최대 24개월=2년, 2026-08-13 추가), `getNewListings()`/`getNewListings(Integer periodMonths)`→t1403(신규상장종목조회, periodMonths 없으면 최근 6개월·최대 10건, 있으면 최대 24개월=2년·최대 50건, 2026-08-13 추가), `getRecentShortSellingTrend(String stockCode)`/`getShortSellingTrend(String stockCode, Integer periodMonths)`→t1927(공매도일별추이, periodMonths 없으면 최근 7일·최대 5건, 있으면 최대 24개월=2년, 2026-08-13 추가), `getStockMasterInfo(String stockCode)`→t8436(주식종목조회API용) |
 | `LsIndustryApiClient` | `industry-url`(`/indtp/market-data`, 기존에 전혀 구현 안 돼 있던 업종 카테고리) | `getCurrentPrice(String marketName)`→t1511(업종현재가), `getRecentTrend(String marketName)`/`getTrend(String marketName, Integer periodMonths)`→t1514(업종기간별추이, periodMonths 없으면 일봉 최근 5건, 있으면 월봉(gubun2=3)으로 전환해 최대 24개월=2년, 2026-08-13 추가), `getExpectedIndex(String marketName, String callAuctionSession)`→t1485(예상지수, 시간대 게이트는 호출부 책임). `marketName`은 `코스피`→`001`/`코스닥`→`301`로 매핑 |
 
-**`LsLocalMarketDataReader`(`infra/ls`, feature/ls-local-data, 2026-08-30 추가)** — `ls.mode=mock`에서
-LS 실시간 시세 대신 로컬 파일로 시세를 공급하는 컴포넌트. 위 10개 REST 클라이언트와 달리 LS API를
-호출하지 않으므로(TR코드/`Authorization` 헤더 없음) `LsApiClientSupport`를 상속하지 않는다.
-`${ls.local-data-path}` 디렉토리에서 `market_data.json` 단일 파일(종목코드를 키로, 값은
-`LsCurrentPriceDetailDto` 필드로 매핑된 맵 — local-market-data-generator가 코스피·코스닥 상위
-100종목을 이 파일 하나에 통합 저장)을 읽어 종목코드 키의 값을 꺼낸다 — 파일은 LS 원본 TR
-필드(hname/price/...)가 아니라 DTO 필드명(stockCode/currentPrice/...)으로 이미 매핑된 형태를
-그대로 역직렬화한다. 공개 메서드: `getCurrentPrice(String stockCode)` — 파일이 없거나 파싱에
-실패하거나 해당 종목코드 키가 없으면 다른 REST 클라이언트와 동일하게 `Optional.empty()`를
-반환한다(예외를 던지지 않음).
+**`LsLocalMarketDataReader`(`infra/ls`, feature/ls-local-data, 2026-08-30 추가, 2026-09-20 호가
+지원 추가)** — `ls.mode=mock`에서 LS 실시간 시세·호가 대신 로컬 파일로 공급하는 컴포넌트. 위 10개
+REST 클라이언트와 달리 LS API를 호출하지 않으므로(TR코드/`Authorization` 헤더 없음)
+`LsApiClientSupport`를 상속하지 않는다. `${ls.local-data-path}` 디렉토리에서 `market_data.json`
+단일 파일(종목코드를 키로 하는 맵 — local-market-data-generator가 코스피·코스닥 상위 100종목의
+t1102(현재가)·t1101(호가) 조회 결과를 종목당 JSON 객체 하나에 합쳐 이 파일 하나에 통합 저장)을
+읽는다 — 파일은 LS 원본 TR 필드(hname/price/offerho1/...)가 아니라 DTO 필드명
+(stockCode/currentPrice/askPrices/...)으로 이미 매핑된 형태를 그대로 역직렬화한다. 공개 메서드:
+`getCurrentPrice(String stockCode)`→종목코드 키의 값을 `LsCurrentPriceDetailDto`로,
+`getHoga(String stockCode)`→같은 키의 값을 `LsHogaData`로 각각 따로 역직렬화한다(서로 자기 DTO에
+없는 필드는 무시 — `ObjectMapper.FAIL_ON_UNKNOWN_PROPERTIES=false`). 둘 다 파일이 없거나 파싱에
+실패하거나 해당 종목코드 키(또는 `getHoga()`는 호가 필드 자체)가 없으면 다른 REST 클라이언트와
+동일하게 `Optional.empty()`를 반환한다(예외를 던지지 않음).
 
 `@ConditionalOnProperty(name = "ls.mode", havingValue = "mock")`로 `ls.mode=mock`일 때만 빈으로
 생성된다(`LsWebSocketClient`의 real 전용 조건과 정반대, A-4 2026-08-30 추가). `LsMarketDataApiClient`가
 이 빈을 `Optional<LsLocalMarketDataReader>` 생성자 주입으로 받아 `getCurrentPrice()` 안에서
-존재 여부로 mock/real을 분기한다 — `StockSubscriptionManager`가 `Optional<LsWebSocketClient>`로
-mock/real을 구분하는 것과 동일한 패턴. 로컬 파일 조회가 빈 값을 반환해도 실제 LS API로 폴백하지
-않는다(mock 모드에서는 로컬 파일이 유일한 데이터 소스).
+존재 여부로 mock/real을 분기하고, `StockService`도 동일한 패턴으로 이 빈을 주입받아
+`getCurrentPrice()`/`getHoga()` 둘 다 분기한다 — `StockSubscriptionManager`가
+`Optional<LsWebSocketClient>`로 mock/real을 구분하는 것과 동일한 패턴. 로컬 파일 조회가 빈 값을
+반환해도 실제 LS API·Redis로 폴백하지 않는다(mock 모드에서는 로컬 파일이 유일한 데이터 소스).
 
 **`LsApiClientSupport`(추상, `infra/ls` 패키지 전용, 코드리뷰 반영)** — 위 10개 클라이언트가
 전부 거의 동일하게 복붙하고 있던 요청 빌딩(Authorization/tr_cd/tr_cont 헤더 + `ExternalApiInvoker`
