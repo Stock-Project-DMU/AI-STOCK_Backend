@@ -26,9 +26,9 @@ public class WatchlistService {
 
     private final WatchlistRepository watchlistRepository;
     private final UserRepository userRepository;
-    // 실시간 캐시가 없으면 LS REST 조회로 서버 검증된 시세와 종목명을 얻는다.
+    // 실시간 캐시가 없으면 외부 시세 데이터 REST 조회로 서버 검증된 시세와 종목명을 얻는다.
     private final StockQuoteService stockQuoteService;
-    // v14, feature/stock-price: 관심종목 추가/삭제를 LS 실시간 구독 참조 카운트에 반영한다.
+    // v14, feature/stock-price: 관심종목 추가/삭제를 외부 시세 데이터 실시간 구독 참조 카운트에 반영한다.
     private final StockSubscriptionManager stockSubscriptionManager;
 
     // watchlist.uq_user_stock — 같은 유저·종목의 관심종목 등록이 동시에 두 건 이상 요청될 때

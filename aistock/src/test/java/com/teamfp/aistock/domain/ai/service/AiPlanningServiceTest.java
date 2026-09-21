@@ -37,20 +37,20 @@ import com.teamfp.aistock.infra.dart.dto.DartFinancialResponse;
 import com.teamfp.aistock.infra.gemini.GeminiApiClient;
 import com.teamfp.aistock.infra.gemini.dto.GeminiRequest;
 import com.teamfp.aistock.infra.gemini.dto.GeminiResponse;
-import com.teamfp.aistock.infra.ls.LsHighItemApiClient;
-import com.teamfp.aistock.infra.ls.LsInvestInfoApiClient;
-import com.teamfp.aistock.infra.ls.LsInvestorTrendApiClient;
-import com.teamfp.aistock.infra.ls.LsMarketDataApiClient;
-import com.teamfp.aistock.infra.ls.LsSectorApiClient;
-import com.teamfp.aistock.infra.ls.dto.LsFinancialRankingDto;
-import com.teamfp.aistock.infra.ls.dto.LsForeignInstitutionalTrendDto;
-import com.teamfp.aistock.infra.ls.dto.LsInvestmentOpinionDto;
-import com.teamfp.aistock.infra.ls.dto.LsMarketLiquidityDto;
-import com.teamfp.aistock.infra.ls.dto.LsOverseasIndexDto;
-import com.teamfp.aistock.infra.ls.dto.LsRankingItemDto;
-import com.teamfp.aistock.infra.ls.dto.LsShareholderMeetingDto;
-import com.teamfp.aistock.infra.ls.dto.LsThemeConstituentDto;
-import com.teamfp.aistock.infra.ls.dto.LsThemeDto;
+import com.teamfp.aistock.infra.marketdata.HighItemApiClient;
+import com.teamfp.aistock.infra.marketdata.InvestInfoApiClient;
+import com.teamfp.aistock.infra.marketdata.InvestorTrendApiClient;
+import com.teamfp.aistock.infra.marketdata.MarketDataApiClient;
+import com.teamfp.aistock.infra.marketdata.SectorApiClient;
+import com.teamfp.aistock.infra.marketdata.dto.FinancialRankingDto;
+import com.teamfp.aistock.infra.marketdata.dto.ForeignInstitutionalTrendDto;
+import com.teamfp.aistock.infra.marketdata.dto.InvestmentOpinionDto;
+import com.teamfp.aistock.infra.marketdata.dto.MarketLiquidityDto;
+import com.teamfp.aistock.infra.marketdata.dto.OverseasIndexDto;
+import com.teamfp.aistock.infra.marketdata.dto.RankingItemDto;
+import com.teamfp.aistock.infra.marketdata.dto.ShareholderMeetingDto;
+import com.teamfp.aistock.infra.marketdata.dto.ThemeConstituentDto;
+import com.teamfp.aistock.infra.marketdata.dto.ThemeDto;
 import com.teamfp.aistock.infra.naver.NaverNewsApiClient;
 import com.teamfp.aistock.infra.naver.dto.NaverNewsSearchRequest;
 import com.teamfp.aistock.infra.naver.dto.NaverNewsSearchResponse;
@@ -101,25 +101,25 @@ class AiPlanningServiceTest {
     @Mock
     private NaverNewsApiClient naverNewsApiClient;
     @Mock
-    private LsMarketDataApiClient lsMarketDataApiClient;
+    private MarketDataApiClient marketDataApiClient;
     @Mock
-    private LsInvestorTrendApiClient lsInvestorTrendApiClient;
+    private InvestorTrendApiClient investorTrendApiClient;
     @Mock
-    private LsInvestInfoApiClient lsInvestInfoApiClient;
+    private InvestInfoApiClient investInfoApiClient;
     @Mock
-    private LsHighItemApiClient lsHighItemApiClient;
+    private HighItemApiClient highItemApiClient;
     @Mock
-    private LsSectorApiClient lsSectorApiClient;
+    private SectorApiClient sectorApiClient;
     @Mock
-    private com.teamfp.aistock.infra.ls.LsEtfApiClient lsEtfApiClient;
+    private com.teamfp.aistock.infra.marketdata.EtfApiClient etfApiClient;
     @Mock
-    private com.teamfp.aistock.infra.ls.LsProgramApiClient lsProgramApiClient;
+    private com.teamfp.aistock.infra.marketdata.ProgramApiClient programApiClient;
     @Mock
-    private com.teamfp.aistock.infra.ls.LsInvestorApiClient lsInvestorApiClient;
+    private com.teamfp.aistock.infra.marketdata.InvestorApiClient investorApiClient;
     @Mock
-    private com.teamfp.aistock.infra.ls.LsEtcApiClient lsEtcApiClient;
+    private com.teamfp.aistock.infra.marketdata.EtcApiClient etcApiClient;
     @Mock
-    private com.teamfp.aistock.infra.ls.LsIndustryApiClient lsIndustryApiClient;
+    private com.teamfp.aistock.infra.marketdata.IndustryApiClient industryApiClient;
 
     @InjectMocks
     private AiPlanningService aiPlanningService;
@@ -727,8 +727,8 @@ class AiPlanningServiceTest {
     }
 
     @Nested
-    @DisplayName("LS 도구 3개(외국인/기관동향·투자의견·주주총회일정, 2026-08-10 추가)")
-    class LsInvestInfoTools {
+    @DisplayName("외부 시세 데이터 도구 3개(외국인/기관동향·투자의견·주주총회일정, 2026-08-10 추가)")
+    class MarketDataInvestInfoTools {
 
         @Test
         @DisplayName("외국인/기관 매매동향 도구 호출 시 stockCode로 조회해 최종 답변에 반영한다")
@@ -742,8 +742,8 @@ class AiPlanningServiceTest {
             stubHappyPathUpTo(firstResponse);
             when(geminiApiClient.generate(any())).thenReturn(firstResponse).thenReturn(finalResponse);
             when(dartApiClient.resolveStockCodeByName("삼성전자")).thenReturn(Optional.of("005930"));
-            when(lsInvestorTrendApiClient.getTrend("005930", null)).thenReturn(List.of(
-                    LsForeignInstitutionalTrendDto.builder()
+            when(investorTrendApiClient.getTrend("005930", null)).thenReturn(List.of(
+                    ForeignInstitutionalTrendDto.builder()
                             .date("20260810").closePrice(71000L)
                             .foreignNetBuyKrx(700L).institutionNetBuyKrx(300L).individualNetBuyKrx(-1000L)
                             .programTradingVolume(5000L).foreignExhaustionRate(51.23)
@@ -753,7 +753,7 @@ class AiPlanningServiceTest {
             AiChatResponse response = aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("삼성전자 외국인 사고 있어?"));
 
             assertThat(response.content()).isEqualTo("안녕하세요! AI 재무설계사 STOCK입니다.\n\n최근 외국인이 순매수 중입니다...");
-            verify(lsInvestorTrendApiClient).getTrend("005930", null);
+            verify(investorTrendApiClient).getTrend("005930", null);
 
             org.mockito.ArgumentCaptor<GeminiRequest> captor = org.mockito.ArgumentCaptor.forClass(GeminiRequest.class);
             verify(geminiApiClient, times(2)).generate(captor.capture());
@@ -774,8 +774,8 @@ class AiPlanningServiceTest {
             stubHappyPathUpTo(firstResponse);
             when(geminiApiClient.generate(any())).thenReturn(firstResponse).thenReturn(finalResponse);
             when(dartApiClient.resolveStockCodeByName("삼성전자")).thenReturn(Optional.of("005930"));
-            when(lsInvestInfoApiClient.getInvestmentOpinions("005930")).thenReturn(List.of(
-                    LsInvestmentOpinionDto.builder()
+            when(investInfoApiClient.getInvestmentOpinions("005930")).thenReturn(List.of(
+                    InvestmentOpinionDto.builder()
                             .date("20260805").securitiesFirm("메리츠")
                             .opinionBefore("HOLD").opinionAfter("BUY")
                             .targetPriceBefore(24000L).targetPriceAfter(30000L).closePriceOnDate(28500L)
@@ -784,7 +784,7 @@ class AiPlanningServiceTest {
             AiChatResponse response = aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("삼성전자 목표주가 얼마로 올렸대?"));
 
             assertThat(response.content()).isEqualTo("안녕하세요! AI 재무설계사 STOCK입니다.\n\n목표주가를 상향 조정했습니다...");
-            verify(lsInvestInfoApiClient).getInvestmentOpinions("005930");
+            verify(investInfoApiClient).getInvestmentOpinions("005930");
 
             org.mockito.ArgumentCaptor<GeminiRequest> captor = org.mockito.ArgumentCaptor.forClass(GeminiRequest.class);
             verify(geminiApiClient, times(2)).generate(captor.capture());
@@ -805,13 +805,13 @@ class AiPlanningServiceTest {
             stubHappyPathUpTo(firstResponse);
             when(geminiApiClient.generate(any())).thenReturn(firstResponse).thenReturn(finalResponse);
             when(dartApiClient.resolveStockCodeByName("삼성전자")).thenReturn(Optional.of("005930"));
-            when(lsInvestInfoApiClient.getShareholderMeetingSchedule("005930")).thenReturn(List.of(
-                    LsShareholderMeetingDto.builder().date("20260315").eventName("주주총회").build()));
+            when(investInfoApiClient.getShareholderMeetingSchedule("005930")).thenReturn(List.of(
+                    ShareholderMeetingDto.builder().date("20260315").eventName("주주총회").build()));
 
             AiChatResponse response = aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("삼성전자 주주총회 언제야?"));
 
             assertThat(response.content()).isEqualTo("안녕하세요! AI 재무설계사 STOCK입니다.\n\n올해 주주총회는 3월입니다...");
-            verify(lsInvestInfoApiClient).getShareholderMeetingSchedule("005930");
+            verify(investInfoApiClient).getShareholderMeetingSchedule("005930");
 
             org.mockito.ArgumentCaptor<GeminiRequest> captor = org.mockito.ArgumentCaptor.forClass(GeminiRequest.class);
             verify(geminiApiClient, times(2)).generate(captor.capture());
@@ -821,8 +821,8 @@ class AiPlanningServiceTest {
         }
 
         @Test
-        @DisplayName("Gemini가 companyName 없이(스키마 위반) LS 도구를 요청해도 안전하게 처리하고 LS를 호출하지 않는다")
-        void functionCall_lsTools_missingCompanyName_skipsLsCall() {
+        @DisplayName("Gemini가 companyName 없이(스키마 위반) 외부 시세 데이터 도구를 요청해도 안전하게 처리하고 외부 시세 데이터를 호출하지 않는다")
+        void functionCall_marketDataTools_missingCompanyName_skipsMarketDataCall() {
             GeminiResponse.FunctionCall functionCall = new GeminiResponse.FunctionCall(
                     "get_foreign_institutional_trend", Map.of());
             GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
@@ -834,12 +834,12 @@ class AiPlanningServiceTest {
 
             aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("외국인 사고 있어?"));
 
-            verify(lsInvestorTrendApiClient, never()).getTrend(any(), any());
+            verify(investorTrendApiClient, never()).getTrend(any(), any());
         }
 
         @Test
-        @DisplayName("종목코드를 찾지 못하면 LS를 호출하지 않고 확인 불가 문구로 답한다")
-        void functionCall_lsTools_unresolvedStockCode_skipsLsCall() {
+        @DisplayName("종목코드를 찾지 못하면 외부 시세 데이터를 호출하지 않고 확인 불가 문구로 답한다")
+        void functionCall_marketDataTools_unresolvedStockCode_skipsMarketDataCall() {
             GeminiResponse.FunctionCall functionCall = new GeminiResponse.FunctionCall(
                     "get_investment_opinion", Map.of("companyName", "존재안함"));
             GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
@@ -852,7 +852,7 @@ class AiPlanningServiceTest {
 
             aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("존재안함 목표주가는?"));
 
-            verify(lsInvestInfoApiClient, never()).getInvestmentOpinions(any());
+            verify(investInfoApiClient, never()).getInvestmentOpinions(any());
         }
     }
 

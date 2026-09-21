@@ -12,9 +12,9 @@ import com.teamfp.aistock.domain.stock.dto.response.StockPriceResponse;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.redis.RedisStockCacheService;
-import com.teamfp.aistock.infra.ls.LsLocalMarketDataReader;
-import com.teamfp.aistock.infra.ls.dto.LsCurrentPriceDetailDto;
-import com.teamfp.aistock.infra.ls.dto.LsHogaData;
+import com.teamfp.aistock.infra.marketdata.LocalMarketDataReader;
+import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
+import com.teamfp.aistock.infra.marketdata.dto.HogaData;
 
 import lombok.RequiredArgsConstructor;
 
@@ -23,27 +23,27 @@ import lombok.RequiredArgsConstructor;
 public class StockService {
 
     private final RedisStockCacheService redisStockCacheService;
-    // ls.mode=mock일 때만 존재(LsLocalMarketDataReader의 @ConditionalOnProperty 참고) —
-    // LsMarketDataApiClient/StockSubscriptionManager와 동일한 Optional 주입 패턴으로 mock/real을 구분한다.
-    private final Optional<LsLocalMarketDataReader> localMarketDataReader;
+    // market-data.mode=mock일 때만 존재(LocalMarketDataReader의 @ConditionalOnProperty 참고) —
+    // MarketDataApiClient/StockSubscriptionManager와 동일한 Optional 주입 패턴으로 mock/real을 구분한다.
+    private final Optional<LocalMarketDataReader> localMarketDataReader;
 
     /**
      * 현재가 조회.
      *
-     * ls.mode=real이면 기존과 동일하게 Redis 캐시(TTL 5초)에서 읽으며, 캐시가 비어있으면(최근
+     * market-data.mode=real이면 기존과 동일하게 Redis 캐시(TTL 5초)에서 읽으며, 캐시가 비어있으면(최근
      * tick이 없으면) 종목 자체가 없는 게 아니라 시세를 일시적으로 못 가져오는 상황이므로
      * STOCK_NOT_FOUND가 아닌 STOCK_PRICE_NOT_AVAILABLE을 던진다(OrderService.createMarketOrder()와
      * 동일한 판단, NAMING.md 8-4 참고). 종목코드 자체의 유효성은 별도 종목 마스터가 없어
      * (KNOWN_ISSUES.md 1번) 이 브랜치에서는 검증하지 않는다.
      *
-     * ls.mode=mock이면 Redis 대신 LsLocalMarketDataReader로 market_data.json을 직접 읽는다 —
-     * mock 모드에서는 LsWebSocketClient가 없어 Redis 캐시가 애초에 채워지지 않기 때문이다
-     * (KNOWN_ISSUES.md 2번). LsMarketDataApiClient.getCurrentPrice()와 동일하게, mock
+     * market-data.mode=mock이면 Redis 대신 LocalMarketDataReader로 market_data.json을 직접 읽는다 —
+     * mock 모드에서는 MarketDataWebSocketClient가 없어 Redis 캐시가 애초에 채워지지 않기 때문이다
+     * (KNOWN_ISSUES.md 2번). MarketDataApiClient.getCurrentPrice()와 동일하게, mock
      * 모드에서는 로컬 파일이 유일한 데이터 소스라 Redis로 폴백하지 않는다.
      */
     public StockPriceResponse getCurrentPrice(String stockCode) {
         if (localMarketDataReader.isPresent()) {
-            LsCurrentPriceDetailDto local = localMarketDataReader.get().getCurrentPrice(stockCode)
+            CurrentPriceDetailDto local = localMarketDataReader.get().getCurrentPrice(stockCode)
                     .orElseThrow(() -> new CustomException(ErrorCode.STOCK_PRICE_NOT_AVAILABLE));
             return toStockPriceResponse(local);
         }
@@ -55,7 +55,7 @@ public class StockService {
         return StockPriceResponse.from(dto);
     }
 
-    private StockPriceResponse toStockPriceResponse(LsCurrentPriceDetailDto dto) {
+    private StockPriceResponse toStockPriceResponse(CurrentPriceDetailDto dto) {
         return new StockPriceResponse(
                 dto.getStockCode(),
                 dto.getStockName(),
@@ -70,17 +70,17 @@ public class StockService {
     /**
      * 호가 조회.
      *
-     * ls.mode=real이면 기존과 동일하게 Redis 캐시(TTL 2초)에서 읽으며, 캐시 미스는
+     * market-data.mode=real이면 기존과 동일하게 Redis 캐시(TTL 2초)에서 읽으며, 캐시 미스는
      * getCurrentPrice()와 동일한 이유로 STOCK_PRICE_NOT_AVAILABLE로 처리한다.
      *
-     * ls.mode=mock이면 getCurrentPrice()와 동일하게 Redis 대신 LsLocalMarketDataReader로
+     * market-data.mode=mock이면 getCurrentPrice()와 동일하게 Redis 대신 LocalMarketDataReader로
      * market_data.json의 호가 필드(askPrices 등, local-market-data-generator가 t1101로 채운다)를
-     * 직접 읽는다 — mock 모드에서는 LsWebSocketClient가 없어 Redis 호가 캐시도 애초에 채워지지
+     * 직접 읽는다 — mock 모드에서는 MarketDataWebSocketClient가 없어 Redis 호가 캐시도 애초에 채워지지
      * 않기 때문이다(KNOWN_ISSUES.md 2번).
      */
     public HogaResponse getHoga(String stockCode) {
         if (localMarketDataReader.isPresent()) {
-            LsHogaData local = localMarketDataReader.get().getHoga(stockCode)
+            HogaData local = localMarketDataReader.get().getHoga(stockCode)
                     .orElseThrow(() -> new CustomException(ErrorCode.STOCK_PRICE_NOT_AVAILABLE));
             return toHogaResponse(local);
         }
@@ -92,7 +92,7 @@ public class StockService {
         return HogaResponse.from(dto);
     }
 
-    private HogaResponse toHogaResponse(LsHogaData dto) {
+    private HogaResponse toHogaResponse(HogaData dto) {
         return new HogaResponse(
                 dto.getStockCode(),
                 dto.getAskPrices(),

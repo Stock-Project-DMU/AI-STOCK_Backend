@@ -20,11 +20,11 @@ import com.teamfp.aistock.domain.user.entity.*;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.redis.RedisPendingOrderService;
 import com.teamfp.aistock.global.redis.RedisStockCacheService;
-import com.teamfp.aistock.infra.ls.LsMarketDataApiClient;
-import com.teamfp.aistock.infra.ls.dto.LsCurrentPriceDetailDto;
+import com.teamfp.aistock.infra.marketdata.MarketDataApiClient;
+import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
 
 /** Uses a temporary user and transaction rollback; no real quote, notification or trade is sent. */
-@SpringBootTest(properties = {"ls.mode=mock"})
+@SpringBootTest(properties = {"market-data.mode=mock"})
 @Transactional(isolation = Isolation.READ_COMMITTED)
 class TradingFallbackIntegrationTest {
     @Autowired OrderService orders;
@@ -33,7 +33,7 @@ class TradingFallbackIntegrationTest {
     @Autowired UserRepository users;
     @Autowired AccountRepository accounts;
     @MockitoBean RedisStockCacheService redis;
-    @MockitoBean LsMarketDataApiClient ls;
+    @MockitoBean MarketDataApiClient ls;
     @MockitoBean RedisPendingOrderService pending;
     @MockitoBean NotificationService notifications;
     @MockitoBean StockSubscriptionManager subscriptions;
@@ -44,7 +44,7 @@ class TradingFallbackIntegrationTest {
                 .role(Role.USER).isActive(true).build());
         Account account = accounts.save(Account.builder().user(user).accountName("임시 검증")
                 .accountNumber("T" + suffix).openedAt(LocalDate.now()).baseBalance(1000000).balance(1000000).build());
-        when(ls.getCurrentPrice("005930")).thenReturn(Optional.of(LsCurrentPriceDetailDto.builder()
+        when(ls.getCurrentPrice("005930")).thenReturn(Optional.of(CurrentPriceDetailDto.builder()
                 .stockCode("005930").stockName("삼성전자").currentPrice(70000).build()));
 
         watchlist.addWatchlist(user.getUserId(), "005930");
@@ -61,7 +61,7 @@ class TradingFallbackIntegrationTest {
         assertThat(account.getBalance()).isEqualTo(930000);
 
         // An unowned stock exercises the limit-order name fallback too.
-        when(ls.getCurrentPrice("000660")).thenReturn(Optional.of(LsCurrentPriceDetailDto.builder()
+        when(ls.getCurrentPrice("000660")).thenReturn(Optional.of(CurrentPriceDetailDto.builder()
                 .stockCode("000660").stockName("SK하이닉스").currentPrice(100000).build()));
         var limit = orders.createLimitOrder(user.getUserId(), new CreateOrderRequest(account.getAccountId(), "000660", OrderType.BUY, 1, PriceType.LIMIT, 90000));
         assertThat(limit.status()).isEqualTo(OrderStatus.PENDING);

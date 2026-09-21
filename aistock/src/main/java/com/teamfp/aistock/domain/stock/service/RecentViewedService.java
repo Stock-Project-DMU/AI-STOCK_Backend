@@ -26,7 +26,7 @@ public class RecentViewedService {
 
     private final RecentViewedRepository recentViewedRepository;
     private final UserRepository userRepository;
-    // 실시간 캐시가 없으면 LS REST 조회로 종목명을 확인한다.
+    // 실시간 캐시가 없으면 외부 시세 데이터 REST 조회로 종목명을 확인한다.
     private final StockQuoteService stockQuoteService;
 
     // recent_viewed.uq_user_stock_view — WatchlistService.UNIQUE_CONSTRAINT_NAME과 같은 이유로,

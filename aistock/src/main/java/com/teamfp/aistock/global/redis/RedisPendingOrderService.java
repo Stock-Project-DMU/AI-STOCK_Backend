@@ -28,7 +28,7 @@ import lombok.extern.slf4j.Slf4j;
  * 지정가(LIMIT) 미체결 주문 대기 목록을 Redis 리스트로 관리하는 서비스.
  *
  * 종목코드별로 pending:orders:{stockCode} 리스트에 미체결 주문을 쌓아두고,
- * LS증권에서 해당 종목의 체결 tick이 들어올 때마다 이 리스트를 훑어서
+ * 외부 시세 데이터 제공사에서 해당 종목의 체결 tick이 들어올 때마다 이 리스트를 훑어서
  * "지정가 조건(매수는 현재가 이하, 매도는 현재가 이상)을 만족하는 주문이 있는지" 확인하는 데 쓴다.
  * DB 대신 Redis를 쓰는 이유는 매 tick(초당 여러 번)마다 DB를 조회하면 부하가 크기 때문이다.
  *
@@ -38,7 +38,7 @@ import lombok.extern.slf4j.Slf4j;
  * 1. 서버 시작
  * 2. DB에서 status = PENDING인 주문 전체 조회
  * 3. Redis pending:orders:{stockCode} 리스트에 전부 재적재 완료
- * 4. (완료된 다음에만) LS증권 WebSocket 연결 시작
+ * 4. (완료된 다음에만) 외부 시세 데이터 제공사 WebSocket 연결 시작
  * </pre>
  *
  * <p>체결/취소 시점에는 DB 갱신과 Redis 리스트 제거를 같은 처리 흐름 안에서 함께 수행하므로
@@ -59,7 +59,7 @@ public class RedisPendingOrderService {
     /**
      * 서버 기동 시 DB의 PENDING 주문을 Redis로 재적재한다.
      * {@code @PostConstruct}로 빈 생성 직후 자동 실행되며, 이 메서드가 끝난 뒤에
-     * LS증권 WebSocket 연결이 시작되도록 빈 초기화 순서(또는 별도 기동 로직)에서 보장해야 한다.
+     * 외부 시세 데이터 제공사 WebSocket 연결이 시작되도록 빈 초기화 순서(또는 별도 기동 로직)에서 보장해야 한다.
      *
      * 처리 순서:
      * 1) 기존에 Redis에 남아있을 수 있는 pending:orders:* 키를 전부 지운다.
@@ -135,7 +135,7 @@ public class RedisPendingOrderService {
 
     /**
      * 특정 종목의 미체결 주문 전체를 조회한다.
-     * LS증권에서 해당 종목의 체결 tick을 수신할 때마다 호출되어, 지정가 체결 조건을
+     * 외부 시세 데이터 제공사에서 해당 종목의 체결 tick을 수신할 때마다 호출되어, 지정가 체결 조건을
      * 만족하는 주문이 있는지 검사하는 용도로 쓰인다 (초당 여러 번 호출될 수 있는 경로).
      *
      * @param stockCode 종목코드

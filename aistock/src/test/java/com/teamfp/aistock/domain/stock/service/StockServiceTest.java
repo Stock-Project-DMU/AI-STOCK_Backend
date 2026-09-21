@@ -25,13 +25,13 @@ import com.teamfp.aistock.domain.stock.dto.response.StockPriceResponse;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.redis.RedisStockCacheService;
-import com.teamfp.aistock.infra.ls.LsLocalMarketDataReader;
-import com.teamfp.aistock.infra.ls.dto.LsCurrentPriceDetailDto;
-import com.teamfp.aistock.infra.ls.dto.LsHogaData;
+import com.teamfp.aistock.infra.marketdata.LocalMarketDataReader;
+import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
+import com.teamfp.aistock.infra.marketdata.dto.HogaData;
 
 /**
- * StockService.getCurrentPrice()/getHoga()의 ls.mode=mock/real 분기 단위 테스트
- * (feature/ls-local-data). LsMarketDataApiClientTest의 GetCurrentPriceMockBranch와 동일하게,
+ * StockService.getCurrentPrice()/getHoga()의 market-data.mode=mock/real 분기 단위 테스트
+ * (feature/ls-local-data). MarketDataApiClientTest의 GetCurrentPriceMockBranch와 동일하게,
  * localMarketDataReader 주입 여부(Optional.empty()=real, Optional.of(...)=mock)로 분기를 갈라
  * 검증한다.
  */
@@ -44,7 +44,7 @@ class StockServiceTest {
     private RedisStockCacheService redisStockCacheService;
 
     @Nested
-    @DisplayName("현재가 조회 real 분기 (ls.mode=real, localMarketDataReader 없음)")
+    @DisplayName("현재가 조회 real 분기 (market-data.mode=real, localMarketDataReader 없음)")
     class GetCurrentPriceRealBranch {
 
         @Test
@@ -82,17 +82,17 @@ class StockServiceTest {
     }
 
     @Nested
-    @DisplayName("현재가 조회 mock 분기 (ls.mode=mock, localMarketDataReader 존재)")
+    @DisplayName("현재가 조회 mock 분기 (market-data.mode=mock, localMarketDataReader 존재)")
     class GetCurrentPriceMockBranch {
 
         @Mock
-        private LsLocalMarketDataReader localMarketDataReader;
+        private LocalMarketDataReader localMarketDataReader;
 
         @Test
         @DisplayName("localMarketDataReader가 값을 반환하면 Redis를 거치지 않고 그 값을 응답으로 변환한다")
         void success_usesLocalReader_andSkipsRedis() {
             StockService service = new StockService(redisStockCacheService, Optional.of(localMarketDataReader));
-            LsCurrentPriceDetailDto local = LsCurrentPriceDetailDto.builder()
+            CurrentPriceDetailDto local = CurrentPriceDetailDto.builder()
                     .stockCode(STOCK_CODE)
                     .stockName("삼성전자(로컬)")
                     .currentPrice(70000L)
@@ -127,7 +127,7 @@ class StockServiceTest {
     }
 
     @Nested
-    @DisplayName("호가 조회 real 분기 (ls.mode=real, localMarketDataReader 없음)")
+    @DisplayName("호가 조회 real 분기 (market-data.mode=real, localMarketDataReader 없음)")
     class GetHogaRealBranch {
 
         @Test
@@ -163,17 +163,17 @@ class StockServiceTest {
     }
 
     @Nested
-    @DisplayName("호가 조회 mock 분기 (ls.mode=mock, localMarketDataReader 존재)")
+    @DisplayName("호가 조회 mock 분기 (market-data.mode=mock, localMarketDataReader 존재)")
     class GetHogaMockBranch {
 
         @Mock
-        private LsLocalMarketDataReader localMarketDataReader;
+        private LocalMarketDataReader localMarketDataReader;
 
         @Test
         @DisplayName("localMarketDataReader가 값을 반환하면 Redis를 거치지 않고 그 값을 응답으로 변환한다")
         void success_usesLocalReader_andSkipsRedis() {
             StockService service = new StockService(redisStockCacheService, Optional.of(localMarketDataReader));
-            LsHogaData local = LsHogaData.builder()
+            HogaData local = HogaData.builder()
                     .stockCode(STOCK_CODE)
                     .askPrices(List.of(78600L, 78700L, 78800L, 78900L, 79000L))
                     .askVolumes(List.of(100L, 200L, 300L, 400L, 500L))

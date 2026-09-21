@@ -55,7 +55,7 @@ public class OrderService {
     // getMyHoldings()의 "보유종목 조회 + 시세 배치 조회 + 평단가 폴백"은 AccountService.
     // getProfit()과 똑같은 절차라 HoldingValuationService로 공용화했다(코드리뷰 반영).
     private final HoldingValuationService holdingValuationService;
-    // 실시간 캐시가 없으면 LS REST 조회로 서버 검증된 시세와 종목명을 얻는다.
+    // 실시간 캐시가 없으면 외부 시세 데이터 REST 조회로 서버 검증된 시세와 종목명을 얻는다.
     private final StockQuoteService stockQuoteService;
     // 지정가 미체결 주문 대기 목록(pending:orders:{stockCode}) 관리도 같은 이유로
     // global/redis 서비스를 직접 주입받아 쓴다.
@@ -172,7 +172,7 @@ public class OrderService {
     /**
      * 지정가 주문 — 매수는 주문금액(지정가 × 수량)을 balance에서 frozenBalance로 묶어두고,
      * 매도는 보유수량만 확인한 뒤 DB에 PENDING으로 등록하고 Redis pending:orders에 함께 올린다.
-     * 실제 체결은 여기서 하지 않는다 — LS증권 tick 수신 시 OrderExecutionService가 처리한다.
+     * 실제 체결은 여기서 하지 않는다 — 외부 시세 데이터 제공사 tick 수신 시 OrderExecutionService가 처리한다.
      *
      * 이 메서드는 request.priceType()이 항상 LIMIT라고 전제한다 — MARKET/LIMIT 분기 책임은
      * createMarketOrder()와 마찬가지로 OrderController에 있다.
@@ -217,7 +217,7 @@ public class OrderService {
             // 이유로, 이미 보유 중인 종목의 추가 매수는 stock:price 캐시가 비어 있어도(TTL 만료 등)
             // 막을 이유가 없다. 이 프로젝트는 종목 마스터 테이블을 따로 두지 않으므로(schema.sql
             // 기준 13개 테이블에 없음), 아직 한 번도 보유한 적 없는 종목을 신규로 지정가 매수할 때만
-            // stockName을 얻을 수 있는 유일한 소스인 LS증권 tick 캐시(stock:price)를 조회한다.
+            // stockName을 얻을 수 있는 유일한 소스인 외부 시세 데이터 제공사 tick 캐시(stock:price)를 조회한다.
             Optional<Holding> existingHolding = findHolding(account, request.stockCode());
             if (existingHolding.isPresent()) {
                 stockName = existingHolding.get().getStockName();

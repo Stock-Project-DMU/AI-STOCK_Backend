@@ -43,7 +43,7 @@ import static org.mockito.Mockito.when;
 /**
  * feature/order-limit — OrderExecutionService.execute()/checkAndExecute() 단위 테스트.
  *
- * LS증권 WebSocket tick 파이프라인은 아직 다른 브랜치가 구현 중이라, tick 수신을 흉내 내려면
+ * 외부 시세 데이터 제공사 WebSocket tick 파이프라인은 아직 다른 브랜치가 구현 중이라, tick 수신을 흉내 내려면
  * checkAndExecute(stockCode, currentPrice)를 직접 호출한다. Repository/Redis는 Mockito로 모킹해서
  * 체결 조건 판정 + 잔고/보유종목 정산 + 동시 체결 충돌(낙관적 락) 시 재시도 로직만 독립적으로 검증한다.
  */
