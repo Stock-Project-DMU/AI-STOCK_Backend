@@ -1,11 +1,15 @@
 package com.teamfp.aistock.infra.marketdata;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -19,6 +23,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
 import com.teamfp.aistock.infra.marketdata.dto.RankingItemDto;
 
 @ExtendWith(MockitoExtension.class)
@@ -37,7 +42,7 @@ class HighItemApiClientTest {
         RestClient.Builder builder = RestClient.builder();
         mockServer = MockRestServiceServer.bindTo(builder).build();
 
-        client = new HighItemApiClient(accessTokenProvider, builder);
+        client = new HighItemApiClient(accessTokenProvider, java.util.Optional.empty(), builder);
         ReflectionTestUtils.setField(client, "highItemUrl", HIGH_ITEM_URL);
     }
 
@@ -132,6 +137,69 @@ class HighItemApiClientTest {
             assertThat(result).hasSize(1);
             assertThat(result.get(0).getExtraInfo()).contains("4729433");
             mockServer.verify();
+        }
+    }
+
+    @Nested
+    @DisplayName("순위 조회 mock 분기 (market-data.mode=mock)")
+    class MockBranch {
+
+        @Mock
+        private LocalMarketDataReader localMarketDataReader;
+
+        private HighItemApiClient mockModeClient;
+
+        @BeforeEach
+        void setUpMockMode() {
+            mockModeClient = new HighItemApiClient(accessTokenProvider, Optional.of(localMarketDataReader), RestClient.builder());
+        }
+
+        private CurrentPriceDetailDto stock(String code, String name, long price, long volume, double changeRate) {
+            return CurrentPriceDetailDto.builder()
+                    .stockCode(code).stockName(name).currentPrice(price).volume(volume).changeRate(changeRate)
+                    .listingShares(1_000L)
+                    .build();
+        }
+
+        @Test
+        @DisplayName("거래량상위는 외부 시세 데이터 API를 호출하지 않고 mock 종목을 거래량 내림차순으로 정렬한다")
+        void getTopVolume_sortsByVolumeDescending() {
+            when(localMarketDataReader.getAllCurrentPrices()).thenReturn(Map.of(
+                    "A", stock("A", "가", 1000, 100, 0.0),
+                    "B", stock("B", "나", 1000, 300, 0.0),
+                    "C", stock("C", "다", 1000, 200, 0.0)));
+
+            List<RankingItemDto> result = mockModeClient.getTopVolume();
+
+            assertThat(result).extracting(RankingItemDto::getStockCode).containsExactly("B", "C", "A");
+            assertThat(result.get(0).getRank()).isEqualTo(1);
+            verify(accessTokenProvider, never()).issueAccessToken();
+        }
+
+        @Test
+        @DisplayName("등락율상위는 mock 종목을 등락률 내림차순으로 정렬한다")
+        void getTopPriceChangeRate_sortsByChangeRateDescending() {
+            when(localMarketDataReader.getAllCurrentPrices()).thenReturn(Map.of(
+                    "A", stock("A", "가", 1000, 100, -1.5),
+                    "B", stock("B", "나", 1000, 100, 5.0)));
+
+            List<RankingItemDto> result = mockModeClient.getTopPriceChangeRate();
+
+            assertThat(result).extracting(RankingItemDto::getStockCode).containsExactly("B", "A");
+        }
+
+        @Test
+        @DisplayName("mock 종목이 10개를 넘으면 상위 10건까지만 반환한다")
+        void limitsToTenItems() {
+            Map<String, CurrentPriceDetailDto> all = new java.util.HashMap<>();
+            for (int i = 1; i <= 15; i++) {
+                all.put("C%d".formatted(i), stock("C%d".formatted(i), "종목%d".formatted(i), 1000, i, 0.0));
+            }
+            when(localMarketDataReader.getAllCurrentPrices()).thenReturn(all);
+
+            List<RankingItemDto> result = mockModeClient.getTopVolume();
+
+            assertThat(result).hasSize(10);
         }
     }
 }

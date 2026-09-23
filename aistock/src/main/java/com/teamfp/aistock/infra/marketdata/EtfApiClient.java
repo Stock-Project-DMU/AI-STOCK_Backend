@@ -25,17 +25,35 @@ public class EtfApiClient extends MarketDataApiClientSupport {
     private static final int MAX_CONSTITUENT_ITEMS = 10;
 
     private final MarketDataAccessTokenProvider accessTokenProvider;
+    // market-data.mode=mock일 때만 존재. getCurrentPrice()만 mock 분기를 탄다 —
+    // getConstituents()(구성종목)는 market_data.json에 대응 데이터가 없어 이번 범위 밖이다
+    // (ETF 시세 mock 지원 추가, 2026-09-21).
+    private final Optional<LocalMarketDataReader> localMarketDataReader;
 
     @Value("${market-data.etf-url}")
     private String etfUrl;
 
-    public EtfApiClient(MarketDataAccessTokenProvider accessTokenProvider, @org.springframework.beans.factory.annotation.Qualifier("marketDataRestClientBuilder") RestClient.Builder restClientBuilder) {
+    public EtfApiClient(
+            MarketDataAccessTokenProvider accessTokenProvider,
+            Optional<LocalMarketDataReader> localMarketDataReader,
+            @org.springframework.beans.factory.annotation.Qualifier("marketDataRestClientBuilder") RestClient.Builder restClientBuilder) {
         super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
+        this.localMarketDataReader = localMarketDataReader;
     }
 
-    /** ETF현재가(시세)조회(t1901) — NAV·52주 최고저 포함 현재가. */
+    /**
+     * ETF현재가(시세)조회(t1901) — NAV·52주 최고저 포함 현재가.
+     *
+     * market-data.mode=mock이면 MarketDataApiClient.getCurrentPrice()와 동일한 패턴으로
+     * LocalMarketDataReader를 직접 읽는다. stocks.json에 isEtf:true로 등록된 종목만 mock
+     * 데이터가 있다 — 등록되지 않은 ETF 코드는(t1901 전용 필드인 NAV 등은 애초에 mock에
+     * 없으므로) 다른 mock 분기와 동일하게 빈 값을 반환한다.
+     */
     public Optional<CurrentPriceDetailDto> getCurrentPrice(String stockCode) {
+        if (localMarketDataReader.isPresent()) {
+            return localMarketDataReader.get().getCurrentPrice(stockCode).filter(CurrentPriceDetailDto::isEtf);
+        }
         try {
             String token = accessTokenProvider.issueAccessToken();
             Map<String, Object> requestBody = Map.of("t1901InBlock", Map.of("shcode", stockCode));

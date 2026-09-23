@@ -38,4 +38,15 @@ public class CurrentPriceDetailDto {
     private Long listingShares;      // 상장주식수(천주)
     private Double foreignExhaustionRate; // 외국인 보유한도 소진율(%)
     private LocalDateTime updatedAt; // 조회 시각
+
+    // market-data.mode=mock 전용 필드 — 실제 t1102 응답에는 없고 local-market-data-generator가
+    // stocks.json의 로컬 메타데이터(시장구분/ETF 여부)를 market_data.json에 함께 적어 넣은 값이다.
+    // real 모드(t1102 직접 파싱, parseCurrentPrice())에서는 채워지지 않고 항상 null/false로 남는다.
+    // IndustryApiClient/HighItemApiClient/EtfApiClient의 mock 분기(순위·지수·ETF 시세)가
+    // LocalMarketDataReader.getAllCurrentPrices()로 전체 종목을 읽은 뒤 이 필드로 시장을 나누거나
+    // ETF 종목만 걸러낸다(순위·지수·ETF 시세 mock 지원 추가, 2026-09-21).
+    private String market;  // "KOSPI" 또는 "KOSDAQ"
+    private boolean etf;    // Lombok 게터는 isEtf() — market_data.json의 "etf" 키와 매칭시킨다
+                             // (필드명을 isEtf로 두면 Jackson이 필드 기반 "isEtf"와 게터 기반
+                             // "etf" 프로퍼티명을 다르게 인식해 충돌할 수 있어 피한다)
 }

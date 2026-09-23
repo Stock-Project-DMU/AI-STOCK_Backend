@@ -160,7 +160,7 @@ class LiveGeminiManualCheck {
         ReflectionTestUtils.setField(investInfoApiClient, "investInfoUrl", "https://openapi.ls-sec.co.kr:8080/stock/investinfo");
 
         // 2026-08-11 추가 — get_market_ranking/get_theme_info 도구 전용.
-        HighItemApiClient highItemApiClient = new HighItemApiClient(marketDataAccessTokenProvider, RestClient.builder());
+        HighItemApiClient highItemApiClient = new HighItemApiClient(marketDataAccessTokenProvider, java.util.Optional.empty(), RestClient.builder());
         ReflectionTestUtils.setField(highItemApiClient, "highItemUrl", "https://openapi.ls-sec.co.kr:8080/stock/high-item");
 
         SectorApiClient sectorApiClient = new SectorApiClient(marketDataAccessTokenProvider, RestClient.builder());
@@ -168,7 +168,7 @@ class LiveGeminiManualCheck {
 
         // 2026-08-11 추가 — 나머지 13개 도구 전용 클라이언트.
         com.teamfp.aistock.infra.marketdata.EtfApiClient etfApiClient =
-                new com.teamfp.aistock.infra.marketdata.EtfApiClient(marketDataAccessTokenProvider, RestClient.builder());
+                new com.teamfp.aistock.infra.marketdata.EtfApiClient(marketDataAccessTokenProvider, java.util.Optional.empty(), RestClient.builder());
         ReflectionTestUtils.setField(etfApiClient, "etfUrl", "https://openapi.ls-sec.co.kr:8080/stock/etf");
 
         com.teamfp.aistock.infra.marketdata.ProgramApiClient programApiClient =
@@ -184,7 +184,7 @@ class LiveGeminiManualCheck {
         ReflectionTestUtils.setField(etcApiClient, "etcUrl", "https://openapi.ls-sec.co.kr:8080/stock/etc");
 
         com.teamfp.aistock.infra.marketdata.IndustryApiClient industryApiClient =
-                new com.teamfp.aistock.infra.marketdata.IndustryApiClient(marketDataAccessTokenProvider, RestClient.builder());
+                new com.teamfp.aistock.infra.marketdata.IndustryApiClient(marketDataAccessTokenProvider, java.util.Optional.empty(), RestClient.builder());
         ReflectionTestUtils.setField(industryApiClient, "industryUrl", "https://openapi.ls-sec.co.kr:8080/indtp/market-data");
 
         Executor syncExecutor = Runnable::run;

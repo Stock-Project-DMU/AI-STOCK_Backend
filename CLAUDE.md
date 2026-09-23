@@ -228,11 +228,34 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
 - **지정가 체결**: tick 수신 시 `pending:orders` 확인 → 조건 충족 시 낙관적 락으로 체결
 - **서버 시작 순서**: `@PostConstruct`로 DB PENDING 주문 Redis 재적재 완료 후 외부 시세 데이터 WebSocket 연결
 - **외부 시세 데이터 재연결**: 지수 백오프 (1→2→4→최대 30초)
-- **외부 시세 데이터 mock 모드**: `market-data.mode=mock`이면 `MarketDataApiClient.getCurrentPrice()`와
-  `StockService.getCurrentPrice()`/`getHoga()`가 실제 외부 시세 데이터 API·Redis 대신 `LocalMarketDataReader`로
-  시세·호가를 공급하고, `MockMarketDataGenerator`(20초 주기 폴링)가 `MarketDataWebSocketClient`(real 전용) 대신
-  변경분을 감지해 STOMP로 실시간 브로드캐스트한다. mock 전환 대상은 이 경로들뿐이며, 나머지 외부 시세 데이터
-  REST 메서드와 `MarketDataAccessTokenProvider`는 `market-data.mode`와 무관하게 항상 실제 외부 시세 데이터 API를 호출한다.
+- **외부 시세 데이터 mock 모드**: `market-data.mode=mock`이면 아래 경로들이 실제 외부 시세 데이터
+  API·Redis 대신 `LocalMarketDataReader`로 데이터를 공급한다(순위·지수·ETF 시세·차트 mock 지원 추가,
+  2026-09-21). `MarketDataAccessTokenProvider`와 이 목록에 없는 나머지 REST 메서드(t1105/t1305의
+  `getRecentHistoricalPrices()`·t1404/t1405·t1486·t8407·`EtfApiClient.getConstituents()` 등)는
+  여전히 `market-data.mode`와 무관하게 항상 실제 외부 시세 데이터 API를 호출한다.
+  - `MarketDataApiClient.getCurrentPrice()`/`StockService.getCurrentPrice()`·`getHoga()` — 종목
+    현재가·호가(가장 먼저 추가된 mock 경로).
+  - `MarketDataApiClient.getHistoricalPrices(stockCode, periodMonths)` — 차트. market_data.json에는
+    현재가 스냅샷 1건뿐이라 실제 과거 시세가 없다. 종목코드로 시드를 고정한 결정적 합성
+    (fabricated) OHLC 시계열을 만들어 반환하며(같은 종목은 항상 같은 그래프), 가장 최근 구간의
+    종가만 mock 현재가와 일치시킨다. **실제 과거 시세가 아니다.**
+  - `HighItemApiClient.getTopVolume()`/`getTopTradingValue()`/`getTopPriceChangeRate()`/
+    `getTopMarketCap()` — 순위(`MarketQueryService.getRankings()`가 노출하는 4종). 전종목이 아니라
+    `LocalMarketDataReader.getAllCurrentPrices()`(stocks.json에 등록된 종목만, 2026-09-21 기준
+    105개)를 정렬해 상위 10개만 뽑는 근사치다. 같은 클래스의 나머지 3개
+    (`getSurgingVolumeVsYesterday()`/시간외 2종)는 mock 대상이 아니다.
+  - `IndustryApiClient.getCurrentPrice(marketName)` — 지수(코스피/코스닥). 실지수는 전종목 시가총액
+    가중평균이라 105개 mock 종목으로 재현 불가능해, 고정 베이스값(`MOCK_BASE_INDEX_VALUE`)을 같은
+    시장 mock 종목의 평균 등락률만큼 흔든 근사치를 쓴다. **실제 지수 값이 아니다.** 같은 클래스의
+    `getTrend()`/`getExpectedIndex()`는 mock 대상이 아니다.
+  - `EtfApiClient.getCurrentPrice()` — ETF 시세. stocks.json에 `isEtf: true`로 등록된 종목만
+    mock 데이터가 있고(2026-09-21 기준 5개), 등록되지 않은 ETF 코드는 real 모드와 동일하게
+    빈 값을 반환한다.
+  - 위 4개 mock 파생 로직이 쓰는 `market`(KOSPI/KOSDAQ)·`etf` 필드는 t1102 실제 응답에는 없는
+    필드로, local-market-data-generator가 stocks.json의 로컬 메타데이터를 market_data.json에
+    함께 써 넣는다(`CurrentPriceDetailDto.market`/`etf`, real 모드 파싱 경로에서는 채워지지 않음).
+  - `MockMarketDataGenerator`(20초 주기 폴링)는 `MarketDataWebSocketClient`(real 전용) 대신
+    변경분을 감지해 STOMP로 실시간 브로드캐스트한다(현재가/호가 대상).
   `LocalMarketDataReader`는 원본을 파일 또는 HTTP 둘 중 하나에서 읽는다:
   - **파일 모드(로컬 개발 기본값)**: `market-data.url`이 비어있으면 `market-data.local-path`
     디렉토리의 `market_data.json` 단일 파일(종목코드를 키로, 현재가·호가 필드가 함께 들어있는

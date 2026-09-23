@@ -229,6 +229,9 @@ public class MarketDataApiClient extends MarketDataApiClientSupport {
         boolean longPeriod = periodMonths != null && periodMonths > 0;
         int dwmcode = longPeriod ? DWMCODE_MONTH : DWMCODE_DAY;
         int cnt = longPeriod ? Math.min(periodMonths, MAX_PERIOD_MONTHS) : MAX_HISTORICAL_ITEMS;
+        if (localMarketDataReader.isPresent()) {
+            return mockHistoricalPrices(stockCode, cnt, longPeriod);
+        }
         try {
             String token = accessTokenProvider.issueAccessToken();
             Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
@@ -265,6 +268,60 @@ public class MarketDataApiClient extends MarketDataApiClientSupport {
             log.warn("외부 시세 데이터 기간별주가 조회 중 오류 - stockCode: {}, 사유: {}", stockCode, e.getMessage());
             return List.of();
         }
+    }
+
+    private static final java.time.format.DateTimeFormatter MOCK_HISTORY_DATE_FORMAT =
+            java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd");
+
+    /**
+     * market-data.mode=mock 전용 — market_data.json에는 현재가 스냅샷 1건뿐이라 실제 과거
+     * 시세가 전혀 없다. 그래서 종목코드로 시드를 고정한 결정적(deterministic) 합성(fabricated)
+     * 시계열을 만든다 — 같은 종목은 요청할 때마다 항상 같은 그래프를 그려 화면 깜빡임처럼
+     * 보이지 않게 하고, 가장 최근 구간(i=0)의 종가를 mock 현재가와 일치시켜 종목 상세(현재가)와
+     * 차트가 서로 모순되지 않게 한다. 실제 과거 시세가 절대 아니므로 real 모드로 착각하지
+     * 않도록 이 메서드 밖으로 새어나가는 로그·주석에 "실제"라는 표현을 쓰지 않는다(차트 mock
+     * 지원 추가, 2026-09-21).
+     */
+    private List<HistoricalPriceDto> mockHistoricalPrices(String stockCode, int cnt, boolean longPeriod) {
+        Optional<CurrentPriceDetailDto> currentOpt = localMarketDataReader.get().getCurrentPrice(stockCode);
+        if (currentOpt.isEmpty()) {
+            return List.of();
+        }
+        CurrentPriceDetailDto current = currentOpt.get();
+        java.util.Random random = new java.util.Random(stockCode.hashCode());
+        java.time.LocalDate date = java.time.LocalDate.now();
+
+        List<HistoricalPriceDto> result = new java.util.ArrayList<>();
+        long close = current.getCurrentPrice();
+        for (int i = 0; i < cnt; i++) {
+            double openRatio = 1 + (random.nextDouble() - 0.5) * 0.06;
+            long open = Math.max(1, Math.round(close * openRatio));
+            long high = Math.max(open, close) + Math.round(Math.max(open, close) * random.nextDouble() * 0.02);
+            long low = Math.max(1, Math.min(open, close) - Math.round(Math.min(open, close) * random.nextDouble() * 0.02));
+            long volume = Math.max(1, Math.round(current.getVolume() * (0.5 + random.nextDouble())));
+            double changeRate = open == 0 ? 0.0 : Math.round((close - open) * 10000.0 / open) / 100.0;
+            Long marketCap = current.getListingShares() != null ? close * current.getListingShares() * 1000 : null;
+            long foreignNetBuy = Math.round(volume * (random.nextDouble() - 0.5) * 0.4);
+            long individualNetBuy = Math.round(volume * (random.nextDouble() - 0.5) * 0.4);
+
+            result.add(HistoricalPriceDto.builder()
+                    .date(date.format(MOCK_HISTORY_DATE_FORMAT))
+                    .open(open)
+                    .high(high)
+                    .low(low)
+                    .close(close)
+                    .changeRate(changeRate)
+                    .volume(volume)
+                    .marketCap(marketCap)
+                    .foreignNetBuy(foreignNetBuy)
+                    .individualNetBuy(individualNetBuy)
+                    .build());
+
+            // 다음(과거) 구간의 종가 = 이번 구간의 시가로 이어 붙여 계단식 시계열을 만든다.
+            close = open;
+            date = longPeriod ? date.minusMonths(1) : date.minusDays(1);
+        }
+        return result;
     }
 
     /** API용주식멀티현재가조회(t8407) — 최대 5종목까지 한번에 현재가 조회(2026-08-11 추가). */

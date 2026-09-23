@@ -1,6 +1,8 @@
 package com.teamfp.aistock.infra.marketdata;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
@@ -40,7 +42,7 @@ class EtfApiClientTest {
         RestClient.Builder builder = RestClient.builder();
         mockServer = MockRestServiceServer.bindTo(builder).build();
 
-        client = new EtfApiClient(accessTokenProvider, builder);
+        client = new EtfApiClient(accessTokenProvider, java.util.Optional.empty(), builder);
         ReflectionTestUtils.setField(client, "etfUrl", ETF_URL);
     }
 
@@ -138,6 +140,57 @@ class EtfApiClientTest {
             assertThat(result.get(0).getStockName()).isEqualTo("삼성전자");
             assertThat(result.get(0).getWeight()).isEqualTo(25.5);
             mockServer.verify();
+        }
+    }
+
+    @Nested
+    @DisplayName("ETF현재가 조회 mock 분기 (getCurrentPrice, market-data.mode=mock)")
+    class GetCurrentPriceMockBranch {
+
+        @Mock
+        private LocalMarketDataReader localMarketDataReader;
+
+        private EtfApiClient mockModeClient;
+
+        @BeforeEach
+        void setUpMockMode() {
+            mockModeClient = new EtfApiClient(accessTokenProvider, Optional.of(localMarketDataReader), RestClient.builder());
+        }
+
+        @Test
+        @DisplayName("mock 데이터의 종목이 ETF(etf=true)면 외부 시세 데이터 API를 호출하지 않고 그대로 반환한다")
+        void usesLocalReader_whenEtfFlagTrue() {
+            CurrentPriceDetailDto localResult = CurrentPriceDetailDto.builder()
+                    .stockCode(STOCK_CODE).stockName("KODEX 200(로컬)").currentPrice(98265L).etf(true).build();
+            when(localMarketDataReader.getCurrentPrice(STOCK_CODE)).thenReturn(Optional.of(localResult));
+
+            Optional<CurrentPriceDetailDto> result = mockModeClient.getCurrentPrice(STOCK_CODE);
+
+            assertThat(result).isPresent();
+            assertThat(result.get().getStockName()).isEqualTo("KODEX 200(로컬)");
+            verify(accessTokenProvider, never()).issueAccessToken();
+        }
+
+        @Test
+        @DisplayName("mock 데이터의 종목코드는 있어도 ETF가 아니면(etf=false) 빈 값을 반환한다")
+        void empty_whenStockCodeExistsButNotEtf() {
+            CurrentPriceDetailDto localResult = CurrentPriceDetailDto.builder()
+                    .stockCode("005930").stockName("삼성전자").currentPrice(70000L).etf(false).build();
+            when(localMarketDataReader.getCurrentPrice("005930")).thenReturn(Optional.of(localResult));
+
+            Optional<CurrentPriceDetailDto> result = mockModeClient.getCurrentPrice("005930");
+
+            assertThat(result).isEmpty();
+        }
+
+        @Test
+        @DisplayName("mock 데이터에 종목코드 자체가 없으면 빈 값을 반환한다")
+        void empty_whenStockCodeMissing() {
+            when(localMarketDataReader.getCurrentPrice(STOCK_CODE)).thenReturn(Optional.empty());
+
+            Optional<CurrentPriceDetailDto> result = mockModeClient.getCurrentPrice(STOCK_CODE);
+
+            assertThat(result).isEmpty();
         }
     }
 }
