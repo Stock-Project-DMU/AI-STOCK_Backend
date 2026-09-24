@@ -7,6 +7,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
+import com.teamfp.aistock.domain.order.service.OrderExecutionService;
 import com.teamfp.aistock.domain.stock.dto.HogaDto;
 import com.teamfp.aistock.domain.stock.dto.PriceDirection;
 import com.teamfp.aistock.domain.stock.dto.StockPriceDto;
@@ -36,6 +37,11 @@ public class StockBroadcastService implements LsMarketDataListener {
     private final RedisStockCacheService redisStockCacheService;
     private final StockNameResolver stockNameResolver;
     private final SimpMessagingTemplate messagingTemplate;
+    // 지정가 체결 판단(CLAUDE.md 8번 "tick 수신 시 pending:orders 확인 → 조건 충족 시
+    // 낙관적 락으로 체결"). OrderExecutionService 자체는 tick 수신 경로를 모르고 호출만
+    // 기다리는 구조라(OrderExecutionService 클래스 상단 Javadoc 참고), 실제 tick 파이프라인인
+    // 여기서 종목코드·체결가를 넘겨 호출해야 지정가 주문이 실제로 체결된다.
+    private final OrderExecutionService orderExecutionService;
 
     private final ConcurrentHashMap<String, Long> lastTickProcessedAt = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> lastHogaProcessedAt = new ConcurrentHashMap<>();
@@ -50,6 +56,7 @@ public class StockBroadcastService implements LsMarketDataListener {
         StockPriceDto dto = toStockPriceDto(tickData);
         redisStockCacheService.saveStockPrice(stockCode, dto);
         broadcastPrice(stockCode, dto);
+        orderExecutionService.checkAndExecute(stockCode, tickData.getCurrentPrice());
     }
 
     public void broadcastPrice(String stockCode, StockPriceDto dto) {

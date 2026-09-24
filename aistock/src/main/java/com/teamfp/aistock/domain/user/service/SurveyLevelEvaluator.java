@@ -9,7 +9,10 @@ final class SurveyLevelEvaluator {
     private SurveyLevelEvaluator() {}
 
     static InvestmentLevel evaluate(List<Integer> answers) {
-        int[] optionCounts = {3, 5, 4, 5, 4, 5, 3, 3};
+        // 1번 문항(투자 목적)은 "목돈 모으기·저축" 선택지가 추가되며 3개→4개로 늘어났다
+        // (SurveyTendencyEvaluator.evaluateFundTendency()가 이 문항 답을 그대로 자금성향 값으로
+        // 쓰므로 선택지 개수와 등급 개수를 1:1로 맞춰야 한다).
+        int[] optionCounts = {4, 5, 4, 5, 4, 5, 3, 3};
         if (answers == null || answers.size() != optionCounts.length) {
             throw new CustomException(ErrorCode.INVALID_INPUT);
         }

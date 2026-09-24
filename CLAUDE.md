@@ -210,8 +210,8 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
 | `stock:price:{stockCode}` | 5초 | 현재가 캐시 |
 | `stock:hoga:{stockCode}` | 2초 | 호가 캐시 |
 | `pending:orders:{stockCode}` | 없음 | 지정가 미체결 주문 |
-| `gemini:rate:{userId}:minute` | 1분 | Gemini Rate Limiter (분당 3회) |
-| `gemini:rate:{userId}:daily` | 1일 | Gemini Rate Limiter (일일 10회) |
+| `gemini:rate:{userId}:minute` | 1분 | Gemini Rate Limiter (분당 3회) — SimulationService만 사용, AI 재무설계사는 2026-09-21부터 미적용 |
+| `gemini:rate:{userId}:daily` | 1일 | Gemini Rate Limiter (일일 10회) — SimulationService만 사용, AI 재무설계사는 2026-09-21부터 미적용 |
 | `admin:online:users` | 없음 (이벤트 기반) | 관리자 대시보드 — 온라인 사용자 집합 (WebSocket CONNECT/DISCONNECT 시 갱신) |
 | `ai:tool:{sessionId}:{도구이름}?{인자}` | 30분 | AI 상담 세션 내 DART/네이버 도구 실행 결과 캐시 (같은 조건 재조회 시 재사용) |
 
@@ -228,7 +228,10 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
 - **지정가 체결**: tick 수신 시 `pending:orders` 확인 → 조건 충족 시 낙관적 락으로 체결
 - **서버 시작 순서**: `@PostConstruct`로 DB PENDING 주문 Redis 재적재 완료 후 LS WebSocket 연결
 - **LS 재연결**: 지수 백오프 (1→2→4→최대 30초)
-- **Gemini 호출 전** 반드시 `RedisRateLimiterService` 통과, 초과 시 429 즉시 반환
+- **Gemini 호출 전** `RedisRateLimiterService` 통과 필요 — 단, **AI 재무설계사(`AiPlanningService`)는
+  2026-09-21 사용자 요청으로 이 제한을 제거함**("몇 번 대화하다 짤리면 안 된다"는 이유, Gemini
+  자체 API 한도에만 걸림). `SimulationService`(목표 도달 시뮬레이션)는 그대로 분당3/일일10
+  제한을 적용받는다.
 - **온라인 추적**: `StompAuthInterceptor`의 CONNECT/DISCONNECT 시점에 `RedisOnlineStatusService`로
   `admin:online:users` 갱신. 클라이언트가 비정상 종료해 DISCONNECT 프레임 없이 끊기는 경우를
   대비해 `SessionDisconnectEvent` 리스너로 보완 처리한다. 서버 자체가 비정상 종료(크래시)된 경우

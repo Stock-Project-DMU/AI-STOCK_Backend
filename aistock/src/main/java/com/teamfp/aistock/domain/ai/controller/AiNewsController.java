@@ -62,7 +62,8 @@ public class AiNewsController {
     @PutMapping("/settings")
     public ApiResponse<NewsBriefingSettingResponse> updateMySetting(@Valid @RequestBody NewsBriefingSettingRequest request) {
         Long userId = SecurityUtil.getCurrentUserId();
-        return ApiResponse.success("언론사 설정이 저장되었습니다.", aiNewsService.updateMySetting(userId, request.outletDomain()));
+        return ApiResponse.success("언론사 설정이 저장되었습니다.",
+                aiNewsService.updateMySetting(userId, request.outletDomain(), request.briefingTime()));
     }
 
     @GetMapping("/briefings/today")

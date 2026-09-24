@@ -1,5 +1,26 @@
 -- =====================================================
--- AI STOCK MySQL Schema (최종본 v12)
+-- AI STOCK MySQL Schema (최종본 v15)
+-- 변경사항 v14 → v15:
+--   1. news_briefing_settings.briefing_hour(TINYINT, 0~23시) → briefing_time(TIME, 시:분:초)로 변경
+--      (2026-09-24 사용자 요청 — 브리핑 생성 시각을 시 단위가 아니라 분·초 단위까지
+--       고를 수 있어야 한다는 요구. 이에 맞춰 AiNewsService.generateDailyBriefings()도
+--       "매시 정각에 깨어나 시각이 일치하는 사용자만 처리"에서 "매초 깨어나 시:분:초가
+--       모두 일치하는 사용자만 처리"로 바뀐다 — 자세한 내용은 AiNewsService 주석 참고.)
+-- =====================================================
+-- 변경사항 v13 → v14:
+--   1. news_briefing_settings에 briefing_hour 컬럼 추가
+--      (feature/ai-news — 브리핑 생성 시각을 서버 고정(새벽 7시) 대신 사용자가 0~23시
+--       중 원하는 시각으로 고를 수 있게 함. 기본값 7은 기존 고정 시각과 동일해 기존
+--       사용자의 체감 동작을 바꾸지 않는다. 이에 맞춰 AiNewsService.generateDailyBriefings()도
+--       "매일 7시 1회 전체 순회"에서 "매시 정각에 깨어나 그 시각을 고른 사용자만 순회"로
+--       바뀐다 — 자세한 내용은 AiNewsService 주석 참고.)
+-- =====================================================
+-- 변경사항 v12 → v13 (뒤늦게 기록 — 해당 PR에서 이 changelog 갱신이 누락됐던 것을
+-- 2026-09-21에 실제 테이블 정의를 보고 소급 작성함. 정확한 작업일자·근거 문서는
+-- 각 테이블 주석 참고):
+--   1. charge_requests, account_transactions, audit_logs 테이블 신규 추가 (16, 17, 18번째 테이블)
+--      (관리자 API·충전 승인·계좌 원장·감사 로그 관련. ADMIN_API_BACKEND_HANDOFF.md 기반)
+-- =====================================================
 -- 변경사항 v11 → v12:
 --   1. news_briefing_settings, news_briefings 테이블 신규 추가 (14, 15번째 테이블)
 --      (feature/ai-news — 맞춤형 뉴스 브리핑. AI 재무설계사와 달리 대화형이 아니라,
@@ -618,6 +639,9 @@ CREATE TABLE news_briefing_settings (
     setting_id     BIGINT          NOT NULL AUTO_INCREMENT,
     user_id        BIGINT          NOT NULL,
     outlet_domain  VARCHAR(50)     NOT NULL,
+    briefing_time  TIME            NOT NULL DEFAULT '07:00:00'
+                                    COMMENT '브리핑 생성 희망 시각(시:분:초, KST) — v14에서 시 단위로
+                                    추가됐다가 v15에서 분·초 단위까지 지원하도록 변경',
     created_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP
                                              ON UPDATE CURRENT_TIMESTAMP,
