@@ -4,6 +4,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -24,10 +26,12 @@ import com.teamfp.aistock.global.security.CustomUserDetails;
 import com.teamfp.aistock.global.security.CustomUserDetailsService;
 import com.teamfp.aistock.global.security.JwtProvider;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -82,6 +86,17 @@ class StompAuthInterceptorTest {
         return buildMessage(accessor);
     }
 
+    private Message<byte[]> subscribeMessage(String destination, UsernamePasswordAuthenticationToken authentication) {
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.SUBSCRIBE);
+        accessor.setDestination(destination);
+        accessor.setSubscriptionId("sub-0");
+        if (authentication != null) {
+            // disconnectMessage()와 같은 이유로, CONNECT 때 세션에 저장된 Principal을 직접 주입한다.
+            accessor.setUser(authentication);
+        }
+        return buildMessage(accessor);
+    }
+
     private Message<byte[]> disconnectMessage(UsernamePasswordAuthenticationToken authentication) {
         StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.DISCONNECT);
         if (authentication != null) {
@@ -107,16 +122,83 @@ class StompAuthInterceptorTest {
     }
 
     @Test
-    @DisplayName("CONNECT — 토큰이 없거나 유효하지 않으면 INVALID_TOKEN 예외를 던지고 온라인 처리를 하지 않는다")
+    @DisplayName("CONNECT — 토큰이 유효하지 않으면 INVALID_TOKEN 예외를 던지고 온라인 처리를 하지 않는다")
     void connect_invalidToken_throwsAndSkipsOnline() {
-        when(jwtProvider.extractBearerToken(null)).thenReturn(null);
+        when(jwtProvider.extractBearerToken("Bearer " + TOKEN)).thenReturn(TOKEN);
+        when(jwtProvider.validateToken(TOKEN)).thenReturn(false);
 
-        assertThatThrownBy(() -> stompAuthInterceptor.preSend(connectMessage(null), null))
+        assertThatThrownBy(() -> stompAuthInterceptor.preSend(connectMessage(TOKEN), null))
                 .isInstanceOf(CustomException.class)
                 .extracting(e -> ((CustomException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_TOKEN);
 
         verify(redisOnlineStatusService, never()).addOnline(anyLong());
+    }
+
+    @Test
+    @DisplayName("CONNECT — Authorization 헤더가 Bearer 형식이 아니면 익명으로 강등하지 않고 INVALID_TOKEN 예외를 던진다")
+    void connect_malformedHeader_throws() {
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.CONNECT);
+        accessor.setNativeHeader(HttpHeaders.AUTHORIZATION, "Basic abc");
+        when(jwtProvider.extractBearerToken("Basic abc")).thenReturn(null);
+
+        assertThatThrownBy(() -> stompAuthInterceptor.preSend(buildMessage(accessor), null))
+                .isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException) e).getErrorCode())
+                .isEqualTo(ErrorCode.INVALID_TOKEN);
+    }
+
+    @Test
+    @DisplayName("CONNECT — 토큰이 없으면(비회원) 익명 세션으로 허용하고 온라인 집계에서 제외한다")
+    void connect_withoutToken_allowsAnonymous() {
+        Message<byte[]> message = connectMessage(null);
+
+        Message<?> result = stompAuthInterceptor.preSend(message, null);
+
+        assertThat(result).isSameAs(message);
+        assertThat(StompHeaderAccessor.wrap(result).getUser()).isNull();
+        verifyNoInteractions(jwtProvider, customUserDetailsService, redisOnlineStatusService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/topic/stock/005930", "/topic/stock/005930/hoga"})
+    @DisplayName("SUBSCRIBE — 비회원도 종목 현재가·호가 토픽은 구독할 수 있다")
+    void subscribe_anonymous_publicStockTopic_allowed(String destination) {
+        Message<byte[]> message = subscribeMessage(destination, null);
+
+        assertThat(stompAuthInterceptor.preSend(message, null)).isSameAs(message);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/user/queue", "/queue/notifications", "/topic/stock/005930/orders", "/topic/stock/", "/topic/admin"})
+    @DisplayName("SUBSCRIBE — 비회원이 공개 토픽 외 목적지를 구독하면 ACCESS_DENIED 예외를 던진다")
+    void subscribe_anonymous_privateDestination_denied(String destination) {
+        assertThatThrownBy(() -> stompAuthInterceptor.preSend(subscribeMessage(destination, null), null))
+                .isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException) e).getErrorCode())
+                .isEqualTo(ErrorCode.ACCESS_DENIED);
+    }
+
+    @Test
+    @DisplayName("SUBSCRIBE — 로그인 사용자는 개인 큐를 포함해 기존처럼 제한 없이 구독한다")
+    void subscribe_authenticated_userQueue_allowed() {
+        UsernamePasswordAuthenticationToken authentication =
+                new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+        Message<byte[]> message = subscribeMessage("/user/queue", authentication);
+
+        assertThat(stompAuthInterceptor.preSend(message, null)).isSameAs(message);
+    }
+
+    @Test
+    @DisplayName("SEND — 비회원은 /app 목적지로 메시지를 보낼 수 없다")
+    void send_anonymous_denied() {
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.SEND);
+        accessor.setDestination("/app/anything");
+
+        assertThatThrownBy(() -> stompAuthInterceptor.preSend(buildMessage(accessor), null))
+                .isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException) e).getErrorCode())
+                .isEqualTo(ErrorCode.ACCESS_DENIED);
     }
 
     @Test

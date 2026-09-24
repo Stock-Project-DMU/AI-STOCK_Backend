@@ -2,12 +2,12 @@ package com.teamfp.aistock.global.stomp;
 
 import java.security.Principal;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 import org.springframework.context.event.EventListener;
 import org.springframework.http.HttpHeaders;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
-import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.messaging.support.MessageHeaderAccessor;
@@ -29,10 +29,20 @@ import lombok.RequiredArgsConstructor;
  * STOMP CONNECT 시 JWT를 검증해 Authentication을 세션에 붙이는 동시에, 관리자 대시보드의
  * "온라인 사용자 수"(admin:online:users)를 CONNECT/세션 종료 시점에 갱신한다
  * (CLAUDE.md 8번, NAMING.md 7번/5번 StompAuthInterceptor 항목 참고).
+ *
+ * 비회원 호가 제공(#06): Authorization 헤더 없이 CONNECT하면 인증 정보 없는 익명 세션으로
+ * 연결을 허용한다. 익명 세션은 REST에서도 공개된 종목 현재가·호가 토픽
+ * (/topic/stock/{stockCode}, /topic/stock/{stockCode}/hoga)만 구독할 수 있고, 그 외 구독과
+ * SEND는 ACCESS_DENIED로 막는다. 헤더가 있는데 토큰이 무효·만료인 경우는 익명으로 강등하지
+ * 않고 기존처럼 INVALID_TOKEN으로 거부한다 — 로그인 사용자가 모르는 사이에 익명 세션이 되어
+ * 개인 알림(/user/queue)을 못 받는 상황을 숨기지 않기 위해서다.
  */
 @Component
 @RequiredArgsConstructor
 public class StompAuthInterceptor implements ChannelInterceptor {
+
+    // 비회원에게 공개하는 토픽 — StockBroadcastService가 브로드캐스트하는 가격/호가 토픽과 동일한 형태
+    private static final Pattern PUBLIC_STOCK_TOPIC_PATTERN = Pattern.compile("^/topic/stock/[A-Za-z0-9]+(/hoga)?$");
 
     private final JwtProvider jwtProvider;
     private final CustomUserDetailsService customUserDetailsService;
@@ -41,12 +51,38 @@ public class StompAuthInterceptor implements ChannelInterceptor {
     @Override
     public Message<?> preSend(Message<?> message, MessageChannel channel) {
         StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
-        if (accessor == null || !StompCommand.CONNECT.equals(accessor.getCommand())) {
+        if (accessor == null || accessor.getCommand() == null) {
             return message;
         }
 
-        String token = resolveToken(accessor);
+        switch (accessor.getCommand()) {
+            case CONNECT -> authenticate(accessor);
+            case SUBSCRIBE -> {
+                if (isAnonymous(accessor) && !isPublicDestination(accessor.getDestination())) {
+                    throw new CustomException(ErrorCode.ACCESS_DENIED);
+                }
+            }
+            case SEND -> {
+                if (isAnonymous(accessor)) {
+                    throw new CustomException(ErrorCode.ACCESS_DENIED);
+                }
+            }
+            default -> {
+                // UNSUBSCRIBE/DISCONNECT 등은 인증 여부와 무관하게 통과시킨다.
+            }
+        }
+        return message;
+    }
 
+    // Authorization 헤더가 아예 없으면 익명 세션으로 둔다(accessor.setUser() 미호출, 온라인 집계 제외).
+    // 헤더가 있으면 반드시 유효한 Bearer 토큰이어야 한다.
+    private void authenticate(StompHeaderAccessor accessor) {
+        String authorizationHeader = accessor.getFirstNativeHeader(HttpHeaders.AUTHORIZATION);
+        if (!StringUtils.hasText(authorizationHeader)) {
+            return;
+        }
+
+        String token = jwtProvider.extractBearerToken(authorizationHeader);
         if (!StringUtils.hasText(token) || !jwtProvider.validateToken(token)) {
             throw new CustomException(ErrorCode.INVALID_TOKEN);
         }
@@ -58,8 +94,16 @@ public class StompAuthInterceptor implements ChannelInterceptor {
                 new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
         accessor.setUser(authentication);
         redisOnlineStatusService.addOnline(userId);
+    }
 
-        return message;
+    // CONNECT 이후 프레임에는 StompSubProtocolHandler가 CONNECT 때 붙인 Principal을 다시 실어준다.
+    // 익명 세션은 Principal이 없으므로 extractUserId()가 비어 있다.
+    private boolean isAnonymous(StompHeaderAccessor accessor) {
+        return extractUserId(accessor.getUser()).isEmpty();
+    }
+
+    private boolean isPublicDestination(String destination) {
+        return destination != null && PUBLIC_STOCK_TOPIC_PATTERN.matcher(destination).matches();
     }
 
     /**
@@ -95,9 +139,5 @@ public class StompAuthInterceptor implements ChannelInterceptor {
             return Optional.empty();
         }
         return Optional.of(userDetails.getUserId());
-    }
-
-    private String resolveToken(StompHeaderAccessor accessor) {
-        return jwtProvider.extractBearerToken(accessor.getFirstNativeHeader(HttpHeaders.AUTHORIZATION));
     }
 }

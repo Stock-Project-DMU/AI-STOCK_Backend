@@ -255,6 +255,17 @@ STOMP 엔드포인트: `/ws-stomp`
 
 ### `StompAuthInterceptor`
 메서드: `preSend(Message<?> message, MessageChannel channel)`, `onSessionDisconnect(SessionDisconnectEvent event)`
+(private) `authenticate(StompHeaderAccessor)`, `isAnonymous(StompHeaderAccessor)`, `isPublicDestination(String)` /
+상수: `PUBLIC_STOCK_TOPIC_PATTERN` (`^/topic/stock/[A-Za-z0-9]+(/hoga)?$`)
+
+> **비회원 호가 제공 (#06, 2026-09-25)**: CONNECT에 `Authorization` 헤더가 **없으면** 익명 세션으로
+> 연결을 허용한다(`accessor.setUser()` 미호출, `admin:online:users` 집계 제외). 헤더가 있는데
+> Bearer 형식이 아니거나 토큰이 무효·만료면 익명으로 강등하지 않고 기존처럼 `INVALID_TOKEN`으로
+> 거부한다. 익명 세션은 SUBSCRIBE 시 `PUBLIC_STOCK_TOPIC_PATTERN`에 맞는 종목 현재가
+> (`/topic/stock/{stockCode}`)·호가(`/topic/stock/{stockCode}/hoga`) 토픽만 허용하고, 그 외
+> 목적지(`/user/queue` 등) 구독과 모든 SEND는 `ACCESS_DENIED`로 막는다. 로그인 세션의 동작은
+> 바뀌지 않는다. REST 쪽(`GET /api/stocks/*`, `/api/stocks/*/hoga`)은 이미 `SecurityConfig`에서
+> 공개돼 있어 변경 없다.
 
 > v8 추가: CONNECT 커맨드 검증 통과 시 `RedisOnlineStatusService.addOnline(userId)` 호출.
 >

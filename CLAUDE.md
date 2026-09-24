@@ -224,6 +224,9 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
 
 - **실시간 시세**: 외부 시세 데이터 제공사 WebSocket 수신 → Throttle 200ms → Redis 캐싱 + STOMP 브로드캐스팅 동시 처리
 - **STOMP 토픽**: `/topic/stock/{stockCode}` (브로드캐스팅), `/user/{userId}/queue` (유니캐스팅)
+- **비회원 실시간 시세**: `StompAuthInterceptor`는 토큰 없는 CONNECT를 익명 세션으로 허용하되,
+  익명 세션에는 `/topic/stock/{stockCode}`·`/topic/stock/{stockCode}/hoga` 구독만 허용하고 SEND는
+  막는다. 토큰이 있는데 무효면 여전히 거부한다(비회원 호가 제공, #06, 2026-09-25).
 - **tick 처리**: `@Async` + 전용 스레드풀 (`AsyncConfig`)
 - **지정가 체결**: tick 수신 시 `pending:orders` 확인 → 조건 충족 시 낙관적 락으로 체결
 - **서버 시작 순서**: `@PostConstruct`로 DB PENDING 주문 Redis 재적재 완료 후 외부 시세 데이터 WebSocket 연결
