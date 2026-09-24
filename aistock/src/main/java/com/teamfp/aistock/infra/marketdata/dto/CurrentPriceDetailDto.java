@@ -49,4 +49,10 @@ public class CurrentPriceDetailDto {
     private boolean etf;    // Lombok 게터는 isEtf() — market_data.json의 "etf" 키와 매칭시킨다
                              // (필드명을 isEtf로 두면 Jackson이 필드 기반 "isEtf"와 게터 기반
                              // "etf" 프로퍼티명을 다르게 인식해 충돌할 수 있어 피한다)
+
+    // market-data.mode=mock 전용 — ETF 종목(etf=true)에만 값이 채워진다. local-market-data-generator가
+    // stocks.json의 isEtf 메타데이터를 보고 ETF 종목에 한해 고정값 "K"(KRX)를 market_data.json에
+    // 적어 넣는다. 실제 외부 시세 데이터 API(t1901)의 exchgubun 스펙과는 무관한 로컬 개발용 필드다
+    // (ETF exchgubun 신규 필드 반영, #04, 2026-09-23).
+    private String exchgubun; // ETF 거래소구분("K"=KRX) — ETF가 아닌 종목은 null
 }

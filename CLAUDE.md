@@ -250,7 +250,9 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
     `getTrend()`/`getExpectedIndex()`는 mock 대상이 아니다.
   - `EtfApiClient.getCurrentPrice()` — ETF 시세. stocks.json에 `isEtf: true`로 등록된 종목만
     mock 데이터가 있고(2026-09-21 기준 5개), 등록되지 않은 ETF 코드는 real 모드와 동일하게
-    빈 값을 반환한다.
+    빈 값을 반환한다. ETF 종목에는 `exchgubun`("K"=KRX 고정값)도 함께 채워지며 별도 매핑
+    없이 `CurrentPriceDetailDto` 그대로 반환된다 — 실제 t1901 API의 exchgubun 스펙과는 무관한
+    mock 전용 필드다(ETF exchgubun 신규 필드 반영, #04, 2026-09-23).
   - 위 4개 mock 파생 로직이 쓰는 `market`(KOSPI/KOSDAQ)·`etf` 필드는 t1102 실제 응답에는 없는
     필드로, local-market-data-generator가 stocks.json의 로컬 메타데이터를 market_data.json에
     함께 써 넣는다(`CurrentPriceDetailDto.market`/`etf`, real 모드 파싱 경로에서는 채워지지 않음).

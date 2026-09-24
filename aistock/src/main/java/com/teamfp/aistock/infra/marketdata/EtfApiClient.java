@@ -48,7 +48,9 @@ public class EtfApiClient extends MarketDataApiClientSupport {
      * market-data.mode=mock이면 MarketDataApiClient.getCurrentPrice()와 동일한 패턴으로
      * LocalMarketDataReader를 직접 읽는다. stocks.json에 isEtf:true로 등록된 종목만 mock
      * 데이터가 있다 — 등록되지 않은 ETF 코드는(t1901 전용 필드인 NAV 등은 애초에 mock에
-     * 없으므로) 다른 mock 분기와 동일하게 빈 값을 반환한다.
+     * 없으므로) 다른 mock 분기와 동일하게 빈 값을 반환한다. local-market-data-generator가
+     * ETF 종목에만 채워 넣는 exchgubun("K"=KRX)도 CurrentPriceDetailDto 그대로를 반환하므로
+     * 별도 매핑 없이 함께 딸려온다(ETF exchgubun 신규 필드 반영, #04, 2026-09-23).
      */
     public Optional<CurrentPriceDetailDto> getCurrentPrice(String stockCode) {
         if (localMarketDataReader.isPresent()) {

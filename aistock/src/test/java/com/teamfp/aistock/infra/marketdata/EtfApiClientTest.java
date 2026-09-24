@@ -192,5 +192,19 @@ class EtfApiClientTest {
 
             assertThat(result).isEmpty();
         }
+
+        @Test
+        @DisplayName("mock 데이터의 exchgubun 필드를 별도 매핑 없이 그대로 반환한다")
+        void returnsExchgubun_whenPresentInMockData() {
+            CurrentPriceDetailDto localResult = CurrentPriceDetailDto.builder()
+                    .stockCode(STOCK_CODE).stockName("KODEX 200(로컬)").currentPrice(98265L)
+                    .etf(true).exchgubun("K").build();
+            when(localMarketDataReader.getCurrentPrice(STOCK_CODE)).thenReturn(Optional.of(localResult));
+
+            Optional<CurrentPriceDetailDto> result = mockModeClient.getCurrentPrice(STOCK_CODE);
+
+            assertThat(result).isPresent();
+            assertThat(result.get().getExchgubun()).isEqualTo("K");
+        }
     }
 }

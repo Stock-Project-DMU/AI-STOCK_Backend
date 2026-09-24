@@ -62,6 +62,21 @@ class LocalMarketDataReaderTest {
     }
 
     @Test
+    @DisplayName("ETF 종목의 exchgubun 필드를 CurrentPriceDetailDto로 그대로 읽는다")
+    void success_readsExchgubunField() throws IOException {
+        Files.writeString(tempDir.resolve("market_data.json"), """
+                {
+                  "069500": {"stockCode":"069500","stockName":"KODEX 200","currentPrice":98265,
+                    "changeAmount":175,"changeRate":0.18,"volume":13128894,"etf":true,"exchgubun":"K"}
+                }""");
+
+        Optional<CurrentPriceDetailDto> result = reader.getCurrentPrice("069500");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getExchgubun()).isEqualTo("K");
+    }
+
+    @Test
     @DisplayName("같은 종목 JSON 객체에 호가 필드(askPrices 등)가 섞여 있어도 현재가 필드는 그대로 읽는다")
     void success_ignoresHogaFieldsMixedIntoSameObject() throws IOException {
         Files.writeString(tempDir.resolve("market_data.json"), """
