@@ -46,4 +46,22 @@ class MarketDataAccessTokenProviderTest {
         assertThatThrownBy(provider::issueAccessToken).isInstanceOf(com.teamfp.aistock.global.exception.CustomException.class);
         server.verify();
     }
+
+    @Test
+    void tokenIssueFailureThrowsMarketDataUnavailable() {
+        // 토큰 발급 실패는 "데이터 없음"이 아니라 제공사 장애로 구분돼야 한다(외부 장애와 빈 목록 구분 처리, #05)
+        var builder = RestClient.builder();
+        var server = MockRestServiceServer.bindTo(builder).build();
+        var provider = new MarketDataAccessTokenProvider(builder);
+        ReflectionTestUtils.setField(provider, "tokenUrl", "http://ls/token");
+        ReflectionTestUtils.setField(provider, "appKey", "key");
+        ReflectionTestUtils.setField(provider, "appSecret", "secret");
+        server.expect(requestTo("http://ls/token")).andRespond(
+                org.springframework.test.web.client.response.MockRestResponseCreators.withServerError());
+        assertThatThrownBy(provider::issueAccessToken)
+                .isInstanceOf(com.teamfp.aistock.global.exception.CustomException.class)
+                .extracting(e -> ((com.teamfp.aistock.global.exception.CustomException) e).getErrorCode())
+                .isEqualTo(com.teamfp.aistock.global.exception.ErrorCode.MARKET_DATA_UNAVAILABLE);
+        server.verify();
+    }
 }

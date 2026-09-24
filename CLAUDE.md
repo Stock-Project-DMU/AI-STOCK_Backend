@@ -228,6 +228,12 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
 - **지정가 체결**: tick 수신 시 `pending:orders` 확인 → 조건 충족 시 낙관적 락으로 체결
 - **서버 시작 순서**: `@PostConstruct`로 DB PENDING 주문 Redis 재적재 완료 후 외부 시세 데이터 WebSocket 연결
 - **외부 시세 데이터 재연결**: 지수 백오프 (1→2→4→최대 30초)
+- **외부 시세 데이터 REST 장애 처리**: `infra/marketdata`의 REST 클라이언트는 제공사 호출(토큰 발급 포함)이
+  네트워크 오류·HTTP 오류로 실패하면 `CustomException(ErrorCode.MARKET_DATA_UNAVAILABLE)`(503)을 던진다
+  (`MarketDataApiClientSupport.invokeMarketData()`). 빈 목록/`Optional.empty()`는 "제공사가 정상 응답했지만
+  데이터가 없음"만 뜻하므로, 클라이언트에서 이 예외를 잡아 빈 값으로 삼키지 않는다. REST API는 이 예외를
+  그대로 전파하고, `AiPlanningService`는 도구 결과를 일시 장애 전용 문구로 바꿔 Gemini에 넘긴다
+  (외부 장애와 빈 목록 구분 처리, #05, 2026-09-24). mock 모드의 `LocalMarketDataReader`는 대상이 아니다.
 - **외부 시세 데이터 mock 모드**: `market-data.mode=mock`이면 아래 경로들이 실제 외부 시세 데이터
   API·Redis 대신 `LocalMarketDataReader`로 데이터를 공급한다(순위·지수·ETF 시세·차트 mock 지원 추가,
   2026-09-21). `MarketDataAccessTokenProvider`와 이 목록에 없는 나머지 REST 메서드(t1105/t1305의

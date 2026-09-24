@@ -177,6 +177,7 @@
 | `INVALID_ADMIN_CODE` | 400 (v8 추가 — 관리자 회원가입 시 코드 불일치) |
 | `INQUIRY_NOT_FOUND` | 404 (v8 추가) |
 | `STOCK_PRICE_NOT_AVAILABLE` | 503 (order-market 추가 — 종목은 존재하지만 `stock:price:{stockCode}` Redis 캐시가 TTL 만료 등으로 비어 있어 현재가 주문을 체결할 수 없는 경우. `STOCK_NOT_FOUND`(종목 자체가 없음)와 혼동하지 않도록 분리) |
+| `MARKET_DATA_UNAVAILABLE` | 503 (외부 장애와 빈 목록 구분 처리, #05, 2026-09-24 추가 — 외부 시세 데이터 제공사 REST 호출(토큰 발급 포함)이 네트워크 오류·HTTP 오류로 실패한 경우. `infra/marketdata`의 REST 클라이언트는 이 예외를 던지고, 빈 목록/`Optional.empty()`는 "제공사가 정상 응답했지만 데이터가 없음"만 뜻한다. `EXTERNAL_API_ERROR`(Gemini/DART/네이버 등 다른 외부 API)와 구분) |
 | `ORDER_ALREADY_PROCESSED` | 409 (order-limit 추가 — 이미 `EXECUTED`/`CANCELLED` 상태인 주문을 다시 취소(`DELETE /api/orders/{orderId}`)하려는 경우) |
 | `ACCOUNT_LIMIT_EXCEEDED` | 400 (mypage-account 추가 — 유저가 이미 계좌 3개를 보유한 상태에서 추가 개설을 시도하는 경우) |
 | `CHARGE_LIMIT_EXCEEDED` | 400 (mypage-account 추가 — 계좌의 `chargeCount`가 이미 3회에 도달한 상태에서 추가 충전을 시도하는 경우. 문의(inquiries) 기능으로 관리자에게 요청하도록 안내) |
@@ -853,6 +854,12 @@ call(String url, String trCd, Map<String, Object> requestBody, String token, Str
 제공한다. 10개 클라이언트 전부 이 클래스를 상속한다. 예외— `InvestorTrendApiClient`는 실패/누락
 시 0.0이 아니라 `null`을 돌려주는 자체 `parseDouble(Object): Double`을 그대로 로컬에 유지한다(그
 파일의 호출부가 "값 없음"과 "0"을 구분해야 함) — 이 파일만 `parseDoubleOrZero`를 안 쓴다.
+
+> **`static <T> T invokeMarketData(Supplier<T> apiCall, String errorLabel)` 추가 (외부 장애와 빈 목록 구분
+> 처리, #05, 2026-09-24)**: `ExternalApiInvoker.call()`을 감싸 외부 시세 데이터 REST 호출 실패를
+> `ErrorCode.MARKET_DATA_UNAVAILABLE`로 바꿔 던진다. `call()`과 `MarketDataAccessTokenProvider.issueAccessToken()`이
+> 이 메서드를 거친다. 10개 클라이언트는 이 예외를 잡아 빈 목록/`Optional.empty()`로 삼키지 않는다 —
+> 빈 값은 "정상 응답이지만 데이터 없음"만 뜻한다.
 
 > **`parseNullableDouble(Object)` 베이스 클래스로 승격 (코드리뷰 반영)**: 원래
 > `MarketDataApiClient`에만 있던 private 메서드였는데, `EtfApiClient.getCurrentPrice()`가

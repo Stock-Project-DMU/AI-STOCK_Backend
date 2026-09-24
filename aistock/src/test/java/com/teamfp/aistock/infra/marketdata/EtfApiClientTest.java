@@ -1,10 +1,12 @@
 package com.teamfp.aistock.infra.marketdata;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import java.util.List;
@@ -22,6 +24,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import com.teamfp.aistock.global.exception.CustomException;
+import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
 import com.teamfp.aistock.infra.marketdata.dto.EtfConstituentDto;
 
@@ -109,6 +113,45 @@ class EtfApiClientTest {
         }
 
         @Test
+        @DisplayName("외부 시세 데이터 제공사가 5xx로 실패하면 빈 값으로 삼키지 않고 MARKET_DATA_UNAVAILABLE을 던진다(#05)")
+        void fail_throwsMarketDataUnavailable_whenProviderReturnsServerError() {
+            when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+            mockServer.expect(requestTo(ETF_URL)).andRespond(withServerError());
+
+            assertThatThrownBy(() -> client.getCurrentPrice(STOCK_CODE))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.MARKET_DATA_UNAVAILABLE);
+            mockServer.verify();
+        }
+
+        @Test
+        @DisplayName("정상 응답이지만 t1901OutBlock이 없으면 장애가 아니라 빈 값으로 구분해 반환한다(#05)")
+        void success_returnsEmpty_whenResponseHasNoOutBlock() {
+            when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+            mockServer.expect(requestTo(ETF_URL))
+                    .andRespond(withSuccess("""
+                            {"rsp_cd":"00000","rsp_msg":"조회완료"}""", MediaType.APPLICATION_JSON));
+
+            Optional<CurrentPriceDetailDto> result = client.getCurrentPrice(STOCK_CODE);
+
+            assertThat(result).isEmpty();
+            mockServer.verify();
+        }
+
+        @Test
+        @DisplayName("토큰 발급이 MARKET_DATA_UNAVAILABLE로 실패하면 그대로 전파한다(#05)")
+        void fail_propagatesTokenFailure() {
+            when(accessTokenProvider.issueAccessToken())
+                    .thenThrow(new CustomException(ErrorCode.MARKET_DATA_UNAVAILABLE));
+
+            assertThatThrownBy(() -> client.getCurrentPrice(STOCK_CODE))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.MARKET_DATA_UNAVAILABLE);
+        }
+
+        @Test
         @DisplayName("t1901OutBlock이 없으면 빈 값을 반환한다")
         void empty_whenOutBlockMissing() {
             when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
@@ -139,6 +182,31 @@ class EtfApiClientTest {
             assertThat(result).hasSize(1);
             assertThat(result.get(0).getStockName()).isEqualTo("삼성전자");
             assertThat(result.get(0).getWeight()).isEqualTo(25.5);
+            mockServer.verify();
+        }
+
+        @Test
+        @DisplayName("정상 응답의 구성종목 배열이 비어 있으면 빈 목록을 반환한다(#05)")
+        void success_returnsEmptyList_whenNoConstituents() {
+            when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+            mockServer.expect(requestTo(ETF_URL))
+                    .andRespond(withSuccess("""
+                            {"rsp_cd":"00000","t1904OutBlock1":[]}""", MediaType.APPLICATION_JSON));
+
+            assertThat(client.getConstituents(STOCK_CODE)).isEmpty();
+            mockServer.verify();
+        }
+
+        @Test
+        @DisplayName("외부 시세 데이터 제공사가 5xx로 실패하면 빈 목록 대신 MARKET_DATA_UNAVAILABLE을 던진다(#05)")
+        void fail_throwsMarketDataUnavailable_whenProviderReturnsServerError() {
+            when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+            mockServer.expect(requestTo(ETF_URL)).andRespond(withServerError());
+
+            assertThatThrownBy(() -> client.getConstituents(STOCK_CODE))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.MARKET_DATA_UNAVAILABLE);
             mockServer.verify();
         }
     }

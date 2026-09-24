@@ -10,7 +10,6 @@ import org.springframework.web.client.RestClient;
 
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
-import com.teamfp.aistock.global.util.ExternalApiInvoker;
 import com.teamfp.aistock.infra.marketdata.dto.MarketDataTokenResponse;
 
 /**
@@ -47,14 +46,16 @@ public class MarketDataAccessTokenProvider {
     public synchronized String issueAccessToken() {
         long now = System.currentTimeMillis();
         if (cachedToken != null && now < refreshAt) return cachedToken;
-        if (now < retryAt) throw new CustomException(ErrorCode.EXTERNAL_API_ERROR);
+        if (now < retryAt) throw new CustomException(ErrorCode.MARKET_DATA_UNAVAILABLE);
         // Serialize refreshes, including a short cooldown when 외부 시세 데이터 is unavailable.
         retryAt = now + 5_000;
         String formBody = "grant_type=client_credentials"
                 + "&appkey=" + URLEncoder.encode(appKey, StandardCharsets.UTF_8)
                 + "&appsecretkey=" + URLEncoder.encode(appSecret, StandardCharsets.UTF_8)
                 + "&scope=oob";
-        MarketDataTokenResponse response = ExternalApiInvoker.call(() -> restClient.post()
+        // 토큰 발급 실패도 개별 조회 실패와 같은 "외부 시세 데이터 장애"로 취급한다 — 호출부가 빈 결과와
+        // 구분할 수 있도록 MARKET_DATA_UNAVAILABLE로 던진다(외부 장애와 빈 목록 구분 처리, #05).
+        MarketDataTokenResponse response = MarketDataApiClientSupport.invokeMarketData(() -> restClient.post()
                         .uri(tokenUrl)
                         .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                         .body(formBody)
@@ -62,7 +63,7 @@ public class MarketDataAccessTokenProvider {
                         .body(MarketDataTokenResponse.class),
                 "외부 시세 데이터 토큰 발급 실패");
         if (response == null || response.getAccessToken() == null || response.getAccessToken().isBlank()) {
-            throw new CustomException(ErrorCode.EXTERNAL_API_ERROR);
+            throw new CustomException(ErrorCode.MARKET_DATA_UNAVAILABLE);
         }
         cachedToken = response.getAccessToken();
         long ttlSeconds = Math.max(0, response.getExpiresIn() - 60);

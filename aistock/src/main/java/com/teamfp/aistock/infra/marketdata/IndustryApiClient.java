@@ -8,7 +8,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
-import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
 import com.teamfp.aistock.infra.marketdata.dto.ExpectedIndexDto;
 import com.teamfp.aistock.infra.marketdata.dto.IndustryPriceDto;
@@ -70,26 +69,21 @@ public class IndustryApiClient extends MarketDataApiClientSupport {
         if (localMarketDataReader.isPresent()) {
             return mockCurrentPrice(marketName, upcode);
         }
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            Map<String, Object> requestBody = Map.of("t1511InBlock", Map.of("upcode", upcode));
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> requestBody = Map.of("t1511InBlock", Map.of("upcode", upcode));
 
-            Map<String, Object> response = call("t1511", requestBody, token);
-            if (response == null || !(response.get("t1511OutBlock") instanceof Map)) {
-                return Optional.empty();
-            }
-            @SuppressWarnings("unchecked")
-            Map<String, Object> outBlock = (Map<String, Object>) response.get("t1511OutBlock");
-            return Optional.of(IndustryPriceDto.builder()
-                    .industryCode(upcode)
-                    .industryName(stringOf(outBlock.get("hname")))
-                    .indexValue(parseDoubleOrZero(outBlock.get("pricejisu")))
-                    .changeRate(parseDoubleOrZero(outBlock.get("diffjisu")))
-                    .build());
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 업종현재가 조회 중 오류 - marketName: {}, 사유: {}", marketName, e.getMessage());
+        Map<String, Object> response = call("t1511", requestBody, token);
+        if (response == null || !(response.get("t1511OutBlock") instanceof Map)) {
             return Optional.empty();
         }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> outBlock = (Map<String, Object>) response.get("t1511OutBlock");
+        return Optional.of(IndustryPriceDto.builder()
+                .industryCode(upcode)
+                .industryName(stringOf(outBlock.get("hname")))
+                .indexValue(parseDoubleOrZero(outBlock.get("pricejisu")))
+                .changeRate(parseDoubleOrZero(outBlock.get("diffjisu")))
+                .build());
     }
 
     /**
@@ -135,36 +129,31 @@ public class IndustryApiClient extends MarketDataApiClientSupport {
         boolean longPeriod = periodMonths != null && periodMonths > 0;
         String gubun2 = longPeriod ? GUBUN2_MONTH : GUBUN2_DAY;
         int cnt = longPeriod ? Math.min(periodMonths, MAX_PERIOD_MONTHS) : MAX_TREND_ITEMS;
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
-            inBlock.put("upcode", upcode);
-            inBlock.put("gubun1", " ");
-            inBlock.put("gubun2", gubun2);
-            inBlock.put("cts_date", " ");
-            inBlock.put("cnt", cnt);
-            inBlock.put("rate_gbn", "1");
-            Map<String, Object> requestBody = Map.of("t1514InBlock", inBlock);
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
+        inBlock.put("upcode", upcode);
+        inBlock.put("gubun1", " ");
+        inBlock.put("gubun2", gubun2);
+        inBlock.put("cts_date", " ");
+        inBlock.put("cnt", cnt);
+        inBlock.put("rate_gbn", "1");
+        Map<String, Object> requestBody = Map.of("t1514InBlock", inBlock);
 
-            Map<String, Object> response = call("t1514", requestBody, token);
-            if (response == null || !(response.get("t1514OutBlock1") instanceof List)) {
-                return List.of();
-            }
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> outBlock = (List<Map<String, Object>>) response.get("t1514OutBlock1");
-            return outBlock.stream()
-                    .limit(cnt)
-                    .map(row -> IndustryTrendDto.builder()
-                            .date(stringOf(row.get("date")))
-                            .indexValue(parseDoubleOrZero(row.get("jisu")))
-                            .changeRate(parseDoubleOrZero(row.get("diff")))
-                            .foreignNetBuy(parseLong(row.get("frgsvolume")))
-                            .build())
-                    .toList();
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 업종기간별추이 조회 중 오류 - marketName: {}, 사유: {}", marketName, e.getMessage());
+        Map<String, Object> response = call("t1514", requestBody, token);
+        if (response == null || !(response.get("t1514OutBlock1") instanceof List)) {
             return List.of();
         }
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> outBlock = (List<Map<String, Object>>) response.get("t1514OutBlock1");
+        return outBlock.stream()
+                .limit(cnt)
+                .map(row -> IndustryTrendDto.builder()
+                        .date(stringOf(row.get("date")))
+                        .indexValue(parseDoubleOrZero(row.get("jisu")))
+                        .changeRate(parseDoubleOrZero(row.get("diff")))
+                        .foreignNetBuy(parseLong(row.get("frgsvolume")))
+                        .build())
+                .toList();
     }
 
     /**
@@ -173,29 +162,24 @@ public class IndustryApiClient extends MarketDataApiClientSupport {
     public Optional<ExpectedIndexDto> getExpectedIndex(String marketName, String callAuctionSession) {
         String upcode = INDUSTRY_CODE_BY_NAME.getOrDefault(marketName, "001");
         String gubun = "장후".equals(callAuctionSession) ? "2" : "1";
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            Map<String, Object> requestBody = Map.of("t1485InBlock", Map.of("upcode", upcode, "gubun", gubun));
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> requestBody = Map.of("t1485InBlock", Map.of("upcode", upcode, "gubun", gubun));
 
-            Map<String, Object> response = call("t1485", requestBody, token);
-            if (response == null || !(response.get("t1485OutBlock") instanceof Map)) {
-                return Optional.empty();
-            }
-            @SuppressWarnings("unchecked")
-            Map<String, Object> outBlock = (Map<String, Object>) response.get("t1485OutBlock");
-            // t1485OutBlock에는 diff가 없고 change만 있는데, 이 change도 부호 없는 크기로 오고
-            // 방향은 sign 필드로 온다(t1102 등과 동일 패턴, 실측: sign=5인데 change="152.93" 양수).
-            // signedDoubleOrZero로 sign 기준 부호를 다시 매긴다(2026-09-11).
-            return Optional.of(ExpectedIndexDto.builder()
-                    .expectedIndexValue(parseDoubleOrZero(outBlock.get("pricejisu")))
-                    .changeRate(signedDoubleOrZero(outBlock.get("change"), outBlock.get("sign")))
-                    .upperLimitStockCount(parseLongPrimitive(outBlock.get("yupjo")))
-                    .lowerLimitStockCount(parseLongPrimitive(outBlock.get("ydownjo")))
-                    .build());
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 예상지수 조회 중 오류 - marketName: {}, 사유: {}", marketName, e.getMessage());
+        Map<String, Object> response = call("t1485", requestBody, token);
+        if (response == null || !(response.get("t1485OutBlock") instanceof Map)) {
             return Optional.empty();
         }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> outBlock = (Map<String, Object>) response.get("t1485OutBlock");
+        // t1485OutBlock에는 diff가 없고 change만 있는데, 이 change도 부호 없는 크기로 오고
+        // 방향은 sign 필드로 온다(t1102 등과 동일 패턴, 실측: sign=5인데 change="152.93" 양수).
+        // signedDoubleOrZero로 sign 기준 부호를 다시 매긴다(2026-09-11).
+        return Optional.of(ExpectedIndexDto.builder()
+                .expectedIndexValue(parseDoubleOrZero(outBlock.get("pricejisu")))
+                .changeRate(signedDoubleOrZero(outBlock.get("change"), outBlock.get("sign")))
+                .upperLimitStockCount(parseLongPrimitive(outBlock.get("yupjo")))
+                .lowerLimitStockCount(parseLongPrimitive(outBlock.get("ydownjo")))
+                .build());
     }
 
     private Map<String, Object> call(String trCd, Map<String, Object> requestBody, String token) {

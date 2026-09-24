@@ -763,6 +763,53 @@ class AiPlanningServiceTest {
         }
 
         @Test
+        @DisplayName("외부 시세 데이터 제공사 장애(MARKET_DATA_UNAVAILABLE)면 '데이터 없음'이 아니라 일시 장애 문구를 도구 결과로 준다(#05)")
+        void functionCall_foreignInstitutionalTrend_providerOutage_returnsOutageMessage() {
+            GeminiResponse.FunctionCall functionCall = new GeminiResponse.FunctionCall(
+                    "get_foreign_institutional_trend", Map.of("companyName", "삼성전자"));
+            GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
+            GeminiResponse finalResponse = new GeminiResponse("지금은 시세 제공사 연결이 원활하지 않아요.", 10);
+
+            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
+            stubHappyPathUpTo(firstResponse);
+            when(geminiApiClient.generate(any())).thenReturn(firstResponse).thenReturn(finalResponse);
+            when(dartApiClient.resolveStockCodeByName("삼성전자")).thenReturn(Optional.of("005930"));
+            when(investorTrendApiClient.getTrend("005930", null))
+                    .thenThrow(new CustomException(ErrorCode.MARKET_DATA_UNAVAILABLE));
+
+            aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("삼성전자 외국인 사고 있어?"));
+
+            org.mockito.ArgumentCaptor<GeminiRequest> captor = org.mockito.ArgumentCaptor.forClass(GeminiRequest.class);
+            verify(geminiApiClient, times(2)).generate(captor.capture());
+            String toolResult = captor.getAllValues().get(1).functionExchangeRounds().get(0).get(0)
+                    .functionResult().get("result").toString();
+            assertThat(toolResult).contains("일시적으로 연결할 수 없어").contains("데이터가 없는 것이 아니라");
+        }
+
+        @Test
+        @DisplayName("종목코드 조회를 거치지 않는 순위 도구도 제공사 장애면 일시 장애 문구를 준다(#05)")
+        void functionCall_marketRanking_providerOutage_returnsOutageMessage() {
+            GeminiResponse.FunctionCall functionCall = new GeminiResponse.FunctionCall(
+                    "get_market_ranking", Map.of("rankingType", "MARKET_CAP"));
+            GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
+            GeminiResponse finalResponse = new GeminiResponse("지금은 순위를 불러올 수 없어요.", 10);
+
+            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
+            stubHappyPathUpTo(firstResponse);
+            when(geminiApiClient.generate(any())).thenReturn(firstResponse).thenReturn(finalResponse);
+            when(highItemApiClient.getTopMarketCap())
+                    .thenThrow(new CustomException(ErrorCode.MARKET_DATA_UNAVAILABLE));
+
+            aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("시가총액 순위 알려줘"));
+
+            org.mockito.ArgumentCaptor<GeminiRequest> captor = org.mockito.ArgumentCaptor.forClass(GeminiRequest.class);
+            verify(geminiApiClient, times(2)).generate(captor.capture());
+            String toolResult = captor.getAllValues().get(1).functionExchangeRounds().get(0).get(0)
+                    .functionResult().get("result").toString();
+            assertThat(toolResult).contains("일시적으로 연결할 수 없어");
+        }
+
+        @Test
         @DisplayName("투자의견 도구 호출 시 stockCode로 조회해 최종 답변에 반영한다")
         void functionCall_investmentOpinion_executesToolAndReturnsResult() {
             GeminiResponse.FunctionCall functionCall = new GeminiResponse.FunctionCall(

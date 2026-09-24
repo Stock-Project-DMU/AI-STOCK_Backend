@@ -1,10 +1,12 @@
 package com.teamfp.aistock.infra.marketdata;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import java.util.List;
@@ -23,6 +25,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import com.teamfp.aistock.global.exception.CustomException;
+import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
 import com.teamfp.aistock.infra.marketdata.dto.RankingItemDto;
 
@@ -115,6 +119,19 @@ class HighItemApiClientTest {
             List<RankingItemDto> result = client.getTopPriceChangeRate();
 
             assertThat(result).hasSize(10);
+        }
+
+        @Test
+        @DisplayName("외부 시세 데이터 제공사가 5xx로 실패하면 빈 순위 대신 MARKET_DATA_UNAVAILABLE을 던진다(#05)")
+        void fail_throwsMarketDataUnavailable_whenProviderReturnsServerError() {
+            when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+            mockServer.expect(requestTo(HIGH_ITEM_URL)).andRespond(withServerError());
+
+            assertThatThrownBy(() -> client.getTopPriceChangeRate())
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.MARKET_DATA_UNAVAILABLE);
+            mockServer.verify();
         }
     }
 

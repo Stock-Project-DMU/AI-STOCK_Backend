@@ -6,6 +6,8 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
 
+import com.teamfp.aistock.global.exception.CustomException;
+import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.util.ExternalApiInvoker;
 
 /**
@@ -46,7 +48,7 @@ abstract class MarketDataApiClientSupport {
         QueryKey key = new QueryKey(url, trCd, requestBody, extraHeaders);
         Map<String, Object> cached = ttl > 0 ? quoteCache.get(key) : null;
         if (cached != null) return cached;
-        Map<String, Object> result = ExternalApiInvoker.call(() -> {
+        Map<String, Object> result = invokeMarketData(() -> {
             RestClient.RequestBodySpec spec = restClient.post()
                     .uri(url)
                     .header("Authorization", "Bearer " + token)
@@ -60,6 +62,22 @@ abstract class MarketDataApiClientSupport {
         }, errorLabel);
         quoteCache.put(key, result, ttl);
         return result;
+    }
+
+    /**
+     * 외부 시세 데이터 REST 호출 실패(네트워크 오류·HTTP 4xx/5xx)를 MARKET_DATA_UNAVAILABLE로 바꿔
+     * 던진다(외부 장애와 빈 목록 구분 처리, #05, 2026-09-24). 이전에는 클라이언트마다 이 예외를
+     * 잡아 빈 목록/Optional.empty()로 삼켜서, 호출부가 "제공사 장애"와 "정상 응답이지만 데이터
+     * 없음"을 구분할 수 없었다 — 이제 빈 값은 후자만 뜻하고, 장애는 이 예외로 전파된다.
+     * 로깅은 ExternalApiInvoker가 그대로 맡는다(스택트레이스 포함). MarketDataAccessTokenProvider도
+     * 토큰 발급 실패에 같은 에러코드를 쓴다.
+     */
+    static <T> T invokeMarketData(java.util.function.Supplier<T> apiCall, String errorLabel) {
+        try {
+            return ExternalApiInvoker.call(apiCall, errorLabel);
+        } catch (CustomException e) {
+            throw new CustomException(ErrorCode.MARKET_DATA_UNAVAILABLE, e.getCause() != null ? e.getCause() : e);
+        }
     }
 
     protected String stringOf(Object value) {

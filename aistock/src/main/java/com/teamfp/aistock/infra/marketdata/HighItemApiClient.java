@@ -9,7 +9,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
-import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
 import com.teamfp.aistock.infra.marketdata.dto.RankingItemDto;
 
@@ -230,35 +229,30 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
     private List<RankingItemDto> callAndParse(
             String trCd, String outBlockKey, Map<String, Object> inBlock,
             java.util.function.Function<Map<String, Object>, RankingItemDto.RankingItemDtoBuilder> rowMapper) {
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            Map<String, Object> requestBody = Map.of(trCd + "InBlock", inBlock);
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> requestBody = Map.of(trCd + "InBlock", inBlock);
 
-            Map<String, Object> response = call(highItemUrl, trCd, requestBody, token, "외부 시세 데이터 상위종목(" + trCd + ") 조회 실패");
+        Map<String, Object> response = call(highItemUrl, trCd, requestBody, token, "외부 시세 데이터 상위종목(" + trCd + ") 조회 실패");
 
-            if (response == null) {
-                return List.of();
-            }
-            Object outBlockObj = response.get(outBlockKey);
-            if (!(outBlockObj instanceof List)) {
-                log.warn("외부 시세 데이터 상위종목 응답에서 {}을 찾지 못함 - trCd: {}, 응답: {}", outBlockKey, trCd, response);
-                return List.of();
-            }
-            List<Map<String, Object>> outBlock = (List<Map<String, Object>>) outBlockObj;
-
-            List<RankingItemDto> items = new java.util.ArrayList<>();
-            int rank = 1;
-            for (Map<String, Object> row : outBlock) {
-                items.add(rowMapper.apply(row).rank(rank++).build());
-                if (items.size() >= MAX_RANKING_ITEMS) {
-                    break;
-                }
-            }
-            return items;
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 상위종목 조회 중 오류 - trCd: {}, 사유: {}", trCd, e.getMessage());
+        if (response == null) {
             return List.of();
         }
+        Object outBlockObj = response.get(outBlockKey);
+        if (!(outBlockObj instanceof List)) {
+            log.warn("외부 시세 데이터 상위종목 응답에서 {}을 찾지 못함 - trCd: {}, 응답: {}", outBlockKey, trCd, response);
+            return List.of();
+        }
+        List<Map<String, Object>> outBlock = (List<Map<String, Object>>) outBlockObj;
+
+        List<RankingItemDto> items = new java.util.ArrayList<>();
+        int rank = 1;
+        for (Map<String, Object> row : outBlock) {
+            items.add(rowMapper.apply(row).rank(rank++).build());
+            if (items.size() >= MAX_RANKING_ITEMS) {
+                break;
+            }
+        }
+        return items;
     }
 
 }
