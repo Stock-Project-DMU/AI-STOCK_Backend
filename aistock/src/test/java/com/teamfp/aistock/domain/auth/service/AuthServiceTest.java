@@ -5,6 +5,8 @@ import com.teamfp.aistock.domain.account.dto.response.AccountInfoResponse;
 import com.teamfp.aistock.domain.account.entity.AccountStatus;
 import com.teamfp.aistock.domain.account.service.AccountService;
 import com.teamfp.aistock.domain.auth.dto.request.SignupRequest;
+import com.teamfp.aistock.domain.auth.dto.request.RecoveryEmailCodeRequest;
+import com.teamfp.aistock.domain.auth.dto.request.RecoveryEmailCodeRequest.RecoveryPurpose;
 import com.teamfp.aistock.domain.auth.dto.response.SignupResponse;
 import com.teamfp.aistock.domain.user.entity.Role;
 import com.teamfp.aistock.domain.user.entity.User;
@@ -66,21 +68,93 @@ class AuthServiceTest {
     private AuthService authService;
 
     @Test
-    void recoveryRejectsCodeBeforeLookingUpIdentity() {
+    void recoveryDoesNotSendCodeWhenIdentityDoesNotMatch() {
+        var request = new RecoveryEmailCodeRequest(RecoveryPurpose.FIND_ID,
+                null, "다른 이름", "tester01@example.com", LocalDate.of(2000, 1, 1));
+        var user = User.builder().loginId("tester01").name("테스터").email(request.email())
+                .birthdate(request.birthdate()).isActive(true).build();
+        given(userRepository.findByEmail(request.email())).willReturn(java.util.Optional.of(user));
+
+        assertThatThrownBy(() -> authService.sendRecoveryEmailCode(request))
+                .isInstanceOf(CustomException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.RECOVERY_INFO_MISMATCH);
+        verify(mailClient, never()).sendAuthCode(anyString(), anyString());
+    }
+
+    @Test
+    void recoverySendsCodeOnlyAfterIdentityMatches() {
+        var request = new RecoveryEmailCodeRequest(RecoveryPurpose.RESET_PASSWORD,
+                "tester01", "테스터", "tester01@example.com", null);
+        var user = User.builder().loginId(request.loginId()).name(request.name())
+                .email(request.email()).password("oldHash").isActive(true).build();
+        given(userRepository.findByEmail(request.email())).willReturn(java.util.Optional.of(user));
+
+        authService.sendRecoveryEmailCode(request);
+
+        verify(mailClient).sendAuthCode(eq(request.email()), anyString());
+    }
+
+    @Test
+    void findIdRecoverySendsCodeWhenNameBirthdateAndEmailMatch() {
+        var request = new RecoveryEmailCodeRequest(RecoveryPurpose.FIND_ID,
+                null, "테스터", "tester01@example.com", LocalDate.of(2000, 1, 1));
+        var user = User.builder().loginId("tester01").name(request.name()).email(request.email())
+                .birthdate(request.birthdate()).isActive(true).build();
+        given(userRepository.findByEmail(request.email())).willReturn(java.util.Optional.of(user));
+
+        authService.sendRecoveryEmailCode(request);
+
+        verify(mailClient).sendAuthCode(eq(request.email()), anyString());
+    }
+
+    @Test
+    void passwordRecoveryDoesNotSendCodeWhenLoginIdDoesNotMatch() {
+        var request = new RecoveryEmailCodeRequest(RecoveryPurpose.RESET_PASSWORD,
+                "wrong-id", "테스터", "tester01@example.com", null);
+        var user = User.builder().loginId("tester01").name(request.name()).email(request.email())
+                .password("oldHash").isActive(true).build();
+        given(userRepository.findByEmail(request.email())).willReturn(java.util.Optional.of(user));
+
+        assertThatThrownBy(() -> authService.sendRecoveryEmailCode(request))
+                .isInstanceOf(CustomException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.RECOVERY_INFO_MISMATCH);
+        verify(mailClient, never()).sendAuthCode(anyString(), anyString());
+    }
+
+    @Test
+    void recoveryRejectsUnverifiedEmailBeforeReturningId() {
         var request = new com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest(
-                "tester01", "테스터", "tester01@example.com", LocalDate.of(2000, 1, 1), "000000", "newpass123");
-        assertThatThrownBy(() -> authService.findLoginId(request)).isInstanceOf(CustomException.class);
-        verify(userRepository, never()).findByEmail(anyString());
+                null, "테스터", "tester01@example.com", LocalDate.of(2000, 1, 1), null);
+        var user = User.builder().loginId("tester01").name(request.name()).email(request.email())
+                .birthdate(request.birthdate()).isActive(true).build();
+        given(userRepository.findByEmail(request.email())).willReturn(java.util.Optional.of(user));
+
+        assertThatThrownBy(() -> authService.findLoginId(request))
+                .isInstanceOf(CustomException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.EMAIL_NOT_VERIFIED);
+    }
+
+    @Test
+    void findIdRecoveryReturnsLoginIdAfterEmailVerification() {
+        var request = new com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest(
+                null, "테스터", "tester01@example.com", LocalDate.of(2000, 1, 1), null);
+        var user = User.builder().loginId("tester01").name(request.name()).email(request.email())
+                .birthdate(request.birthdate()).isActive(true).build();
+        given(userRepository.findByEmail(request.email())).willReturn(java.util.Optional.of(user));
+        given(redisAuthCodeService.consumeEmailVerified(request.email())).willReturn(true);
+
+        assertThat(authService.findLoginId(request)).isEqualTo("tester01");
+        verify(redisAuthCodeService).consumeEmailVerified(request.email());
     }
 
     @Test
     void passwordRecoveryUpdatesHashAndRevokesRefreshToken() {
         var request = new com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest(
-                "tester01", "테스터", "tester01@example.com", null, "123456", "newpass123");
+                "tester01", "테스터", "tester01@example.com", null, "newpass123");
         var user = User.builder().loginId("tester01").name("테스터").email("tester01@example.com")
                 .password("oldHash").isActive(true).build();
         ReflectionTestUtils.setField(user, "userId", 10L);
-        given(redisAuthCodeService.verifyAndDeleteEmailCode(request.email(), request.code())).willReturn(true);
+        given(redisAuthCodeService.consumeEmailVerified(request.email())).willReturn(true);
         given(userRepository.findByEmail(request.email())).willReturn(java.util.Optional.of(user));
         given(passwordEncoder.encode(request.newPassword())).willReturn("newHash");
         authService.resetPassword(request);

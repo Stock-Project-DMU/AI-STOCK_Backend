@@ -4,6 +4,8 @@ import com.teamfp.aistock.domain.account.dto.request.CreateAccountRequest;
 import com.teamfp.aistock.domain.account.service.AccountService;
 import com.teamfp.aistock.domain.auth.dto.request.LoginRequest;
 import com.teamfp.aistock.domain.auth.dto.request.OAuthLoginRequest;
+import com.teamfp.aistock.domain.auth.dto.request.RecoveryEmailCodeRequest;
+import com.teamfp.aistock.domain.auth.dto.request.RecoveryEmailCodeRequest.RecoveryPurpose;
 import com.teamfp.aistock.domain.auth.dto.request.SignupRequest;
 import com.teamfp.aistock.domain.auth.dto.response.LoginResponse;
 import com.teamfp.aistock.domain.auth.dto.response.SignupResponse;
@@ -34,6 +36,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -54,11 +57,16 @@ public class AuthService {
     }
 
     public String findLoginId(com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest request) {
-        User user = verifyRecoveryIdentity(request);
-        if (request.birthdate() == null || !request.birthdate().equals(user.getBirthdate())) {
-            throw new CustomException(ErrorCode.INVALID_INPUT);
-        }
+        User user = findRecoveryUser(RecoveryPurpose.FIND_ID, request.email(), request.name(),
+                null, request.birthdate());
+        requireVerifiedRecoveryEmail(request.email());
         return user.getLoginId();
+    }
+
+    public void sendRecoveryEmailCode(RecoveryEmailCodeRequest request) {
+        findRecoveryUser(request.purpose(), request.email(), request.name(),
+                request.loginId(), request.birthdate());
+        sendEmailCode(request.email());
     }
 
     @Transactional
@@ -67,23 +75,33 @@ public class AuthService {
                 || request.loginId() == null || request.loginId().isBlank()) {
             throw new CustomException(ErrorCode.INVALID_INPUT);
         }
-        User user = verifyRecoveryIdentity(request);
-        if (!request.loginId().equals(user.getLoginId())) {
-            throw new CustomException(ErrorCode.INVALID_INPUT);
-        }
+        User user = findRecoveryUser(RecoveryPurpose.RESET_PASSWORD, request.email(),
+                request.name(), request.loginId(), null);
+        requireVerifiedRecoveryEmail(request.email());
         user.changePassword(passwordEncoder.encode(request.newPassword()));
         redisTokenService.deleteRefreshToken(user.getUserId());
     }
 
-    private User verifyRecoveryIdentity(com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest request) {
-        // 이메일 소유 증명을 먼저 소비해 비인증 계정 조회와 인증코드 재사용을 차단한다.
-        if (!redisAuthCodeService.verifyAndDeleteEmailCode(request.email(), request.code())) {
-            throw new CustomException(ErrorCode.EMAIL_CODE_MISMATCH);
+    private User findRecoveryUser(RecoveryPurpose purpose, String email, String name,
+                                  String loginId, LocalDate birthdate) {
+        if (purpose == null || email == null || name == null) {
+            throw new CustomException(ErrorCode.RECOVERY_INFO_MISMATCH);
         }
-        return userRepository.findByEmail(request.email())
+        return userRepository.findByEmail(email)
                 .filter(User::isActive)
-                .filter(user -> request.name().equals(user.getName()) && user.getLoginId() != null)
-                .orElseThrow(() -> new CustomException(ErrorCode.INVALID_INPUT));
+                .filter(user -> name.equals(user.getName()) && user.getLoginId() != null)
+                .filter(user -> switch (purpose) {
+                    case FIND_ID -> birthdate != null && birthdate.equals(user.getBirthdate());
+                    case RESET_PASSWORD -> loginId != null && loginId.equals(user.getLoginId())
+                            && user.getPassword() != null;
+                })
+                .orElseThrow(() -> new CustomException(ErrorCode.RECOVERY_INFO_MISMATCH));
+    }
+
+    private void requireVerifiedRecoveryEmail(String email) {
+        if (!redisAuthCodeService.consumeEmailVerified(email)) {
+            throw new CustomException(ErrorCode.EMAIL_NOT_VERIFIED);
+        }
     }
 
     private static final SecureRandom EMAIL_CODE_RANDOM = new SecureRandom();

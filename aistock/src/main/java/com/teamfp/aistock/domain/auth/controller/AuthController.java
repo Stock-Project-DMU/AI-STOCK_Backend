@@ -4,6 +4,7 @@ import com.teamfp.aistock.domain.auth.dto.request.EmailCodeRequest;
 import com.teamfp.aistock.domain.auth.dto.request.EmailCodeVerifyRequest;
 import com.teamfp.aistock.domain.auth.dto.request.LoginRequest;
 import com.teamfp.aistock.domain.auth.dto.request.OAuthLoginRequest;
+import com.teamfp.aistock.domain.auth.dto.request.RecoveryEmailCodeRequest;
 import com.teamfp.aistock.domain.auth.dto.request.SignupRequest;
 import com.teamfp.aistock.domain.auth.dto.response.LoginResponse;
 import com.teamfp.aistock.domain.auth.dto.response.SignupResponse;
@@ -36,6 +37,12 @@ public class AuthController {
     public ApiResponse<Void> resetPassword(@Valid @RequestBody com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest request) {
         authService.resetPassword(request);
         return ApiResponse.success("비밀번호가 변경되었습니다.", null);
+    }
+
+    @PostMapping("/recovery/send-code")
+    public ApiResponse<Void> sendRecoveryEmailCode(@Valid @RequestBody RecoveryEmailCodeRequest request) {
+        authService.sendRecoveryEmailCode(request);
+        return ApiResponse.success("인증코드가 발송되었습니다.", null);
     }
 
     private final AuthService authService;
