@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -23,4 +24,8 @@ public interface AiPlanningMessageRepository extends JpaRepository<AiPlanningMes
     // 뒤집어 쓴다). messageId를 2차 정렬키로 두는 이유는 위 asc 메서드와 동일.
     @Query("select m from AiPlanningMessage m where m.session.sessionId = :sessionId order by m.createdAt desc, m.messageId desc")
     List<AiPlanningMessage> findRecentBySessionId(@Param("sessionId") Long sessionId, Pageable pageable);
+
+    @Modifying
+    @Query("delete from AiPlanningMessage m where m.session.sessionId = :sessionId")
+    void deleteBySessionId(@Param("sessionId") Long sessionId);
 }

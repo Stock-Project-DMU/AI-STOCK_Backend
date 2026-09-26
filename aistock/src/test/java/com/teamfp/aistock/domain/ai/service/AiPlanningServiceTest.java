@@ -857,6 +857,51 @@ class AiPlanningServiceTest {
     }
 
     @Nested
+    @DisplayName("세션 제목 수정과 삭제")
+    class SessionManagement {
+
+        @Test
+        @DisplayName("내 세션의 제목을 수정할 수 있다")
+        void renamesOwnedSession() {
+            when(sessionRepository.findByUserIdAndSessionId(USER_ID, SESSION_ID)).thenReturn(Optional.of(session));
+
+            var response = aiPlanningService.renameSession(USER_ID, SESSION_ID, "  은퇴 계획  ");
+
+            assertThat(response.title()).isEqualTo("은퇴 계획");
+            assertThat(session.getTitle()).isEqualTo("은퇴 계획");
+        }
+
+        @Test
+        @DisplayName("다른 사용자의 세션은 수정하거나 삭제할 수 없다")
+        void rejectsUnownedSession() {
+            when(sessionRepository.findByUserIdAndSessionId(USER_ID, SESSION_ID)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> aiPlanningService.renameSession(USER_ID, SESSION_ID, "새 제목"))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.AI_SESSION_NOT_FOUND);
+            assertThatThrownBy(() -> aiPlanningService.deleteSession(USER_ID, SESSION_ID))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.AI_SESSION_NOT_FOUND);
+            verify(messageRepository, never()).deleteBySessionId(anyLong());
+            verify(sessionRepository, never()).delete(any());
+        }
+
+        @Test
+        @DisplayName("내 세션을 삭제하면 메시지도 함께 삭제한다")
+        void deletesOwnedSessionAndMessages() {
+            ReflectionTestUtils.setField(session, "sessionId", SESSION_ID);
+            when(sessionRepository.findByUserIdAndSessionId(USER_ID, SESSION_ID)).thenReturn(Optional.of(session));
+
+            aiPlanningService.deleteSession(USER_ID, SESSION_ID);
+
+            verify(messageRepository).deleteBySessionId(SESSION_ID);
+            verify(sessionRepository).delete(session);
+        }
+    }
+
+    @Nested
     @DisplayName("세션 소유권 검증")
     class SessionOwnership {
 

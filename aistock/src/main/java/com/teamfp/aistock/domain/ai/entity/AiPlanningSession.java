@@ -67,8 +67,7 @@ public class AiPlanningSession {
     }
 
     /**
-     * 세션 제목 자동 채우기. 생성 시 title은 null이며, 첫 메시지가 저장될 때
-     * AiPlanningService.sendMessage()가 사용자 메시지 앞부분을 잘라 한 번만 채운다.
+     * 생성 시 제목은 첫 메시지에서 자동으로 채워지며, 이후 사용자가 직접 수정할 수 있다.
      */
     public void updateTitle(String title) {
         this.title = title;
