@@ -618,6 +618,9 @@ CREATE TABLE news_briefing_settings (
     setting_id     BIGINT          NOT NULL AUTO_INCREMENT,
     user_id        BIGINT          NOT NULL,
     outlet_domain  VARCHAR(50)     NOT NULL,
+    delivery_time  TIME            NOT NULL DEFAULT '07:00:00',
+    last_attempt_date DATE         NULL,
+    last_attempt_at DATETIME       NULL,
     created_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP
                                              ON UPDATE CURRENT_TIMESTAMP,
@@ -631,8 +634,8 @@ CREATE TABLE news_briefing_settings (
 -- =====================================================
 /*
   [생성 흐름]
-  AiNewsService.generateDailyBriefings()가 매일 07:00(KST)에 news_briefing_settings를
-  가진 사용자 전원을 순회한다. NaverNewsApiClient.searchByOutlet(outletDomain)로 그
+  AiNewsService.generateDailyBriefings()가 매분 설정된 수신 시간(KST)이 지난 사용자를
+  확인한다. NaverNewsApiClient.searchByOutlet(outletDomain)로 그
   언론사의 오늘자 시황 기사를 모으고, Gemini로 3~4문장 요약을 만들어 한 행씩 저장한
   뒤 notifications에도 "오늘의 브리핑 도착" 알림을 함께 남긴다(type='NEWS').
   재무설계사(ai_planning_sessions/messages)처럼 대화 이력을 쌓는 게 아니라, 하루 한

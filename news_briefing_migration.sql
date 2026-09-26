@@ -30,6 +30,9 @@ CREATE TABLE IF NOT EXISTS news_briefing_settings (
     setting_id     BIGINT          NOT NULL AUTO_INCREMENT,
     user_id        BIGINT          NOT NULL,
     outlet_domain  VARCHAR(50)     NOT NULL,
+    delivery_time  TIME            NOT NULL DEFAULT '07:00:00',
+    last_attempt_date DATE         NULL,
+    last_attempt_at DATETIME       NULL,
     created_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP
                                              ON UPDATE CURRENT_TIMESTAMP,

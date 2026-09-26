@@ -2,11 +2,14 @@ package com.teamfp.aistock.domain.ai.repository;
 
 import java.util.List;
 import java.util.Optional;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.teamfp.aistock.domain.ai.entity.NewsBriefingSetting;
 
@@ -23,6 +26,11 @@ public interface NewsBriefingSettingRepository extends JpaRepository<NewsBriefin
     // LAZY 프록시로 인한 LazyInitializationException을 피한다.
     @Query("SELECT s FROM NewsBriefingSetting s JOIN FETCH s.user")
     List<NewsBriefingSetting> findAllWithUser();
+
+    @Transactional
+    @Modifying
+    @Query("update NewsBriefingSetting s set s.lastAttemptDate = :date, s.lastAttemptAt = :attemptedAt where s.settingId = :settingId and (s.lastAttemptDate is null or s.lastAttemptDate < :date)")
+    int claimBriefingAttempt(@Param("settingId") Long settingId, @Param("date") LocalDate date, @Param("attemptedAt") LocalDateTime attemptedAt);
 
     // 탈퇴 처리용 — schema.sql users 테이블 주석의 자식 테이블 명시적 삭제 순서(v12) 참고.
     @Modifying

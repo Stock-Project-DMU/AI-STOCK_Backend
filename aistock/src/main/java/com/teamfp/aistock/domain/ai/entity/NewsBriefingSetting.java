@@ -1,6 +1,8 @@
 package com.teamfp.aistock.domain.ai.entity;
 
 import java.time.LocalDateTime;
+import java.time.LocalDate;
+import java.time.LocalTime;
 
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
@@ -52,6 +54,15 @@ public class NewsBriefingSetting {
     @Column(name = "outlet_domain", length = 50, nullable = false)
     private String outletDomain;
 
+    @Column(name = "delivery_time", nullable = false, columnDefinition = "TIME DEFAULT '07:00:00'")
+    private LocalTime deliveryTime;
+
+    @Column(name = "last_attempt_date")
+    private LocalDate lastAttemptDate;
+
+    @Column(name = "last_attempt_at")
+    private LocalDateTime lastAttemptAt;
+
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -61,13 +72,16 @@ public class NewsBriefingSetting {
     private LocalDateTime updatedAt;
 
     @Builder
-    private NewsBriefingSetting(User user, String outletDomain) {
+    private NewsBriefingSetting(User user, String outletDomain, LocalTime deliveryTime) {
         this.user = user;
         this.outletDomain = outletDomain;
+        this.deliveryTime = deliveryTime;
     }
 
-    // 언론사 변경(예: 한국경제 → 매일경제) — 상태 변경은 Setter 대신 의미 있는 메서드로.
-    public void changeOutlet(String outletDomain) {
+    public void changeSchedule(String outletDomain, LocalTime deliveryTime) {
         this.outletDomain = outletDomain;
+        this.deliveryTime = deliveryTime;
+        this.lastAttemptDate = null;
+        this.lastAttemptAt = null;
     }
 }

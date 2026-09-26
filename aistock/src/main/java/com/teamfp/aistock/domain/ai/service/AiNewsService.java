@@ -1,6 +1,8 @@
 package com.teamfp.aistock.domain.ai.service;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.Comparator;
 import java.util.List;
@@ -51,6 +53,7 @@ import lombok.extern.slf4j.Slf4j;
 public class AiNewsService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private static final LocalTime DEFAULT_DELIVERY_TIME = LocalTime.of(7, 0);
 
     // 비서 톤 인사말(2026-08-24 사용자 요청) — AiPlanningService.FIRST_TURN_GREETING과 동일한
     // 이유로 프롬프트 지시만으로 맡기지 않고 코드가 항상 앞에 붙인다. Gemini에게 "인사도 네가
@@ -151,8 +154,11 @@ public class AiNewsService {
      * 설정이 있으면 교체하고, 없으면 새로 만든다.
      */
     @Transactional
-    public NewsBriefingSettingResponse updateMySetting(Long userId, String outletDomain) {
+    public NewsBriefingSettingResponse updateMySetting(Long userId, String outletDomain, LocalTime deliveryTime) {
         validateOutlet(outletDomain);
+        if (deliveryTime == null || deliveryTime.getSecond() != 0 || deliveryTime.getNano() != 0) {
+            throw new CustomException(ErrorCode.INVALID_INPUT);
+        }
 
         NewsBriefingSetting setting = newsBriefingSettingRepository.findByUserId(userId).orElse(null);
         if (setting == null) {
@@ -160,9 +166,10 @@ public class AiNewsService {
             setting = NewsBriefingSetting.builder()
                     .user(user)
                     .outletDomain(outletDomain)
+                    .deliveryTime(deliveryTime)
                     .build();
         } else {
-            setting.changeOutlet(outletDomain);
+            setting.changeSchedule(outletDomain, deliveryTime);
         }
         NewsBriefingSetting saved = newsBriefingSettingRepository.save(setting);
         return NewsBriefingSettingResponse.from(saved);
@@ -199,21 +206,31 @@ public class AiNewsService {
     }
 
     /**
-     * 매일 아침 7시(KST) — 언론사를 설정해둔 사용자 전체를 순회하며 오늘의 브리핑을 생성한다.
+     * 매분(KST) 설정한 수신 시각이 지난 사용자를 확인하고, 하루에 한 번만 브리핑 생성을 시도한다.
      * 재무설계사의 Gemini 호출과 달리 사용자가 직접 요청한 게 아니라 서버가 스스로 도는
      * 배치 작업이라, 대화용으로 설계된 RedisRateLimiterService(분당3/일일10)는 여기 적용하지
      * 않는다 — 그 한도는 사용자 한 명이 채팅을 남용하는 것을 막기 위한 것이지, 서버가 하루
      * 한 번 대신 요약해주는 이 기능과는 목적이 다르다.
      */
-    @Scheduled(cron = "0 0 7 * * *", zone = "Asia/Seoul")
+    @Scheduled(cron = "0 * * * * *", zone = "Asia/Seoul")
     public void generateDailyBriefings() {
+        generateDueBriefings(LocalDateTime.now(KST));
+    }
+
+    void generateDueBriefings(LocalDateTime now) {
         List<NewsBriefingSetting> settings = newsBriefingSettingRepository.findAllWithUser();
-        LocalDate today = LocalDate.now(KST);
-        log.info("뉴스 브리핑 일일 배치 시작 - 대상 사용자 {}명", settings.size());
+        LocalDate today = now.toLocalDate();
 
         int successCount = 0;
         for (NewsBriefingSetting setting : settings) {
+            LocalTime deliveryTime = setting.getDeliveryTime() == null ? DEFAULT_DELIVERY_TIME : setting.getDeliveryTime();
+            if (deliveryTime.isAfter(now.toLocalTime())) {
+                continue;
+            }
             try {
+                if (newsBriefingSettingRepository.claimBriefingAttempt(setting.getSettingId(), today, now) == 0) {
+                    continue;
+                }
                 if (self.generateBriefingForUser(setting, today)) {
                     successCount++;
                 }
@@ -223,7 +240,9 @@ public class AiNewsService {
                 log.error("뉴스 브리핑 생성 실패 - userId: {}", setting.getUser().getUserId(), e);
             }
         }
-        log.info("뉴스 브리핑 일일 배치 종료 - 성공 {}건 / 대상 {}건", successCount, settings.size());
+        if (successCount > 0) {
+            log.info("뉴스 브리핑 예약 처리 완료 - 생성 {}건", successCount);
+        }
     }
 
     /**
