@@ -19,6 +19,10 @@ public class GoalPlanController {
     @GetMapping public ApiResponse<List<GoalPlanResponse>> getPlans() {
         return ApiResponse.success(goalPlanService.getPlans(SecurityUtil.getCurrentUserId()));
     }
+    @PutMapping("/{planId}") public ApiResponse<GoalPlanResponse> updatePlan(@PathVariable Long planId,
+            @Valid @RequestBody GoalPlanRequest request) {
+        return ApiResponse.success(goalPlanService.updatePlan(SecurityUtil.getCurrentUserId(), planId, request));
+    }
     @PatchMapping("/{planId}/saved") public ApiResponse<GoalPlanResponse> savePlan(@PathVariable Long planId) {
         return ApiResponse.success(goalPlanService.savePlan(SecurityUtil.getCurrentUserId(), planId));
     }

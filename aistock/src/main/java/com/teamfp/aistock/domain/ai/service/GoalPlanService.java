@@ -26,6 +26,12 @@ public class GoalPlanService {
         return goalPlanRepository.findTop100ByUserIdOrderByCreatedAtDesc(userId).stream().map(this::toResponse).toList();
     }
     @Transactional
+    public GoalPlanResponse updatePlan(Long userId, Long planId, GoalPlanRequest request) {
+        GoalPlan plan = findPlan(userId, planId);
+        plan.updateSettings(request);
+        return toResponse(plan);
+    }
+    @Transactional
     public GoalPlanResponse savePlan(Long userId, Long planId) {
         GoalPlan plan = findPlan(userId, planId);
         plan.savePlan();
