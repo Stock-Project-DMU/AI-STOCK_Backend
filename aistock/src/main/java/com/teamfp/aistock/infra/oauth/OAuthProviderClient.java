@@ -23,7 +23,11 @@ public class OAuthProviderClient {
     private final Environment environment;
 
     private String setting(SocialProvider provider, String suffix) {
-        return environment.getProperty(provider.name() + "_OAUTH_" + suffix, "");
+        String value = environment.getProperty(provider.name() + "_OAUTH_" + suffix, "");
+        if (value.isBlank() && provider == SocialProvider.GOOGLE && !"REDIRECT_URI".equals(suffix)) {
+            return environment.getProperty("GOOGLE_" + suffix, "");
+        }
+        return value;
     }
 
     private void requireConfigured(SocialProvider provider) {
@@ -76,23 +80,29 @@ public class OAuthProviderClient {
             JsonNode profile = client.get().uri(userUrl).headers(headers -> headers.setBearerAuth(token.path("access_token").asText()))
                     .retrieve().body(JsonNode.class);
             if (profile == null) throw new CustomException(ErrorCode.INVALID_TOKEN);
-            JsonNode account = provider == SocialProvider.NAVER ? profile.path("response")
-                    : provider == SocialProvider.KAKAO ? profile.path("kakao_account") : profile;
-            String id = provider == SocialProvider.GOOGLE ? profile.path("sub").asText("")
-                    : provider == SocialProvider.KAKAO ? profile.path("id").asText("") : account.path("id").asText("");
-            boolean verified = provider == SocialProvider.GOOGLE ? account.path("email_verified").asBoolean(false)
-                    : provider == SocialProvider.KAKAO ? account.path("is_email_valid").asBoolean(false) && account.path("is_email_verified").asBoolean(false)
-                    : "00".equals(profile.path("resultcode").asText(""));
-            String email = verified ? account.path("email").asText("") : "";
-            String name = provider == SocialProvider.KAKAO ? account.path("profile").path("nickname").asText("")
-                    : account.path("name").asText("");
-            if (id.isBlank() || email.isBlank()) throw new CustomException(ErrorCode.OAUTH_EMAIL_REQUIRED);
-            return new SocialUserDto(id, email.toLowerCase(Locale.ROOT), name.isBlank() ? "회원" : name);
+            return mapUserInfo(provider, profile);
         } catch (CustomException e) {
             throw e;
         } catch (org.springframework.web.client.RestClientException e) {
             // 토큰 응답 본문이 예외 메시지에 포함될 수 있으므로 원문을 기록하지 않음
             throw new CustomException(ErrorCode.EXTERNAL_API_ERROR);
         }
+    }
+
+    static SocialUserDto mapUserInfo(SocialProvider provider, JsonNode profile) {
+        JsonNode account = provider == SocialProvider.NAVER ? profile.path("response")
+                : provider == SocialProvider.KAKAO ? profile.path("kakao_account") : profile;
+        String id = provider == SocialProvider.GOOGLE ? profile.path("sub").asText("")
+                : provider == SocialProvider.KAKAO ? profile.path("id").asText("") : account.path("id").asText("");
+        boolean verified = provider == SocialProvider.GOOGLE ? account.path("email_verified").asBoolean(false)
+                : provider == SocialProvider.KAKAO ? account.path("is_email_valid").asBoolean(false) && account.path("is_email_verified").asBoolean(false)
+                : "00".equals(profile.path("resultcode").asText(""));
+        String email = verified ? account.path("email").asText("") : "";
+        String name = provider == SocialProvider.KAKAO ? account.path("profile").path("nickname").asText("")
+                : account.path("name").asText("");
+        if (id.isBlank()) throw new CustomException(ErrorCode.INVALID_TOKEN);
+        // 이메일 동의가 없거나 인증되지 않은 경우에도 제공자 ID로 계정을 식별한다.
+        // 검증되지 않은 이메일로 기존 계정을 자동 연동하지 않도록 null로 전달한다.
+        return new SocialUserDto(id, email.isBlank() ? null : email.toLowerCase(Locale.ROOT), name.isBlank() ? "회원" : name);
     }
 }
