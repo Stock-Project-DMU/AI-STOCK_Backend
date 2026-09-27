@@ -247,6 +247,12 @@
 STOMP 엔드포인트: `/ws-stomp`
 토픽: `/topic/stock/{stockCode}` (브로드캐스팅), `/queue`(유니캐스팅 prefix), `/app`(publish prefix)
 
+> **`registerStompEndpoints()`의 `setAllowedOriginPatterns()` (배포 사전검증 단계 변경)**:
+> 원래 `"*"` 하드코딩이었는데, REST CORS(`SecurityConfig.corsConfigurationSource()`가 쓰는
+> `cors.allowed-origins`, 환경변수 `CORS_ALLOWED_ORIGINS`)와 같은 값을 콤마 분리해서 그대로
+> 쓰도록 바꿨다 — 배포 시 프론트엔드 도메인을 REST/WebSocket 두 군데에 따로 등록하지 않아도
+> 되고, `"*"`보다 실제로 허용할 도메인만 열어두는 쪽이 안전하다.
+
 ### `StompAuthInterceptor`
 메서드: `preSend(Message<?> message, MessageChannel channel)`, `onSessionDisconnect(SessionDisconnectEvent event)`
 
@@ -286,29 +292,29 @@ AWS Parameter Store에서 민감한 설정값(JWT_SECRET, DB 자격증명, `ADMI
 
 | 클래스 | 주요 메서드 |
 |---|---|
-| `LsWebSocketClient` | `connect()`, `subscribe(String stockCode)`, `unsubscribe(String stockCode)`, `disconnect()` |
-| `LsWebSocketHandler` | `handleMessage(String rawMessage)`, `onTickReceived(LsTickData tickData)`, `onHogaReceived(LsHogaData hogaData)` |
-| `LsReconnectService` | `scheduleReconnect()`, `reconnectWithBackoff()` |
-| `LsMarketDataListener` (v9 추가) | `onTickReceived(LsTickData tickData)`, `onHogaReceived(LsHogaData hogaData)` — infra는 domain을 직접 참조하지 않으므로(CLAUDE.md 4번), `LsWebSocketHandler`가 파싱한 시세를 domain에 넘기기 위한 콜백 인터페이스. 4주차 `feature/stock-price`의 `StockBroadcastService`가 이를 구현해 스프링 빈으로 등록하면 자동으로 연결된다. |
-| `LsTickData` (dto) | `stockCode`, `stockName`, `currentPrice`, `changeRate`, `changeAmount`(v14 추가), `volume`, `tradedAt` — `stockName`은 LS 실시간 체결 응답에 종목명 필드 자체가 없어 파싱 시 항상 `null`로 둔다(아래 참고). `changeAmount`는 LS 원본 `change` 필드(전일대비, 항상 부호 없는 절대값)를 그대로 옮긴 것 — 부호 없음에 주의, 부호를 반영한 최종 등락 금액은 4주차 `feature/stock-price`의 `StockBroadcastService`가 `changeRate` 부호를 적용해 `StockPriceDto.changeAmount`로 변환할 때 붙인다 |
-| `LsHogaData` (dto) | `stockCode`, `askPrices`(List), `askVolumes`(List), `bidPrices`(List), `bidVolumes`(List) |
-| `LsTokenResponse` (dto, v10 추가) | `accessToken`, `tokenType`, `expiresIn`, `scope` — `/oauth2/token` 응답(`access_token`/`token_type`/`expires_in`/`scope`)을 Jackson `@JsonProperty`로 매핑하는 내부 DTO. `LsWebSocketClient`가 토큰 발급 시에만 사용 |
-| `LsAuthenticationException` (v10 추가) | `LsWebSocketClient`가 `/oauth2/token` 발급 응답을 HTTP 401/403으로 받았을 때 던지는 런타임 예외. `LsReconnectService.reconnectWithBackoff()`가 이 예외 타입으로 "인증 실패로 의심되는 경우"와 "네트워크 문제로 의심되는 경우"를 구분해 로그를 남긴다 (도메인에 노출되는 예외가 아니라 infra 내부 재연결 로직 전용이라 `CustomException`/`ErrorCode`를 쓰지 않음) |
+| `MarketDataWebSocketClient` | `connect()`, `subscribe(String stockCode)`, `unsubscribe(String stockCode)`, `disconnect()` |
+| `MarketDataWebSocketHandler` | `handleMessage(String rawMessage)`, `onTickReceived(TickData tickData)`, `onHogaReceived(HogaData hogaData)` |
+| `MarketDataReconnectService` | `scheduleReconnect()`, `reconnectWithBackoff()` |
+| `MarketDataListener` (v9 추가) | `onTickReceived(TickData tickData)`, `onHogaReceived(HogaData hogaData)` — infra는 domain을 직접 참조하지 않으므로(CLAUDE.md 4번), `MarketDataWebSocketHandler`가 파싱한 시세를 domain에 넘기기 위한 콜백 인터페이스. 4주차 `feature/stock-price`의 `StockBroadcastService`가 이를 구현해 스프링 빈으로 등록하면 자동으로 연결된다. |
+| `TickData` (dto) | `stockCode`, `stockName`, `currentPrice`, `changeRate`, `changeAmount`(v14 추가), `volume`, `tradedAt` — `stockName`은 외부 시세 데이터 실시간 체결 응답에 종목명 필드 자체가 없어 파싱 시 항상 `null`로 둔다(아래 참고). `changeAmount`는 외부 시세 데이터 원본 `change` 필드(전일대비, 항상 부호 없는 절대값)를 그대로 옮긴 것 — 부호 없음에 주의, 부호를 반영한 최종 등락 금액은 4주차 `feature/stock-price`의 `StockBroadcastService`가 `changeRate` 부호를 적용해 `StockPriceDto.changeAmount`로 변환할 때 붙인다 |
+| `HogaData` (dto) | `stockCode`, `askPrices`(List), `askVolumes`(List), `bidPrices`(List), `bidVolumes`(List) |
+| `MarketDataTokenResponse` (dto, v10 추가) | `accessToken`, `tokenType`, `expiresIn`, `scope` — `/oauth2/token` 응답(`access_token`/`token_type`/`expires_in`/`scope`)을 Jackson `@JsonProperty`로 매핑하는 내부 DTO. `MarketDataWebSocketClient`가 토큰 발급 시에만 사용 |
+| `MarketDataAuthenticationException` (v10 추가) | `MarketDataWebSocketClient`가 `/oauth2/token` 발급 응답을 HTTP 401/403으로 받았을 때 던지는 런타임 예외. `MarketDataReconnectService.reconnectWithBackoff()`가 이 예외 타입으로 "인증 실패로 의심되는 경우"와 "네트워크 문제로 의심되는 경우"를 구분해 로그를 남긴다 (도메인에 노출되는 예외가 아니라 infra 내부 재연결 로직 전용이라 `CustomException`/`ErrorCode`를 쓰지 않음) |
 
-**연동 정보 (LS증권 Open API 공식 가이드 확인, v9)**
+**연동 정보 (외부 시세 데이터 제공사 Open API 공식 가이드 확인, v9)**
 - 실시간시세 WebSocket: 실서버 `wss://openapi.ls-sec.co.kr:9443/websocket`, 모의투자 `wss://openapi.ls-sec.co.kr:29443/websocket`
 - 접근토큰 발급: `POST https://openapi.ls-sec.co.kr:8080/oauth2/token` (`application/x-www-form-urlencoded`, `grant_type=client_credentials&appkey=...&appsecretkey=...&scope=oob`) — 실서버/모의투자 공통 엔드포인트이며 appkey/appsecret 자체가 계정을 구분
 - 실시간 등록 메시지: `{"header":{"token":"...","tr_type":"3"},"body":{"tr_cd":"...","tr_key":"종목코드"}}` (해제는 `tr_type":"4"`)
 - 체결 TR코드: 코스피 `S3_`, 코스닥 `K3_` (종목코드만으로는 시장을 구분할 수 없고 `stocks` 마스터 테이블도 없어(schema.sql 13개 테이블 고정), `subscribe()`/`unsubscribe()`는 두 TR코드 모두에 동일한 tr_key로 등록·해제한다 — 해당 종목이 속하지 않는 시장의 TR은 데이터가 오지 않을 뿐 부작용 없음)
 - 호가 TR코드 (v10 확정): 코스피 `H1_`, 코스닥 `HA_` — 체결과 동일하게 두 TR코드 모두 동일한 tr_key로 등록·해제
-- 체결(`S3_`/`K3_`) 응답 body 실제 필드명 (**v13 장중 실측 확정** — 2026-07-28 09:16~09:19 KST, 삼성전자 등 12개 종목으로 라이브 캡처): `shcode`(종목코드), `price`(현재가), `change`(전일대비, **항상 부호 없는 절대값 문자열** — 하락 종목에서도 음수로 오지 않음, 실측으로 음수 case 0건 확인), `drate`(등락률%, **이미 부호가 포함된 숫자 문자열**로 온다 — 하락 시 `"-8.17"`처럼 `-`가 붙어서 오므로 `asDouble()`로 그대로 파싱하면 부호까지 정확함, 실측 확정), `sign`(등락구분 코드 — 실측으로 `2`=상승 `3`=보합 `5`=하락 확인됨, KRX 상하한가를 친 종목이 캡처 시간대에 없어 `1`=상한 `4`=하한은 **미관측**·통상적 관례상 추정치일 뿐 아직 실측 못함), `cgubun`(**주의: NAMING.md v10에서 이 필드가 등락구분 코드를 담는다고 가정했던 것은 틀렸다** — 실제로는 `+`/`-` 두 값만 오고, 같은 종목·같은 `sign`·같은 `drate` 부호를 유지한 채로도 체결마다 `+`/`-`가 계속 바뀌는 것이 실측으로 확인됨(예: KB금융 105560이 `sign:"2"`/`drate:"0.06"`으로 상승 유지 중에도 연속 체결에서 `cgubun`이 `+`→`-`로 바뀜). 즉 일별 등락 방향과 무관한 필드로 보이며(직전 체결 대비 매수/매도 체결구분 등으로 추정되나 공식 문서로 확인 전까지 의미 미확정), **일별 등락 방향 판단에는 쓰면 안 된다**), `volume`(누적거래량), `chetime`(체결시각 HHMMSS), `open`/`high`/`low`(시가/고가/저가). 이 외에도 `mdchecnt`/`mschecnt`/`mdvolume`/`msvolume`/`w_avrg`/`cpower`/`offerho`/`bidho`/`cvolume`/`value`/`opentime`/`hightime`/`lowtime`/`jnilvolume`/`exchname`/`status` 필드가 함께 오나 `LsTickData`가 쓰지 않아 무시한다(파싱 안 해도 무방, 실측 확인). **응답에 종목명 필드가 없다** — `LsTickData.stockName`은 파싱 시 `null`로 두고, 종목명이 필요한 화면은 4주차 `StockBroadcastService` 쪽에서 별도로 채운다 (v10, 사용자 확인).
-- 호가(`H1_`/`HA_`) 응답 body 실제 필드명 (v10 확정, **v13 장중 실측으로 재확인**): `shcode`(종목코드), `offerho1`~`offerho10`(매도호가 1~10단계), `offerrem1`~`offerrem10`(매도잔량 1~10단계), `bidho1`~`bidho10`(매수호가 1~10단계), `bidrem1`~`bidrem10`(매수잔량 1~10단계), `hotime`(호가시각 HHMMSS) — `askPrices`/`askVolumes`/`bidPrices`/`bidVolumes`는 인덱스 0~9가 각각 1~10단계에 대응. 이 외에도 `totofferrem`/`totbidrem`/`midprice`/`midsumrem`/`midsumremgubun`/`offermidsumrem`/`bidmidsumrem`/`donsigubun`/`alloc_gubun`/`volume` 필드가 함께 오나 `LsHogaData`가 쓰지 않아 무시한다(실측 확인).
-- 환경변수: `LS_TOKEN_URL`(기본값 있음), `LS_APP_KEY`, `LS_APP_SECRET`(기본값 없음, 반드시 로컬 환경변수로 주입), `LS_WEBSOCKET_URL`(dev는 모의투자 기본값, prod는 필수)
-- **토큰 발급 실패 응답 포맷 (v11 실측 확정)**: 잘못된 appsecret으로 `/oauth2/token` 요청 시 `HTTP 403`, body `{"error_code":"IGW00105","error_description":"유효하지 않은 AppSecret입니다."}` — `LsWebSocketClient.issueAccessToken()`이 `HttpClientErrorException.Unauthorized`/`.Forbidden`(401/403)을 잡아 `LsAuthenticationException`으로 변환하는 기존 구현이 실측으로 확인됨. `LsReconnectService`의 "인증 실패 의심"/"네트워크 문제 의심" 로그 분기는 확정 상태로 유지.
-- **실시간 등록/해제 ACK 응답 포맷 (v12 실측 확정)**: 등록(`tr_type:"3"`) 요청에 대한 응답은 body 없이 `{"header":{"tr_type":"3","tr_cd":"S3_","rsp_cd":"...","rsp_msg":"..."},"body":null}` 형태로 온다 — 성공 시 `rsp_cd:"00000"`, `rsp_msg:"정상처리되었습니다"` (모의투자 계정으로 재확인, v12), 실패 시(예: 계좌 성격/접속 서버 불일치) `rsp_cd:"10001"`과 원인 메시지(v11). 실제 체결/호가 데이터는 이 ACK과 별개로 이후 도착하는, body가 채워진 메시지로 온다. `LsWebSocketHandler.handleMessage()`는 `header.rsp_cd`가 있으면(성공/실패 무관) body를 파싱하지 않고 무시하되, `00000`은 debug 로그, 그 외는 warn 로그로 구분한다 (v12).
+- 체결(`S3_`/`K3_`) 응답 body 실제 필드명 (**v13 장중 실측 확정** — 2026-07-28 09:16~09:19 KST, 삼성전자 등 12개 종목으로 라이브 캡처): `shcode`(종목코드), `price`(현재가), `change`(전일대비, **항상 부호 없는 절대값 문자열** — 하락 종목에서도 음수로 오지 않음, 실측으로 음수 case 0건 확인), `drate`(등락률%, **이미 부호가 포함된 숫자 문자열**로 온다 — 하락 시 `"-8.17"`처럼 `-`가 붙어서 오므로 `asDouble()`로 그대로 파싱하면 부호까지 정확함, 실측 확정), `sign`(등락구분 코드 — 실측으로 `2`=상승 `3`=보합 `5`=하락 확인됨, KRX 상하한가를 친 종목이 캡처 시간대에 없어 `1`=상한 `4`=하한은 **미관측**·통상적 관례상 추정치일 뿐 아직 실측 못함), `cgubun`(**주의: NAMING.md v10에서 이 필드가 등락구분 코드를 담는다고 가정했던 것은 틀렸다** — 실제로는 `+`/`-` 두 값만 오고, 같은 종목·같은 `sign`·같은 `drate` 부호를 유지한 채로도 체결마다 `+`/`-`가 계속 바뀌는 것이 실측으로 확인됨(예: KB금융 105560이 `sign:"2"`/`drate:"0.06"`으로 상승 유지 중에도 연속 체결에서 `cgubun`이 `+`→`-`로 바뀜). 즉 일별 등락 방향과 무관한 필드로 보이며(직전 체결 대비 매수/매도 체결구분 등으로 추정되나 공식 문서로 확인 전까지 의미 미확정), **일별 등락 방향 판단에는 쓰면 안 된다**), `volume`(누적거래량), `chetime`(체결시각 HHMMSS), `open`/`high`/`low`(시가/고가/저가). 이 외에도 `mdchecnt`/`mschecnt`/`mdvolume`/`msvolume`/`w_avrg`/`cpower`/`offerho`/`bidho`/`cvolume`/`value`/`opentime`/`hightime`/`lowtime`/`jnilvolume`/`exchname`/`status` 필드가 함께 오나 `TickData`가 쓰지 않아 무시한다(파싱 안 해도 무방, 실측 확인). **응답에 종목명 필드가 없다** — `TickData.stockName`은 파싱 시 `null`로 두고, 종목명이 필요한 화면은 4주차 `StockBroadcastService` 쪽에서 별도로 채운다 (v10, 사용자 확인).
+- 호가(`H1_`/`HA_`) 응답 body 실제 필드명 (v10 확정, **v13 장중 실측으로 재확인**): `shcode`(종목코드), `offerho1`~`offerho10`(매도호가 1~10단계), `offerrem1`~`offerrem10`(매도잔량 1~10단계), `bidho1`~`bidho10`(매수호가 1~10단계), `bidrem1`~`bidrem10`(매수잔량 1~10단계), `hotime`(호가시각 HHMMSS) — `askPrices`/`askVolumes`/`bidPrices`/`bidVolumes`는 인덱스 0~9가 각각 1~10단계에 대응. 이 외에도 `totofferrem`/`totbidrem`/`midprice`/`midsumrem`/`midsumremgubun`/`offermidsumrem`/`bidmidsumrem`/`donsigubun`/`alloc_gubun`/`volume` 필드가 함께 오나 `HogaData`가 쓰지 않아 무시한다(실측 확인).
+- 환경변수: `MARKET_DATA_TOKEN_URL`(기본값 있음), `MARKET_DATA_APP_KEY`, `MARKET_DATA_APP_SECRET`(기본값 없음, 반드시 로컬 환경변수로 주입), `MARKET_DATA_WEBSOCKET_URL`(dev는 모의투자 기본값, prod는 필수)
+- **토큰 발급 실패 응답 포맷 (v11 실측 확정)**: 잘못된 appsecret으로 `/oauth2/token` 요청 시 `HTTP 403`, body `{"error_code":"IGW00105","error_description":"유효하지 않은 AppSecret입니다."}` — `MarketDataWebSocketClient.issueAccessToken()`이 `HttpClientErrorException.Unauthorized`/`.Forbidden`(401/403)을 잡아 `MarketDataAuthenticationException`으로 변환하는 기존 구현이 실측으로 확인됨. `MarketDataReconnectService`의 "인증 실패 의심"/"네트워크 문제 의심" 로그 분기는 확정 상태로 유지.
+- **실시간 등록/해제 ACK 응답 포맷 (v12 실측 확정)**: 등록(`tr_type:"3"`) 요청에 대한 응답은 body 없이 `{"header":{"tr_type":"3","tr_cd":"S3_","rsp_cd":"...","rsp_msg":"..."},"body":null}` 형태로 온다 — 성공 시 `rsp_cd:"00000"`, `rsp_msg:"정상처리되었습니다"` (모의투자 계정으로 재확인, v12), 실패 시(예: 계좌 성격/접속 서버 불일치) `rsp_cd:"10001"`과 원인 메시지(v11). 실제 체결/호가 데이터는 이 ACK과 별개로 이후 도착하는, body가 채워진 메시지로 온다. `MarketDataWebSocketHandler.handleMessage()`는 `header.rsp_cd`가 있으면(성공/실패 무관) body를 파싱하지 않고 무시하되, `00000`은 debug 로그, 그 외는 warn 로그로 구분한다 (v12).
 - **모의투자 앱키 정정 후 재확인 (v12)**: `.env`를 모의투자용 appkey/appsecret으로 교체 후 재테스트한 결과, 토큰 발급 성공(HTTP 200) + S3_/K3_/H1_/HA_ 4개 TR 모두 등록 ACK `rsp_cd:"00000"` 정상 수신 확인. 다만 테스트 시점이 장 마감 이후(23시경 KST)라 실제 체결/호가 tick 이벤트 자체가 발생하지 않아, 체결/호가 응답 body의 실제 필드명은 **아직 라이브로 재검증되지 못했다** — 위 필드명은 여전히 공식 카탈로그 문서 예시(v10) 기준. 장중(평일 09:00~15:30 KST)에 재접속해서 실제 body를 받아 최종 검증 필요.
-- **부호 처리 최종 확정 (v13, 2026-07-28 09:16~09:19 KST 장중 실측)**: 삼성전자(005930, 하락), SK하이닉스(000660, 하락), KB금융(105560, 상승→하락 전환 포함) 등 12개 종목 실시간 체결 데이터로 검증 완료. 결론 — `drate`는 API가 이미 부호를 포함해서 보내주므로(`"-8.17"` 등) `LsWebSocketHandler.parseTick()`이 `body.path("drate").asDouble()`로 그대로 파싱하는 기존 구현이 **추가 보정 없이 정확함**을 확인했다(코드 변경 불필요). `change`는 반대로 항상 부호 없는 절대값이라 방향 판단에 못 쓰지만 `LsTickData`가애초에 `change`를 읽지 않으므로 영향 없음. `cgubun`은 등락구분이 아니라 체결마다 바뀌는 별도 성격의 필드로 확인돼(위 필드명 항목 참고) 애초에 방향 판단용으로 쓰면 안 되고, 실제 등락구분 코드는 `sign`(2상승/3보합/5하락 실측 확인, 1상한/4하한 미관측)에 있다. 현재 `LsTickData`/`parseTick()`은 `sign`/`cgubun`을 아예 안 읽으므로 기존 구현 그대로 유지.
-- **`changeAmount` 파싱 추가 (v14, 4주차 `feature/stock-price`)**: `StockPriceDto.changeAmount`(등락 금액, 원)를 채우려면 `changeRate`만으로는 부족해(반올림 오차 발생) LS 원본 `change` 필드(전일대비 절대값, 부호 없음)를 새로 파싱하기로 확정했다. `LsTickData`에 `changeAmount` 필드를 추가하고 `parseTick()`에 `.changeAmount(body.path("change").asLong())`를 추가한다 — `drate`/`sign`/`cgubun` 처리는 v13 결론 그대로 유지, `change` 필드 파싱만 새로 켠다.
+- **부호 처리 최종 확정 (v13, 2026-07-28 09:16~09:19 KST 장중 실측)**: 삼성전자(005930, 하락), SK하이닉스(000660, 하락), KB금융(105560, 상승→하락 전환 포함) 등 12개 종목 실시간 체결 데이터로 검증 완료. 결론 — `drate`는 API가 이미 부호를 포함해서 보내주므로(`"-8.17"` 등) `MarketDataWebSocketHandler.parseTick()`이 `body.path("drate").asDouble()`로 그대로 파싱하는 기존 구현이 **추가 보정 없이 정확함**을 확인했다(코드 변경 불필요). `change`는 반대로 항상 부호 없는 절대값이라 방향 판단에 못 쓰지만 `TickData`가애초에 `change`를 읽지 않으므로 영향 없음. `cgubun`은 등락구분이 아니라 체결마다 바뀌는 별도 성격의 필드로 확인돼(위 필드명 항목 참고) 애초에 방향 판단용으로 쓰면 안 되고, 실제 등락구분 코드는 `sign`(2상승/3보합/5하락 실측 확인, 1상한/4하한 미관측)에 있다. 현재 `TickData`/`parseTick()`은 `sign`/`cgubun`을 아예 안 읽으므로 기존 구현 그대로 유지.
+- **`changeAmount` 파싱 추가 (v14, 4주차 `feature/stock-price`)**: `StockPriceDto.changeAmount`(등락 금액, 원)를 채우려면 `changeRate`만으로는 부족해(반올림 오차 발생) 외부 시세 데이터 원본 `change` 필드(전일대비 절대값, 부호 없음)를 새로 파싱하기로 확정했다. `TickData`에 `changeAmount` 필드를 추가하고 `parseTick()`에 `.changeAmount(body.path("change").asLong())`를 추가한다 — `drate`/`sign`/`cgubun` 처리는 v13 결론 그대로 유지, `change` 필드 파싱만 새로 켠다.
 
 ---
 
@@ -324,7 +330,7 @@ redis-logic.md(수정본) 기준 확정된 이름 그대로 사용:
 | `RedisPendingOrderService` | `initPendingOrders`, `addPendingOrder`, `getPendingOrders`, `removePendingOrder` |
 | `RedisRateLimiterService` | `isAllowed`, `increment`, `getRemainingDaily` — 2026-09-21부터 `SimulationService`만 사용(분당3/일일10). `AiPlanningService`(AI 재무설계사)는 사용자 요청으로 이 서비스 의존성 자체를 제거함(생성자 파라미터에서도 빠짐) |
 | `RedisOnlineStatusService` (v8 추가) | `clearOnlineStatus()`(서버 재시작 시 `@PostConstruct` 초기화, v9), `addOnline(Long userId)`, `removeOnline(Long userId)`, `countOnline()`, `isOnline(Long userId)` |
-| `RedisAiToolCacheService` (feature/ai-planning 추가) | `getCachedResult(Long sessionId, String toolKey)`, `cacheResult(Long sessionId, String toolKey, String result)` — 키 `ai:tool:{sessionId}:{toolKey}`(TTL 30분), AI 상담 세션 내 DART/LS/네이버 도구 실행 결과 캐시(같은 조건 재조회 시 재사용). 8-9 참고 |
+| `RedisAiToolCacheService` (feature/ai-planning 추가) | `getCachedResult(Long sessionId, String toolKey)`, `cacheResult(Long sessionId, String toolKey, String result)` — 키 `ai:tool:{sessionId}:{toolKey}`(TTL 30분), AI 상담 세션 내 DART/외부 시세 데이터/네이버 도구 실행 결과 캐시(같은 조건 재조회 시 재사용). 8-9 참고 |
 
 > **`admin:online:users`를 Set → Hash로 변경 (v9, feature/admin-dashboard 코드리뷰 반영)**:
 > 원래 Set(SADD/SREM, 값=userId)이었는데, 같은 유저가 탭을 여러 개 열어 세션이 여러 개 생긴
@@ -425,16 +431,17 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 | Controller | `StockController` |
 | 엔드포인트 | `GET /api/stocks/{stockCode}`, `GET /api/stocks/{stockCode}/hoga` |
 | Service | `StockService` — `getCurrentPrice(String stockCode)`, `getHoga(String stockCode)` |
-| Broadcast | `StockBroadcastService` — `onTickReceived(LsTickData tickData)`, `broadcastPrice(String stockCode, StockPriceDto dto)`, `onHogaReceived(LsHogaData hogaData)`, `broadcastHoga(String stockCode, HogaDto dto)` (`LsMarketDataListener`의 두 콜백을 모두 구현) |
-| 종목명 조회 | `StockNameResolver`(domain/stock/service) — `resolveStockName(String stockCode)`. `LsTickData.stockName`이 항상 null로 오기 때문에, `WatchlistRepository`/`HoldingRepository`/`OrderRepository`/`RecentViewedRepository`의 `findFirstByStockCode(String stockCode)`를 순서대로 조회해 처음 찾은 이름을 반환한다(admin 도메인과 동일하게 여러 도메인의 Repository를 직접 주입받아 조합하는 예외적 컴포넌트, CLAUDE.md 4번 참고). 4개 테이블 어디에도 없으면 null을 반환하고, `StockBroadcastService`는 이 경우 `stockCode`를 이름 대신 사용한다 — 근본 해결은 하단 `> 종목명 폴백 한계` 참고 |
+| Broadcast | `StockBroadcastService` — `onTickReceived(TickData tickData)`, `broadcastPrice(String stockCode, StockPriceDto dto)`, `onHogaReceived(HogaData hogaData)`, `broadcastHoga(String stockCode, HogaDto dto)` (`MarketDataListener`의 두 콜백을 모두 구현) |
+| 종목명 조회 | `StockNameResolver`(domain/stock/service) — `resolveStockName(String stockCode)`. `TickData.stockName`이 항상 null로 오기 때문에, `WatchlistRepository`/`HoldingRepository`/`OrderRepository`/`RecentViewedRepository`의 `findFirstByStockCode(String stockCode)`를 순서대로 조회해 처음 찾은 이름을 반환한다(admin 도메인과 동일하게 여러 도메인의 Repository를 직접 주입받아 조합하는 예외적 컴포넌트, CLAUDE.md 4번 참고). 4개 테이블 어디에도 없으면 null을 반환하고, `StockBroadcastService`는 이 경우 `stockCode`를 이름 대신 사용한다 — 근본 해결은 하단 `> 종목명 폴백 한계` 참고 |
 | Response DTO | `StockPriceResponse`(stockCode, stockName, currentPrice, changeAmount, changeRate, direction, volume), `HogaResponse`(stockCode, askPrices, askVolumes, bidPrices, bidVolumes) — `direction`은 `PriceDirection`(0번 전역 Enum 참고), `changeAmount`는 `StockBroadcastService.toStockPriceDto()`가 계산한 부호 있는 등락 금액을 그대로 응답에 노출한 것(v14) |
 | STOMP 토픽 (v14 확정) | 가격 `/topic/stock/{stockCode}`(`StockPriceResponse`), 호가 `/topic/stock/{stockCode}/hoga`(`HogaResponse`) — REST 엔드포인트 구분(`GET /api/stocks/{stockCode}` vs `/hoga`)과 동일하게 분리, 프론트가 가격만 필요하면 호가 토픽은 구독하지 않아도 됨 |
-| 구독 관리 (v14 확정) | `StockSubscriptionManager`(domain/stock/service) — `increaseWatchlistSubscription(String stockCode)`, `decreaseWatchlistSubscription(String stockCode)`, `increaseViewingSubscription(String stockCode)`, `decreaseViewingSubscription(String stockCode)`. `LsWebSocketClient`는 `ls.mode=real`일 때만 빈으로 존재하므로 `Optional<LsWebSocketClient>`로 생성자 주입받는다 — mock 모드(`Optional.empty()`)에서는 구독 카운터만 갱신하고 실제 `subscribe()`/`unsubscribe()` 호출은 debug 로그만 남기고 건너뛴다 |
+| 구독 관리 (v14 확정, feature/mock-broadcast에서 조회 메서드 추가) | `StockSubscriptionManager`(domain/stock/service) — `increaseWatchlistSubscription(String stockCode)`, `decreaseWatchlistSubscription(String stockCode)`, `increaseViewingSubscription(String stockCode)`, `decreaseViewingSubscription(String stockCode)`, `getActiveSubscribedStockCodes()`(참조 카운트 > 0인 종목코드 집합 반환 — `MockMarketDataGenerator`가 폴링 대상을 정하는 데 사용). `MarketDataWebSocketClient`는 `market-data.mode=real`일 때만 빈으로 존재하므로 `Optional<MarketDataWebSocketClient>`로 생성자 주입받는다 — mock 모드(`Optional.empty()`)에서는 구독 카운터만 갱신하고 실제 `subscribe()`/`unsubscribe()` 호출은 debug 로그만 남기고 건너뛴다 |
 | STOMP 세션 리스너 (v14 확정) | `StockViewSubscriptionListener`(global/stomp) — `handleSessionSubscribe(SessionSubscribeEvent event)`, `handleSessionUnsubscribe(SessionUnsubscribeEvent event)`, `handleSessionDisconnect(SessionDisconnectEvent event)` |
+| Mock 브로드캐스트 소스 (feature/mock-broadcast 추가) | `MockMarketDataGenerator`(domain/stock/service — `StockSubscriptionManager` 의존 때문에 infra가 아닌 domain에 위치, 아래 상세 설명 참고) — `pollAndBroadcast()`(`@Scheduled(fixedDelay = 20_000)`, 유일한 public 메서드) |
 
 > **종목명 폴백 한계 (v14 추가, 미해결 이슈)**: `StockNameResolver`는 우리 DB(watchlist/holdings/
 > orders/recent_viewed)에 이미 등록된 종목만 이름을 찾을 수 있다. 아무도 관심등록·매매·조회한
-> 적 없는 신규/미거래 종목은 LS tick도 `stockName`이 null로 오고 우리 DB 어디에도 이름이 없어
+> 적 없는 신규/미거래 종목은 외부 시세 데이터 tick도 `stockName`이 null로 오고 우리 DB 어디에도 이름이 없어
 > `stockCode`가 그대로 노출된다. 이 브랜치 범위에서는 해결하지 않고 `KNOWN_ISSUES.md`에 별도
 > 이슈로 남긴다 — 근본 해결책(DART 기업개황 API 연동 vs `stock_master` 테이블 신설)은 팀 회의에서
 > 결정 필요.
@@ -454,11 +461,11 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 >    처리하는 패턴은 CLAUDE.md 8번의 온라인 추적 정책과 동일한 논리다.
 > 3. `StockSubscriptionManager`는 종목별 구독자 수(관심종목+조회 합산)를
 >    `ConcurrentHashMap<String, AtomicInteger>`로 관리한다(단일 서버 운영 전제 — Redis 키로
->    승격할지는 다중 서버로 확장될 때 재검토). 0→1 전환 시 `LsWebSocketClient.subscribe()`,
+>    승격할지는 다중 서버로 확장될 때 재검토). 0→1 전환 시 `MarketDataWebSocketClient.subscribe()`,
 >    1→0 전환 시 `unsubscribe()`를 호출한다.
 > 4. 소켓당 종목 512개 제한: 0→1 전환으로 새 종목을 구독하려는 시점에 이미 관리 중인 종목 수가
 >    512개 이상이면 `subscribe()` 호출 자체는 그대로 진행하되 warn 로그만 남긴다(실제 초과 여부·
->    거부 응답은 `LsWebSocketHandler`의 기존 ACK 로깅으로 확인 — 본격적인 대응은 범위 밖).
+>    거부 응답은 `MarketDataWebSocketHandler`의 기존 ACK 로깅으로 확인 — 본격적인 대응은 범위 밖).
 >
 > **(v14 발견, feature/admin-dashboard에서 해소)**: 이 브랜치(feature/stock-price) 시점에는
 > CLAUDE.md 8번/NAMING.md 7번이 기술한 `RedisOnlineStatusService`/`StompAuthInterceptor`의
@@ -669,7 +676,7 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 ### 8-9. feature/ai-planning
 
 **Tavily는 뉴스 검색 백엔드로 쓰다가 2026-08-05 네이버로 교체, 2026-08-06 `TavilyApiClient`/dto 완전
-삭제됨(CLAUDE.md 참고). 아래는 LS증권 Open API 대대적 확장(2026-08-10~11) 이후 최종 상태.**
+삭제됨(CLAUDE.md 참고). 아래는 외부 시세 데이터 제공사 Open API 대대적 확장(2026-08-10~11) 이후 최종 상태.**
 
 | 구분 | 이름 |
 |---|---|
@@ -713,9 +720,18 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 
 **AI 도구(Gemini function-calling) 27개** — `AiPlanningService.converseWithTools()`가 매 라운드 전달하는
 `tools` 목록. `*_TOOL_NAME` 상수 → 파라미터(괄호 안은 enum 값) → 실제 처리 클라이언트/TR 순.
-"묶음형"은 하나의 도구가 mode류 파라미터로 여러 LS TR을 분기해서 부르는 도구(48개 후보를 18개로
+"묶음형"은 하나의 도구가 mode류 파라미터로 여러 외부 시세 데이터 TR을 분기해서 부르는 도구(48개 후보를 18개로
 압축한 결과, CLAUDE.md 4번 "infra는 domain을 통해서만" 원칙과 별개로 이건 Gemini 판단 정확도·
 프롬프트 비용 문제로 압축한 것).
+
+**외부 시세 데이터 도구 22개는 전부 `ai:tool` 세션 캐시(30분) 대상에서 제외**된다(2026-08-31,
+feature/ls-local-data A-6). 외부 시세 데이터 시세·순위·동향·공시류는 DART 재무제표/네이버 뉴스와 달리 갱신
+주기가 짧아, 30분 세션 캐시에 태우면 낡은 값이 그대로 재사용되기 때문이다. `AiPlanningService`의
+`MARKET_DATA_CACHE_BYPASS_TOOL_NAMES`(Set)로 이름 기준 판정하며, `get_etf_info`만 예외적으로 이름이 아니라
+인자(`infoType`)로 갈린다 — `PRICE` 모드는 캐시 제외, `CONSTITUENTS` 모드(구성종목 비중, 자주 안
+바뀜)는 캐시 유지. DART 4개(`get_financial_statements`/`get_capital_change_info`/
+`get_ownership_info`/`get_disclosure_info`)와 뉴스 1개(`search_securities_news`)는 캐시를 그대로
+유지한다.
 
 | 도구 이름 | 파라미터 | 분기(묶음형만) → 실제 호출 |
 |---|---|---|
@@ -724,28 +740,28 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 | `get_capital_change_info` | companyName(필수), changeType(`유상증자`/`무상증자`) | `DartApiClient.getCapitalChangeDecisions()` |
 | `get_ownership_info` | companyName(필수), infoType(`현황`/`변동`) | `DartApiClient.getOwnershipInfo()` |
 | `get_disclosure_info` | companyName(필수), disclosureType(`DISCLOSURE_REGISTRY` 약 70종) | `DartApiClient.getDisclosureInfo()` |
-| `get_current_price` | companyName(필수) | `LsMarketDataApiClient.getCurrentPrice()`(t1102) — 30분 도구 캐시 대상에서 제외, `ConfirmedPrice` 확정 패턴 적용(아래 참고) |
-| `get_foreign_institutional_trend` | companyName(필수), periodMonths(선택, 1~24) | `LsInvestorTrendApiClient.getTrend()`(t1716, periodMonths 있으면 최대 2년까지 조회 후 합계·최고/최저일 요약) |
-| `get_investment_opinion` | companyName(필수) | `LsInvestInfoApiClient.getInvestmentOpinions()`(t3401) |
-| `get_shareholder_meeting_schedule` | companyName(필수) | `LsInvestInfoApiClient.getShareholderMeetingSchedule()`(t3202) |
-| `get_market_ranking` | rankingType(`PRICE_CHANGE_RATE`/`MARKET_CAP`/`VOLUME`/`TRADING_VALUE`/`VOLUME_SURGE`/`AFTER_HOURS_PRICE_CHANGE_RATE`/`AFTER_HOURS_VOLUME`) | `LsHighItemApiClient`의 7개 메서드(t1441/t1444/t1452/t1463/t1466/t1481/t1482)로 1:1 분기. `AFTER_HOURS_*` 2개는 `DateUtil.isAfterHoursTradingTime()` 게이트 |
-| `get_theme_info` | mode(`THEME_TO_STOCKS`/`STOCK_TO_THEMES`/`HOT_THEMES`), themeName(조건부), companyName(조건부) | `LsSectorApiClient`의 `getThemeConstituentsByName()`(t8425 이름→코드 캐시 후 t1537)/`getThemesForStock()`(t1532)/`getHotThemes()`(t1533) |
-| `get_financial_ranking` | criteria(`SALES_GROWTH`/`OPERATING_INCOME_GROWTH`/`DEBT_RATIO`/`EPS`/`BPS`/`ROE`/`PER`/`PBR`/`PEG`) | `LsInvestInfoApiClient.getFinancialRanking()`(t3341) — criteria는 코드(`1`/`2`/`4`/`6`/`7`/`8`/`9`/`a`/`b`)로 매핑 후 전달 |
-| `get_overseas_index` | indexName(`다우지수`/`나스닥`/`원달러환율`/`국제유가`) | `LsInvestInfoApiClient.getOverseasIndex()`(t3521) — 종목 심볼로 매핑 후 전달 |
-| `get_market_liquidity_trend` | periodMonths(선택, 1~24) | `LsInvestInfoApiClient.getMarketLiquidityTrend()`(t8428, periodMonths 있으면 최대 2년까지 조회 후 최고/최저일 요약) |
-| `get_stock_technical_signal` | companyName(필수) | `LsMarketDataApiClient.getPivotLevels()`(t1105) |
-| `get_historical_price` | companyName(필수), periodMonths(선택, 1~24) | `LsMarketDataApiClient.getHistoricalPrices()`(t1305, periodMonths 있으면 월봉으로 전환해 최대 24개월 조회 — open/high/low 실측값으로 기간 내 최고가·최저가를 코드가 직접 계산해 답에 덧붙임) |
-| `get_multi_stock_price` | companyNames(필수, 콤마구분 최대 5개) | `LsMarketDataApiClient.getMultiStockPrices()`(t8407) — `get_current_price`와 동일하게 30분 도구 캐시 대상에서 제외, `ConfirmedPrice` 확정 패턴 적용(아래 참고). 최초 구현 시 캐시 제외 분기에서 누락돼 캐시 히트 시 `ConfirmedPrice`가 안 쌓이던 버그가 있었음(코드리뷰로 발견, `executeTool()` 수정으로 해결) |
-| `get_stock_risk_flag` | companyName(필수) | `LsMarketDataApiClient.getRiskFlags()`(t1404 관리종목 + t1405 투자경고/매매정지) |
-| `get_call_auction_price` | companyName(필수) | `LsMarketDataApiClient.getRecentCallAuctionPrices()`(t1486) — `DateUtil.isCallAuctionTime()` 게이트, `get_current_price`와 동일하게 30분 도구 캐시 대상에서 제외(동시호가 예상체결가는 그 순간에만 유효, 코드리뷰로 캐시 제외 누락 발견돼 반영) |
-| `get_stock_credit_info` | companyName(필수), infoType(`COLLATERAL_LOAN`/`MARGIN_REQUIREMENT`/`MARGIN_TRADING`/`SECURITIES_LENDING`), periodMonths(선택, 1~24, infoType=`SECURITIES_LENDING`일 때만) | `LsEtcApiClient`의 4개 메서드(CLNAQ00100/t1411/t1921/t1941)로 1:1 분기. `SECURITIES_LENDING`(t1941)만 periodMonths로 최대 2년 확장 가능(2026-08-13 추가) — `MARGIN_TRADING`(t1921)은 LS API 자체에 기간 파라미터가 없어(연속조회 커서만 지원) 확장 불가로 확인됨, 항상 최근 며칠만 조회 |
-| `get_etf_info` | companyName(필수), infoType(`PRICE`/`CONSTITUENTS`) | `CONSTITUENTS`→`LsEtfApiClient.getConstituents()`(t1904, 구성종목 비중은 자주 안 바뀌어 30분 도구 캐시 대상 유지), 그 외(기본 `PRICE`)→`getCurrentPrice()`(t1901, `get_current_price`와 동일하게 30분 도구 캐시 대상에서 제외 — 코드리뷰로 캐시 제외 누락 발견돼 반영) |
-| `get_program_trading_summary` | mode(`MARKET_SNAPSHOT`/`TOP_STOCKS`) | `TOP_STOCKS`→`LsProgramApiClient.getTopProgramTradingStocks()`(t1636), 그 외(기본)→`getMarketSnapshot()`(t1640) |
-| `get_investor_trend_summary` | mode(`BY_INVESTOR_TYPE`/`BY_MARKET`) | `BY_MARKET`→`LsInvestorApiClient.getMarketComparison()`(t1615), 그 외(기본)→`getInvestorTypeSummary()`(t1601) |
-| `get_new_listing_stocks` | periodMonths(선택, 1~24) | `LsEtcApiClient.getNewListings()`(t1403, periodMonths 있으면 최대 2년까지 확장, 2026-08-13 추가) |
-| `get_short_selling_trend` | companyName(필수), periodMonths(선택, 1~24) | `LsEtcApiClient.getShortSellingTrend()`(t1927, periodMonths 있으면 최대 2년까지 조회 후 합계·최고일 요약) |
-| `get_stock_master_info` | companyName(필수) | `LsEtcApiClient.getStockMasterInfo()`(t8436) |
-| `get_industry_info` | marketName(`코스피`/`코스닥`), mode(`CURRENT`/`TREND`/`EXPECTED`), callAuctionSession(`장전`/`장후`, EXPECTED일 때만), periodMonths(선택, 1~24, mode=TREND일 때만) | `TREND`→`LsIndustryApiClient.getTrend()`(t1514, periodMonths 있으면 월봉으로 전환해 최대 24개월 조회 후 최고/최저 요약), `EXPECTED`→`getExpectedIndex()`(t1485, `DateUtil.isCallAuctionTime()` 게이트), 그 외(기본 `CURRENT`)→`getCurrentPrice()`(t1511) |
+| `get_current_price` | companyName(필수) | `MarketDataApiClient.getCurrentPrice()`(t1102) — 30분 도구 캐시 대상에서 제외, `ConfirmedPrice` 확정 패턴 적용(아래 참고) |
+| `get_foreign_institutional_trend` | companyName(필수), periodMonths(선택, 1~24) | `InvestorTrendApiClient.getTrend()`(t1716, periodMonths 있으면 최대 2년까지 조회 후 합계·최고/최저일 요약) |
+| `get_investment_opinion` | companyName(필수) | `InvestInfoApiClient.getInvestmentOpinions()`(t3401) |
+| `get_shareholder_meeting_schedule` | companyName(필수) | `InvestInfoApiClient.getShareholderMeetingSchedule()`(t3202) |
+| `get_market_ranking` | rankingType(`PRICE_CHANGE_RATE`/`MARKET_CAP`/`VOLUME`/`TRADING_VALUE`/`VOLUME_SURGE`/`AFTER_HOURS_PRICE_CHANGE_RATE`/`AFTER_HOURS_VOLUME`) | `HighItemApiClient`의 7개 메서드(t1441/t1444/t1452/t1463/t1466/t1481/t1482)로 1:1 분기. `AFTER_HOURS_*` 2개는 `DateUtil.isAfterHoursTradingTime()` 게이트 |
+| `get_theme_info` | mode(`THEME_TO_STOCKS`/`STOCK_TO_THEMES`/`HOT_THEMES`), themeName(조건부), companyName(조건부) | `SectorApiClient`의 `getThemeConstituentsByName()`(t8425 이름→코드 캐시 후 t1537)/`getThemesForStock()`(t1532)/`getHotThemes()`(t1533) |
+| `get_financial_ranking` | criteria(`SALES_GROWTH`/`OPERATING_INCOME_GROWTH`/`DEBT_RATIO`/`EPS`/`BPS`/`ROE`/`PER`/`PBR`/`PEG`) | `InvestInfoApiClient.getFinancialRanking()`(t3341) — criteria는 코드(`1`/`2`/`4`/`6`/`7`/`8`/`9`/`a`/`b`)로 매핑 후 전달 |
+| `get_overseas_index` | indexName(`다우지수`/`나스닥`/`원달러환율`/`국제유가`) | `InvestInfoApiClient.getOverseasIndex()`(t3521) — 종목 심볼로 매핑 후 전달 |
+| `get_market_liquidity_trend` | periodMonths(선택, 1~24) | `InvestInfoApiClient.getMarketLiquidityTrend()`(t8428, periodMonths 있으면 최대 2년까지 조회 후 최고/최저일 요약) |
+| `get_stock_technical_signal` | companyName(필수) | `MarketDataApiClient.getPivotLevels()`(t1105) |
+| `get_historical_price` | companyName(필수), periodMonths(선택, 1~24) | `MarketDataApiClient.getHistoricalPrices()`(t1305, periodMonths 있으면 월봉으로 전환해 최대 24개월 조회 — open/high/low 실측값으로 기간 내 최고가·최저가를 코드가 직접 계산해 답에 덧붙임) |
+| `get_multi_stock_price` | companyNames(필수, 콤마구분 최대 5개) | `MarketDataApiClient.getMultiStockPrices()`(t8407) — `get_current_price`와 동일하게 30분 도구 캐시 대상에서 제외, `ConfirmedPrice` 확정 패턴 적용(아래 참고). 최초 구현 시 캐시 제외 분기에서 누락돼 캐시 히트 시 `ConfirmedPrice`가 안 쌓이던 버그가 있었음(코드리뷰로 발견, `executeTool()` 수정으로 해결) |
+| `get_stock_risk_flag` | companyName(필수) | `MarketDataApiClient.getRiskFlags()`(t1404 관리종목 + t1405 투자경고/매매정지) |
+| `get_call_auction_price` | companyName(필수) | `MarketDataApiClient.getRecentCallAuctionPrices()`(t1486) — `DateUtil.isCallAuctionTime()` 게이트, `get_current_price`와 동일하게 30분 도구 캐시 대상에서 제외(동시호가 예상체결가는 그 순간에만 유효, 코드리뷰로 캐시 제외 누락 발견돼 반영) |
+| `get_stock_credit_info` | companyName(필수), infoType(`COLLATERAL_LOAN`/`MARGIN_REQUIREMENT`/`MARGIN_TRADING`/`SECURITIES_LENDING`), periodMonths(선택, 1~24, infoType=`SECURITIES_LENDING`일 때만) | `EtcApiClient`의 4개 메서드(CLNAQ00100/t1411/t1921/t1941)로 1:1 분기. `SECURITIES_LENDING`(t1941)만 periodMonths로 최대 2년 확장 가능(2026-08-13 추가) — `MARGIN_TRADING`(t1921)은 외부 시세 데이터 API 자체에 기간 파라미터가 없어(연속조회 커서만 지원) 확장 불가로 확인됨, 항상 최근 며칠만 조회 |
+| `get_etf_info` | companyName(필수), infoType(`PRICE`/`CONSTITUENTS`) | `CONSTITUENTS`→`EtfApiClient.getConstituents()`(t1904, 구성종목 비중은 자주 안 바뀌어 30분 도구 캐시 대상 유지), 그 외(기본 `PRICE`)→`getCurrentPrice()`(t1901, `get_current_price`와 동일하게 30분 도구 캐시 대상에서 제외 — 코드리뷰로 캐시 제외 누락 발견돼 반영) |
+| `get_program_trading_summary` | mode(`MARKET_SNAPSHOT`/`TOP_STOCKS`) | `TOP_STOCKS`→`ProgramApiClient.getTopProgramTradingStocks()`(t1636), 그 외(기본)→`getMarketSnapshot()`(t1640) |
+| `get_investor_trend_summary` | mode(`BY_INVESTOR_TYPE`/`BY_MARKET`) | `BY_MARKET`→`InvestorApiClient.getMarketComparison()`(t1615), 그 외(기본)→`getInvestorTypeSummary()`(t1601) |
+| `get_new_listing_stocks` | periodMonths(선택, 1~24) | `EtcApiClient.getNewListings()`(t1403, periodMonths 있으면 최대 2년까지 확장, 2026-08-13 추가) |
+| `get_short_selling_trend` | companyName(필수), periodMonths(선택, 1~24) | `EtcApiClient.getShortSellingTrend()`(t1927, periodMonths 있으면 최대 2년까지 조회 후 합계·최고일 요약) |
+| `get_stock_master_info` | companyName(필수) | `EtcApiClient.getStockMasterInfo()`(t8436) |
+| `get_industry_info` | marketName(`코스피`/`코스닥`), mode(`CURRENT`/`TREND`/`EXPECTED`), callAuctionSession(`장전`/`장후`, EXPECTED일 때만), periodMonths(선택, 1~24, mode=TREND일 때만) | `TREND`→`IndustryApiClient.getTrend()`(t1514, periodMonths 있으면 월봉으로 전환해 최대 24개월 조회 후 최고/최저 요약), `EXPECTED`→`getExpectedIndex()`(t1485, `DateUtil.isCallAuctionTime()` 게이트), 그 외(기본 `CURRENT`)→`getCurrentPrice()`(t1511) |
 
 **`ConfirmedPrice` 확정 시세 패턴 (2026-08-11 라이브 테스트로 도입)** — Gemini가 답변 문장을 작성하며
 가격·거래량 숫자를 옮겨 적다가 실제로 다른 숫자를 지어내는 사고가 라이브에서 실측됐다(자릿수
@@ -758,77 +774,141 @@ confirmedCurrentPrices`(`executeTool()`이 `aiToolTaskExecutor`로 동시 실행
 형식으로 코드가 직접 이어붙인다(모델이 옮겨 적은 본문 숫자와 무관하게 항상 정확). 이 두 도구는
 30분 도구 캐시 자체도 우회한다(시세는 그때그때 달라지는 값이라).
 
-**LS증권 REST API 클라이언트 (`infra/ls`, 27개 도구 중 `get_*` 조회 전용 — 6번 섹션의
-`LsWebSocketClient`/`LsWebSocketHandler`/`LsReconnectService`/`LsMarketDataListener`/
-`LsAuthenticationException`(실시간 체결·호가 WebSocket 계열)과는 완전히 별개 카테고리)**
+**외부 시세 데이터 제공사 REST API 클라이언트 (`infra/marketdata`, 27개 도구 중 `get_*` 조회 전용 — 6번 섹션의
+`MarketDataWebSocketClient`/`MarketDataWebSocketHandler`/`MarketDataReconnectService`/`MarketDataListener`/
+`MarketDataAuthenticationException`(실시간 체결·호가 WebSocket 계열)과는 완전히 별개 카테고리)**
 
 | 클라이언트 | 엔드포인트(`ls.*-url`) | 공개 메서드 → TR코드 |
 |---|---|---|
-| `LsAccessTokenProvider` | `${ls.token-url}` | `issueAccessToken()` — 아래 10개 클라이언트가 전부 공유하는 토큰 발급 전용 컴포넌트(WebSocket 쪽 `LsWebSocketClient`는 이걸 안 쓰고 자체 토큰 발급 로직을 유지) |
-| `LsMarketDataApiClient` | `market-data-url` | `getCurrentPrice(String stockCode)`→t1102, `getRiskFlags(String stockCode)`→t1404+t1405, `getPivotLevels(String stockCode)`→t1105, `getRecentHistoricalPrices(String stockCode)`/`getHistoricalPrices(String stockCode, Integer periodMonths)`→t1305(periodMonths 없으면 일봉 최근 5건, 있으면 월봉으로 전환해 최대 24개월=2년, 2026-08-13 추가 — open/high/low도 함께 파싱), `getMultiStockPrices(List<String> stockCodes)`→t8407(최대 5종목), `getRecentCallAuctionPrices(String stockCode)`→t1486(최대 5건, 시간대 게이트는 호출부 책임) |
-| `LsInvestorTrendApiClient` | `frgr-itt-url` | `getRecentTrend(String stockCode)`/`getTrend(String stockCode, Integer periodMonths)`→t1716(외인기관종목별동향, periodMonths 없으면 최근 10일·최대 5건, 있으면 최대 24개월=2년까지 일별 원본 그대로 반환해 호출부가 합계·최고/최저일 계산, 2026-08-13 추가) |
-| `LsInvestInfoApiClient` | `investinfo-url` | `getInvestmentOpinions(String stockCode)`→t3401(최대 5건), `getShareholderMeetingSchedule(String stockCode)`→t3202(`upgu=="09"` 필터, 최대 5건), `getFinancialRanking(String criteria)`→t3341(최대 10건), `getOverseasIndex(String kind, String symbol)`→t3521, `getRecentMarketLiquidityTrend()`/`getMarketLiquidityTrend(Integer periodMonths)`→t8428(periodMonths 없으면 최근 7일·최대 5건, 있으면 최대 24개월=2년, 2026-08-13 추가) |
-| `LsHighItemApiClient` | `high-item-url` | `getTopPriceChangeRate()`→t1441, `getTopMarketCap()`→t1444, `getTopVolume()`→t1452, `getTopTradingValue()`→t1463, `getSurgingVolumeVsYesterday()`→t1466, `getTopAfterHoursPriceChangeRate()`→t1481, `getTopAfterHoursVolume()`→t1482 (전부 `List<LsRankingItemDto>`, 최대 10건) |
-| `LsSectorApiClient` | `sector-url` | `getThemeConstituentsByName(String themeName)`→t8425(테마명→코드 프로세스 수명 캐시) 후 t1537, `getThemesForStock(String stockCode)`→t1532, `getHotThemes()`→t1533 |
-| `LsEtfApiClient` | `etf-url` | `getCurrentPrice(String stockCode)`→t1901, `getConstituents(String stockCode)`→t1904(최대 10건) |
-| `LsProgramApiClient` | `program-url` | `getTopProgramTradingStocks()`→t1636(최대 10건), `getMarketSnapshot()`→t1640(gubun=`11` 거래소 전체) |
-| `LsInvestorApiClient` | `investor-url` | `getInvestorTypeSummary()`→t1601, `getMarketComparison()`→t1615 |
-| `LsEtcApiClient` | `etc-url` | `getCollateralLoanEligibility(String stockCode)`→`CLNAQ00100`(예탁담보융자가능종목현황조회), `getMarginRequirement(String stockCode)`→t1411(증거금율별종목조회), `getMarginTradingTrend(String stockCode)`→t1921(신용거래동향, 최근 5일 — LS API 자체에 기간 파라미터가 없어 확장 불가, 2026-08-13 전수조사로 확인), `getSecuritiesLendingTrend(String stockCode)`/`getSecuritiesLendingTrend(String stockCode, Integer periodMonths)`→t1941(종목별대차거래일간추이, periodMonths 없으면 최근 7일·최대 5건, 있으면 최대 24개월=2년, 2026-08-13 추가), `getNewListings()`/`getNewListings(Integer periodMonths)`→t1403(신규상장종목조회, periodMonths 없으면 최근 6개월·최대 10건, 있으면 최대 24개월=2년·최대 50건, 2026-08-13 추가), `getRecentShortSellingTrend(String stockCode)`/`getShortSellingTrend(String stockCode, Integer periodMonths)`→t1927(공매도일별추이, periodMonths 없으면 최근 7일·최대 5건, 있으면 최대 24개월=2년, 2026-08-13 추가), `getStockMasterInfo(String stockCode)`→t8436(주식종목조회API용) |
-| `LsIndustryApiClient` | `industry-url`(`/indtp/market-data`, 기존에 전혀 구현 안 돼 있던 업종 카테고리) | `getCurrentPrice(String marketName)`→t1511(업종현재가), `getRecentTrend(String marketName)`/`getTrend(String marketName, Integer periodMonths)`→t1514(업종기간별추이, periodMonths 없으면 일봉 최근 5건, 있으면 월봉(gubun2=3)으로 전환해 최대 24개월=2년, 2026-08-13 추가), `getExpectedIndex(String marketName, String callAuctionSession)`→t1485(예상지수, 시간대 게이트는 호출부 책임). `marketName`은 `코스피`→`001`/`코스닥`→`301`로 매핑 |
+| `MarketDataAccessTokenProvider` | `${market-data.token-url}` | `issueAccessToken()` — 아래 10개 클라이언트가 전부 공유하는 토큰 발급 전용 컴포넌트(WebSocket 쪽 `MarketDataWebSocketClient`는 이걸 안 쓰고 자체 토큰 발급 로직을 유지) |
+| `MarketDataApiClient` | `market-data-url` | `getCurrentPrice(String stockCode)`→t1102(`market-data.mode=mock`이면 `LocalMarketDataReader`로 대체, feature/ls-local-data 2026-08-30 추가 — 나머지 메서드 및 다른 9개 클라이언트는 그대로 항상 실제 외부 시세 데이터 API 호출), `getRiskFlags(String stockCode)`→t1404+t1405, `getPivotLevels(String stockCode)`→t1105, `getRecentHistoricalPrices(String stockCode)`/`getHistoricalPrices(String stockCode, Integer periodMonths)`→t1305(periodMonths 없으면 일봉 최근 5건, 있으면 월봉으로 전환해 최대 24개월=2년, 2026-08-13 추가 — open/high/low도 함께 파싱), `getMultiStockPrices(List<String> stockCodes)`→t8407(최대 5종목), `getRecentCallAuctionPrices(String stockCode)`→t1486(최대 5건, 시간대 게이트는 호출부 책임) |
+| `InvestorTrendApiClient` | `frgr-itt-url` | `getRecentTrend(String stockCode)`/`getTrend(String stockCode, Integer periodMonths)`→t1716(외인기관종목별동향, periodMonths 없으면 최근 10일·최대 5건, 있으면 최대 24개월=2년까지 일별 원본 그대로 반환해 호출부가 합계·최고/최저일 계산, 2026-08-13 추가) |
+| `InvestInfoApiClient` | `investinfo-url` | `getInvestmentOpinions(String stockCode)`→t3401(최대 5건), `getShareholderMeetingSchedule(String stockCode)`→t3202(`upgu=="09"` 필터, 최대 5건), `getFinancialRanking(String criteria)`→t3341(최대 10건), `getOverseasIndex(String kind, String symbol)`→t3521, `getRecentMarketLiquidityTrend()`/`getMarketLiquidityTrend(Integer periodMonths)`→t8428(periodMonths 없으면 최근 7일·최대 5건, 있으면 최대 24개월=2년, 2026-08-13 추가) |
+| `HighItemApiClient` | `high-item-url` | `getTopPriceChangeRate()`→t1441, `getTopMarketCap()`→t1444, `getTopVolume()`→t1452, `getTopTradingValue()`→t1463, `getSurgingVolumeVsYesterday()`→t1466, `getTopAfterHoursPriceChangeRate()`→t1481, `getTopAfterHoursVolume()`→t1482 (전부 `List<RankingItemDto>`, 최대 10건) |
+| `SectorApiClient` | `sector-url` | `getThemeConstituentsByName(String themeName)`→t8425(테마명→코드 프로세스 수명 캐시) 후 t1537, `getThemesForStock(String stockCode)`→t1532, `getHotThemes()`→t1533 |
+| `EtfApiClient` | `etf-url` | `getCurrentPrice(String stockCode)`→t1901, `getConstituents(String stockCode)`→t1904(최대 10건) |
+| `ProgramApiClient` | `program-url` | `getTopProgramTradingStocks()`→t1636(최대 10건), `getMarketSnapshot()`→t1640(gubun=`11` 거래소 전체) |
+| `InvestorApiClient` | `investor-url` | `getInvestorTypeSummary()`→t1601, `getMarketComparison()`→t1615 |
+| `EtcApiClient` | `etc-url` | `getCollateralLoanEligibility(String stockCode)`→`CLNAQ00100`(예탁담보융자가능종목현황조회), `getMarginRequirement(String stockCode)`→t1411(증거금율별종목조회), `getMarginTradingTrend(String stockCode)`→t1921(신용거래동향, 최근 5일 — 외부 시세 데이터 API 자체에 기간 파라미터가 없어 확장 불가, 2026-08-13 전수조사로 확인), `getSecuritiesLendingTrend(String stockCode)`/`getSecuritiesLendingTrend(String stockCode, Integer periodMonths)`→t1941(종목별대차거래일간추이, periodMonths 없으면 최근 7일·최대 5건, 있으면 최대 24개월=2년, 2026-08-13 추가), `getNewListings()`/`getNewListings(Integer periodMonths)`→t1403(신규상장종목조회, periodMonths 없으면 최근 6개월·최대 10건, 있으면 최대 24개월=2년·최대 50건, 2026-08-13 추가), `getRecentShortSellingTrend(String stockCode)`/`getShortSellingTrend(String stockCode, Integer periodMonths)`→t1927(공매도일별추이, periodMonths 없으면 최근 7일·최대 5건, 있으면 최대 24개월=2년, 2026-08-13 추가), `getStockMasterInfo(String stockCode)`→t8436(주식종목조회API용) |
+| `IndustryApiClient` | `industry-url`(`/indtp/market-data`, 기존에 전혀 구현 안 돼 있던 업종 카테고리) | `getCurrentPrice(String marketName)`→t1511(업종현재가), `getRecentTrend(String marketName)`/`getTrend(String marketName, Integer periodMonths)`→t1514(업종기간별추이, periodMonths 없으면 일봉 최근 5건, 있으면 월봉(gubun2=3)으로 전환해 최대 24개월=2년, 2026-08-13 추가), `getExpectedIndex(String marketName, String callAuctionSession)`→t1485(예상지수, 시간대 게이트는 호출부 책임). `marketName`은 `코스피`→`001`/`코스닥`→`301`로 매핑 |
 
-**`LsApiClientSupport`(추상, `infra/ls` 패키지 전용, 코드리뷰 반영)** — 위 10개 클라이언트가
+**`LocalMarketDataReader`(`infra/marketdata`, feature/ls-local-data, 2026-08-30 추가, 2026-09-20 호가
+지원 추가, 2026-09-21 원격 URL 조회 지원 추가)** — `market-data.mode=mock`에서 외부 시세 데이터 실시간 시세·호가 대신
+로컬 파일(또는 HTTP)로 공급하는 컴포넌트. 위 10개 REST 클라이언트와 달리 외부 시세 데이터 API를 호출하지
+않으므로(TR코드/`Authorization` 헤더 없음) `MarketDataApiClientSupport`를 상속하지 않는다. 데이터 원본은
+종목코드를 키로 하는 맵(local-market-data-generator가 코스피·코스닥 상위 100종목의 t1102(현재가)·
+t1101(호가) 조회 결과를 종목당 JSON 객체 하나에 합쳐 통합 저장) — 외부 시세 데이터 원본 TR 필드(hname/price/
+offerho1/...)가 아니라 DTO 필드명(stockCode/currentPrice/askPrices/...)으로 이미 매핑된 형태를
+그대로 역직렬화한다. 공개 메서드: `getCurrentPrice(String stockCode)`→종목코드 키의 값을
+`CurrentPriceDetailDto`로, `getAllCurrentPrices()`→전체를 `Map<String, CurrentPriceDetailDto>`로
+(`MockMarketDataGenerator` 전용, 아래 참고), `getHoga(String stockCode)`→같은 키의 값을 `HogaData`로
+각각 따로 역직렬화한다(서로 자기 DTO에 없는 필드는 무시 — `ObjectMapper.FAIL_ON_UNKNOWN_PROPERTIES=false`).
+전부 원본을 찾지 못하거나 파싱에 실패하거나 해당 종목코드 키(또는 `getHoga()`는 호가 필드
+자체)가 없으면 다른 REST 클라이언트와 동일하게 `Optional.empty()`/빈 맵을 반환한다(예외를
+던지지 않음).
+
+**원본을 파일에서 읽을지 URL에서 읽을지는 `market-data.url` 값으로 갈린다(배포 사전검증 단계
+추가)** — 로컬 개발(기본값, 빈 문자열)은 `${market-data.local-path}` 디렉토리의 `market_data.json`을
+직접 읽는다. 값이 비어있지 않으면(배포 환경 — 백엔드가 데이터 생성기와 파일 시스템을 공유하지
+못함) 대신 그 URL로 GET 요청해 같은 JSON을 가져온다(내부 `RestClient`, connect 3초/read 5초
+타임아웃 — `RestClientConfig`의 공유 빈을 쓰지 않고 직접 생성해 기존 `new LocalMarketDataReader()`
++ `ReflectionTestUtils` 테스트 패턴을 유지). URL 쪽은 데이터 생성기(`local-market-data-generator/generator.py`)가
+같이 띄우는 최소 HTTP 서버(`GET /market-data`, `GET /health`, 기본 포트 8081)를 가리키도록
+설정한다. 두 경로 모두 요청/파싱 실패 시 예외를 던지지 않고 빈 값을 반환하는 동일한 관례를
+따른다.
+
+`@ConditionalOnProperty(name = "market-data.mode", havingValue = "mock")`로 `market-data.mode=mock`일 때만 빈으로
+생성된다(`MarketDataWebSocketClient`의 real 전용 조건과 정반대, A-4 2026-08-30 추가). `MarketDataApiClient`가
+이 빈을 `Optional<LocalMarketDataReader>` 생성자 주입으로 받아 `getCurrentPrice()` 안에서
+존재 여부로 mock/real을 분기하고, `StockService`도 동일한 패턴으로 이 빈을 주입받아
+`getCurrentPrice()`/`getHoga()` 둘 다 분기한다 — `StockSubscriptionManager`가
+`Optional<MarketDataWebSocketClient>`로 mock/real을 구분하는 것과 동일한 패턴. 로컬 파일 조회가 빈 값을
+반환해도 실제 외부 시세 데이터 API·Redis로 폴백하지 않는다(mock 모드에서는 로컬 파일이 유일한 데이터 소스).
+
+공개 메서드가 하나 더 있다: `getAllCurrentPrices()`→`market_data.json` 전체를
+`Map<String, CurrentPriceDetailDto>`로 한 번에 역직렬화(feature/mock-broadcast, 2026-09-21
+추가). `MockMarketDataGenerator`가 구독 중인 다수 종목의 `updatedAt` 변경 여부를 매 폴링 주기(20초)마다
+확인해야 하는데, `getCurrentPrice(String)`을 종목 수만큼 반복 호출하면 같은 파일을 그만큼 반복해서
+열게 되므로 파일 하나를 한 번만 읽는 전용 메서드를 뒀다. `getCurrentPrice(String)`/`getHoga(String)`과
+동일한 관례로, 파일이 없거나 파싱에 실패하면 예외 없이 빈 맵을 반환한다.
+
+**`MockMarketDataGenerator`(domain/stock/service, feature/mock-broadcast, 2026-09-21 추가,
+KNOWN_ISSUES.md 2번 해소)** — `market-data.mode=mock`에서 `MarketDataWebSocketClient`(real 전용)가 실제 시세
+변동 시 하던 "실시간 tick 소스" 역할을 대신한다. 클래스명은 `infra/marketdata`의 다른 클라이언트
+클래스들과 비슷한 이름이지만 외부 시세 데이터 API를 호출하지 않고 `StockSubscriptionManager`(도메인
+서비스)를 참조해야 해서 `infra`가 아니라 `domain/stock/service`에 둔다(infra는 domain을 직접
+참조할 수 없음, CLAUDE.md
+4번) — domain이 infra 클라이언트(`LocalMarketDataReader`)를 주입받아 쓰는 것은 정상 방향이라
+문제없다. `@ConditionalOnProperty(name = "market-data.mode", havingValue = "mock")`로 mock 모드에서만
+빈으로 생성되므로 real 모드 동작에는 전혀 영향이 없다.
+
+동작: `pollAndBroadcast()`(`@Scheduled(fixedDelay = 20_000)`, generator.py의 기본 폴링 주기
+60초보다 짧게 잡아 화면 반영 지연을 최대 20초로 따라잡음)가 `StockSubscriptionManager.getActiveSubscribedStockCodes()`로
+지금 구독 중인 종목만 추려 `LocalMarketDataReader.getAllCurrentPrices()`로 읽은 최신 데이터와
+비교한다. 종목코드별로 마지막에 브로드캐스트한 `updatedAt`을 `ConcurrentHashMap`에 기억해뒀다가
+같은 값이면(generator.py가 아직 갱신 안 함) 건너뛰고, 다르면 `TickData`를 만들어
+`List<MarketDataListener>`(=`StockBroadcastService`)의 `onTickReceived()`를 호출하고,
+이어서 `LocalMarketDataReader.getHoga(stockCode)`가 값을 반환하면 `onHogaReceived()`도
+호출한다 — `MarketDataWebSocketHandler`(real 모드)가 파싱한 tick/호가를 같은 리스너 인터페이스로
+넘기는 것과 동일한 경로이므로, Redis 캐싱·STOMP 브로드캐스팅·200ms 스로틀·종목명 폴백 등
+`StockBroadcastService`의 기존 로직을 그대로 재사용한다. 주의: `CurrentPriceDetailDto.changeAmount`는
+이미 부호가 있는 값이라 `TickData.changeAmount`(외부 시세 데이터 원본처럼 부호 없는 절대값이어야 함)로 옮길
+때 `Math.abs()`를 적용한다 — 그대로 옮기면 `StockBroadcastService.onTickReceived()`가
+`changeRate` 부호로 다시 부호를 적용해 이중 반전된다.
+
+**`MarketDataApiClientSupport`(추상, `infra/marketdata` 패키지 전용, 코드리뷰 반영)** — 위 10개 클라이언트가
 전부 거의 동일하게 복붙하고 있던 요청 빌딩(Authorization/tr_cd/tr_cont 헤더 + `ExternalApiInvoker`
 위임)과 응답 필드 파싱을 한 곳으로 모은 베이스 클래스. `protected Map<String, Object>
 call(String url, String trCd, Map<String, Object> requestBody, String token, String errorLabel)`
-(4개 헤더만 필요한 대다수), 그 오버로드로 `extraHeaders` 인자를 받는 5-인자 버전(`LsEtcApiClient`만
+(4개 헤더만 필요한 대다수), 그 오버로드로 `extraHeaders` 인자를 받는 5-인자 버전(`EtcApiClient`만
 `tr_cont_key` 헤더가 추가로 필요해서 씀), `protected String stringOf(Object)`,
 `protected Long parseLong(Object)`, `protected double parseDoubleOrZero(Object)`(실패/누락 시 0.0)를
-제공한다. 10개 클라이언트 전부 이 클래스를 상속한다. 예외— `LsInvestorTrendApiClient`는 실패/누락
+제공한다. 10개 클라이언트 전부 이 클래스를 상속한다. 예외— `InvestorTrendApiClient`는 실패/누락
 시 0.0이 아니라 `null`을 돌려주는 자체 `parseDouble(Object): Double`을 그대로 로컬에 유지한다(그
 파일의 호출부가 "값 없음"과 "0"을 구분해야 함) — 이 파일만 `parseDoubleOrZero`를 안 쓴다.
 
 > **`parseNullableDouble(Object)` 베이스 클래스로 승격 (코드리뷰 반영)**: 원래
-> `LsMarketDataApiClient`에만 있던 private 메서드였는데, `LsEtfApiClient.getCurrentPrice()`가
-> per/exhratio 파싱에 똑같이 필요해지면서 `protected`로 `LsApiClientSupport`에 옮기고
-> `LsMarketDataApiClient`의 중복 정의는 삭제했다.
+> `MarketDataApiClient`에만 있던 private 메서드였는데, `EtfApiClient.getCurrentPrice()`가
+> per/exhratio 파싱에 똑같이 필요해지면서 `protected`로 `MarketDataApiClientSupport`에 옮기고
+> `MarketDataApiClient`의 중복 정의는 삭제했다.
 >
-> **`LsEtfApiClient.getCurrentPrice()`(t1901) 필드 매핑 보강 (LS증권 TR 필드 정정 반영,
-> 2026-09)**: `LsCurrentPriceDetailDto`의 per/high52wDate/low52wDate/listingShares/
+> **`EtfApiClient.getCurrentPrice()`(t1901) 필드 매핑 보강 (외부 시세 데이터 제공사 TR 필드 정정 반영,
+> 2026-09)**: `CurrentPriceDetailDto`의 per/high52wDate/low52wDate/listingShares/
 > foreignExhaustionRate가 t1901OutBlock에 실제로 내려오는데도 지금까지 매핑이 안 돼 있어
 > 항상 빈 값이었다. `outBlock`의 `per`/`high52wdate`/`low52wdate`/`listing`/`exhratio`
 > 필드를 각각 연결했다(pbr은 ETF에 개념이 없는 필드라 계속 null).
 
-**`infra/ls/dto` 신규 DTO 26개** (기존 실시간 계열의 `LsTickData`/`LsHogaData`/`LsTokenResponse`와는 별개)
+**`infra/marketdata/dto` 신규 DTO 26개** (기존 실시간 계열의 `TickData`/`HogaData`/`MarketDataTokenResponse`와는 별개)
 
 | DTO | 필드 |
 |---|---|
-| `LsCurrentPriceDetailDto` | stockCode, stockName, currentPrice, changeAmount, changeRate, volume, per, pbr, high52w, high52wDate, low52w, low52wDate, listingShares, foreignExhaustionRate, updatedAt |
-| `LsMultiStockPriceDto` | stockCode, stockName, price, changeAmount, changeRate, volume |
-| `LsPivotLevelDto` | stockCode, pivot, resistance1, support1, resistance2, support2 |
-| `LsHistoricalPriceDto` | date, open, high, low(2026-08-13 추가 — 기간 내 최고가/최저가 계산용), close, changeRate, volume, marketCap, foreignNetBuy, individualNetBuy |
-| `LsCallAuctionPriceDto` | time, price, changeRate, expectedVolume |
-| `LsStockRiskFlagDto` | flagType, reasonCode, date |
-| `LsForeignInstitutionalTrendDto` | date, closePrice, individualNetBuyKrx, institutionNetBuyKrx, foreignNetBuyKrx, programTradingVolume, foreignHoldingShares, foreignExhaustionRate, shortSellingVolume, shortSellingValue |
-| `LsInvestmentOpinionDto` | date, securitiesFirm, opinionBefore, opinionAfter, targetPriceBefore, targetPriceAfter, closePriceOnDate |
-| `LsShareholderMeetingDto` | date, eventName |
-| `LsRankingItemDto` | rank, stockCode, stockName, price, changeAmount, changeRate, volume, extraInfo |
-| `LsThemeDto` | themeCode, themeName, stats(핫테마 조회에서만 채워짐) |
-| `LsThemeConstituentDto` | stockCode, stockName, price, changeAmount, changeRate, volume |
-| `LsFinancialRankingDto` | rank, stockCode, stockName, roe, per, pbr, salesGrowthRate |
-| `LsOverseasIndexDto` | symbol, name, price, changeAmount, changeRate, date |
-| `LsMarketLiquidityDto` | date, customerDepositAmount, marginLoanAmount |
-| `LsEtfConstituentDto` | stockCode, stockName, price, changeRate, weight |
-| `LsProgramTradingRankDto` | rank, stockCode, stockName, price, changeRate, netBuyValue |
-| `LsProgramTradingSnapshotDto` | offerValue, bidValue, netValue |
-| `LsInvestorTypeSummaryDto` | individualNetBuy, foreignNetBuy, institutionNetBuy, securitiesNetBuy, insuranceNetBuy, investmentTrustNetBuy |
-| `LsMarketInvestorComparisonDto` | marketName, individualNetBuy, foreignNetBuy, institutionNetBuy |
-| `LsStockCreditInfoDto` | stockCode, detail |
-| `LsNewListingDto` | stockCode, stockName, listedDate, price |
-| `LsShortSellingTrendDto` | date, shortSellingVolume, shortSellingValue, shortSellingRatio |
-| `LsStockMasterInfoDto` | stockCode, stockName, upperLimitPrice, lowerLimitPrice, isSpac |
-| `LsIndustryPriceDto` | industryCode, industryName, indexValue, changeRate |
-| `LsIndustryTrendDto` | date, indexValue, changeRate, foreignNetBuy |
-| `LsExpectedIndexDto` | expectedIndexValue, changeRate, upperLimitStockCount, lowerLimitStockCount |
+| `CurrentPriceDetailDto` | stockCode, stockName, currentPrice, changeAmount, changeRate, volume, per, pbr, high52w, high52wDate, low52w, low52wDate, listingShares, foreignExhaustionRate, updatedAt |
+| `MultiStockPriceDto` | stockCode, stockName, price, changeAmount, changeRate, volume |
+| `PivotLevelDto` | stockCode, pivot, resistance1, support1, resistance2, support2 |
+| `HistoricalPriceDto` | date, open, high, low(2026-08-13 추가 — 기간 내 최고가/최저가 계산용), close, changeRate, volume, marketCap, foreignNetBuy, individualNetBuy |
+| `CallAuctionPriceDto` | time, price, changeRate, expectedVolume |
+| `StockRiskFlagDto` | flagType, reasonCode, date |
+| `ForeignInstitutionalTrendDto` | date, closePrice, individualNetBuyKrx, institutionNetBuyKrx, foreignNetBuyKrx, programTradingVolume, foreignHoldingShares, foreignExhaustionRate, shortSellingVolume, shortSellingValue |
+| `InvestmentOpinionDto` | date, securitiesFirm, opinionBefore, opinionAfter, targetPriceBefore, targetPriceAfter, closePriceOnDate |
+| `ShareholderMeetingDto` | date, eventName |
+| `RankingItemDto` | rank, stockCode, stockName, price, changeAmount, changeRate, volume, extraInfo |
+| `ThemeDto` | themeCode, themeName, stats(핫테마 조회에서만 채워짐) |
+| `ThemeConstituentDto` | stockCode, stockName, price, changeAmount, changeRate, volume |
+| `FinancialRankingDto` | rank, stockCode, stockName, roe, per, pbr, salesGrowthRate |
+| `OverseasIndexDto` | symbol, name, price, changeAmount, changeRate, date |
+| `MarketLiquidityDto` | date, customerDepositAmount, marginLoanAmount |
+| `EtfConstituentDto` | stockCode, stockName, price, changeRate, weight |
+| `ProgramTradingRankDto` | rank, stockCode, stockName, price, changeRate, netBuyValue |
+| `ProgramTradingSnapshotDto` | offerValue, bidValue, netValue |
+| `InvestorTypeSummaryDto` | individualNetBuy, foreignNetBuy, institutionNetBuy, securitiesNetBuy, insuranceNetBuy, investmentTrustNetBuy |
+| `MarketInvestorComparisonDto` | marketName, individualNetBuy, foreignNetBuy, institutionNetBuy |
+| `StockCreditInfoDto` | stockCode, detail |
+| `NewListingDto` | stockCode, stockName, listedDate, price |
+| `ShortSellingTrendDto` | date, shortSellingVolume, shortSellingValue, shortSellingRatio |
+| `StockMasterInfoDto` | stockCode, stockName, upperLimitPrice, lowerLimitPrice, isSpac |
+| `IndustryPriceDto` | industryCode, industryName, indexValue, changeRate |
+| `IndustryTrendDto` | date, indexValue, changeRate, foreignNetBuy |
+| `ExpectedIndexDto` | expectedIndexValue, changeRate, upperLimitStockCount, lowerLimitStockCount |
 
 **네이버 뉴스 검색 (`infra/naver`, 2026-08-05 Tavily 대체)**
 - `NaverNewsApiClient.search(NaverNewsSearchRequest request)` — 엔드포인트 `app.naver.api-url`, 인증은
@@ -856,7 +936,7 @@ call(String url, String trCd, Map<String, Object> requestBody, String token, Str
 - `RedisAiToolCacheService`(§7 redis-service에도 등록) — `getCachedResult(Long sessionId, String toolKey)`,
   `cacheResult(Long sessionId, String toolKey, String result)`. 키 `ai:tool:{sessionId}:{toolKey}`, TTL 30분.
 - `ExternalApiInvoker` — `static <T> T call(Supplier<T> apiCall, String logMessage, Object... logArgs)`.
-  `GeminiApiClient`/`DartApiClient`/`NaverNewsApiClient`/LS REST 클라이언트 전체가 반복하던
+  `GeminiApiClient`/`DartApiClient`/`NaverNewsApiClient`/외부 시세 데이터 REST 클라이언트 전체가 반복하던
   try-catch(`RestClientException`→로그→`CustomException(ErrorCode.EXTERNAL_API_ERROR, e)`) 패턴을 공용화.
 - `NewsRelevanceMatcher` — `SECURITIES_NEWS_DOMAINS`(신뢰 언론사 도메인 29개), `KNOWN_ALIASES`(현재
   `삼성전자`→`삼전`만 등록, 필요시 확장), `MAX_PERIOD_DAYS`(730일=2년, 2026-08-11에 90일에서 확장),
@@ -871,9 +951,9 @@ call(String url, String trCd, Map<String, Object> requestBody, String token, Str
   제목만 보도록 좁혔다 — `searchByOutlet()`이 회사명 없이 "증시" 단일 검색어만으로는
   걸러내지 못하는 무관한 기사를 잡기 위해 추가)
 - `DateUtil` — `isCallAuctionTime()`(08:30~09:00, 15:20~15:30 KST 평일), `isAfterHoursTradingTime()`(15:30~18:00
-  KST 평일). 시간대가 아닐 때 해당 LS 도구 호출 자체를 막고 안내 문구로 대체하는 "시간대 게이트"용 —
+  KST 평일). 시간대가 아닐 때 해당 외부 시세 데이터 도구 호출 자체를 막고 안내 문구로 대체하는 "시간대 게이트"용 —
   둘 다 `Asia/Seoul` 고정, 테스트 주입용 `ZonedDateTime` 오버로드 있음
-- `RestClientConfig` — `RestClient.Builder` 빈 하나(연결 5초/응답 30초 타임아웃 고정). Gemini/DART/Naver/LS
+- `RestClientConfig` — `RestClient.Builder` 빈 하나(연결 5초/응답 30초 타임아웃 고정). Gemini/DART/Naver/외부 시세 데이터
   REST 클라이언트 전부가 이 빈을 주입받아 각자 `.build()`(Naver만 `.clone()...build()`)로 독립 인스턴스 생성
 
 ### 8-10. feature/ai-news
@@ -1557,11 +1637,11 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 
 - `UserWithdrawalService.withdraw`: DELETE `/api/users/me`, `PasswordVerifyRequest`로 현재 비밀번호 확인. 계좌 잠금, 자식 데이터 삭제, 개인정보 익명화, Redis 주문/인증 정리. 마지막 활성 관리자 탈퇴 방지.
 
-- `MarketQueryService.getIndexes`, `getResearch`: GET `/api/market/indexes`, GET `/api/market/stocks/{stockCode}/research?section=finance|earnings|dividend|peers|analysts`. DART/LS 실데이터로 조회, 자료가 없으면 빈 목록 또는 명시적 오류 응답.
+- `MarketQueryService.getIndexes`, `getResearch`: GET `/api/market/indexes`, GET `/api/market/stocks/{stockCode}/research?section=finance|earnings|dividend|peers|analysts`. DART/외부 시세 데이터 실데이터로 조회, 자료가 없으면 빈 목록 또는 명시적 오류 응답.
 
 - `PlanningPreferences` / Repository / Service / Controller, `PlanningPreferencesRequest(savedBriefingDates, linkedBriefingDates, linkedGoalPlanIds)`: GET/PUT `/api/ai/planning/preferences`. 본인 브리핑 저장과 AI 자료 연동 설정. `getPreferences`, `savePreferences`, `describeConnections`, `updateSelections`. 사용자 소유권 검증, 목록 개수 제한, 낙관적 잠금 적용.
 
-- `MarketQueryController`, `MarketQueryService`: GET `/api/market/rankings?sort=volume|value|change|market-cap`, GET `/api/market/stocks/{stockCode}/history?months=12`, GET `/api/market/stocks/{stockCode}/detail`, GET `/api/market/news?query=`. 기존 LS/네이버 클라이언트 재사용. `getRankings`, `getHistory`, `getDetail`, `getNews`.
+- `MarketQueryController`, `MarketQueryService`: GET `/api/market/rankings?sort=volume|value|change|market-cap`, GET `/api/market/stocks/{stockCode}/history?months=12`, GET `/api/market/stocks/{stockCode}/detail`, GET `/api/market/news?query=`. 기존 외부 시세 데이터/네이버 클라이언트 재사용. `getRankings`, `getHistory`, `getDetail`, `getNews`.
 - `AiNewsService.getBriefingHistory`, `getBriefing`, `NewsBriefingRepository.findTop100ByUserUserIdOrderByBriefingDateDesc`: GET `/api/ai/news/briefings`, GET `/api/ai/news/briefings/{date}`. 날짜별 본인 소유 브리핑만 조회.
 
 - `GoalPlan`, `GoalPlanRepository`, `GoalPlanService`, `GoalPlanController`, `GoalPlanRequest(goal, monthlyPayment, years, annualReturn, aggressive)`, `GoalPlanResponse(planId, settings, futureValue, aggressiveFutureValue, saved, createdAt)`.
@@ -1576,7 +1656,7 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 - `findLoginId` 응답은 인증된 본인의 아이디 문자열. `resetPassword`는 기존 Refresh Token을 폐기한다.
 # 2026-09-09 UI 연동 추가 등록
 
-- MarketQueryService.getExchangeRate / MarketQueryController.getExchangeRate: 원/달러 환율 실응답(LS t3521 R/USDKRWSMBS), 미설정 시 MARKET_NOT_CONFIGURED.
+- MarketQueryService.getExchangeRate / MarketQueryController.getExchangeRate: 원/달러 환율 실응답(외부 시세 데이터 t3521 R/USDKRWSMBS), 미설정 시 MARKET_NOT_CONFIGURED.
 
 - OAuthProviderClient: authorizationUrl, getUserInfo — 제공자 실제 인증 URL/토큰/프로필 연동. OAuthAuthorizationController: authorize — 브라우저 세션에 state(10분) 보관, consumeState — 콜백 일회 검증.
 - ProfileUpdateRequest / UserService.updateProfile: 개인정보·성향·선택적 비밀번호를 한 트랜잭션에서 저장.

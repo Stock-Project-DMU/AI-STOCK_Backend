@@ -14,7 +14,7 @@ import com.teamfp.aistock.domain.stock.repository.WatchlistRepository;
 import lombok.RequiredArgsConstructor;
 
 /**
- * LsTickData.stockName이 항상 null로 오기 때문에, 우리 DB에 이미 등록된 종목명을 대신 찾아주는
+ * TickData.stockName이 항상 null로 오기 때문에, 우리 DB에 이미 등록된 종목명을 대신 찾아주는
  * 컴포넌트. schema.sql 13개 테이블에 별도 "종목 마스터" 테이블이 없어(KNOWN_ISSUES.md 1번 참고),
  * stockName이 저장돼있는 4개 테이블(watchlist/holdings/orders/recent_viewed)을 순서대로 조회한다.
  *

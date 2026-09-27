@@ -26,7 +26,7 @@ import com.teamfp.aistock.domain.user.entity.Role;
 import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.redis.RedisStockCacheService;
-import com.teamfp.aistock.infra.ls.dto.LsTickData;
+import com.teamfp.aistock.infra.marketdata.dto.TickData;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -115,9 +115,9 @@ class OrderExecutionIntegrationTest {
         // Redis 반영이 이 시점 이후 아주 약간 늦어질 수 있어 짧게 대기한다.
         Thread.sleep(300);
 
-        // 4) LS증권 WebSocket 대신 StockBroadcastService.onTickReceived()로 tick을 직접 주입한다.
+        // 4) 외부 시세 데이터 WebSocket 대신 StockBroadcastService.onTickReceived()로 tick을 직접 주입한다.
         //    지정가(70,000) 이하인 65,000원 체결 tick → 매수 조건(현재가 <= 지정가) 충족.
-        LsTickData tickData = LsTickData.builder()
+        TickData tickData = TickData.builder()
                 .stockCode(stockCode)
                 .stockName("삼성전자")
                 .currentPrice(65_000L)

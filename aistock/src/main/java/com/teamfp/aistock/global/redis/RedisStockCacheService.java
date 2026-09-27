@@ -21,11 +21,11 @@ import lombok.RequiredArgsConstructor;
 /**
  * 실시간 주가·호가 캐시 서비스.
  *
- * LS증권 WebSocket으로 tick(체결/호가)이 들어올 때마다 저장해두고,
- * 조회 API나 STOMP 브로드캐스팅에서는 이 캐시를 먼저 읽어서 매번 LS증권에
+ * 외부 시세 데이터 제공사 WebSocket으로 tick(체결/호가)이 들어올 때마다 저장해두고,
+ * 조회 API나 STOMP 브로드캐스팅에서는 이 캐시를 먼저 읽어서 매번 외부 시세 데이터 제공사에
  * 재조회하지 않도록 한다. TTL이 아주 짧기 때문에(가격 5초, 호가 2초) 값이
  * 없거나 오래됐으면 그냥 null을 반환하고, 호출하는 쪽(주가 조회 서비스 등)에서
- * 필요하면 LS증권 최신 tick으로 다시 채워질 때까지 기다리거나 REST로 재조회한다.
+ * 필요하면 외부 시세 데이터 제공사 최신 tick으로 다시 채워질 때까지 기다리거나 REST로 재조회한다.
  */
 @Service
 @RequiredArgsConstructor
@@ -44,7 +44,7 @@ public class RedisStockCacheService {
 
     /**
      * 실시간 현재가를 캐시에 저장한다.
-     * LS증권 WebSocket에서 체결 tick을 수신할 때마다 호출되는 것을 전제로 한다.
+     * 외부 시세 데이터 제공사 WebSocket에서 체결 tick을 수신할 때마다 호출되는 것을 전제로 한다.
      * 값은 JSON 문자열로 직렬화해서 저장하고, PRICE_TTL_SECONDS가 지나면 Redis가 자동으로 만료시킨다.
      *
      * @param stockCode 종목코드 (예: "005930")

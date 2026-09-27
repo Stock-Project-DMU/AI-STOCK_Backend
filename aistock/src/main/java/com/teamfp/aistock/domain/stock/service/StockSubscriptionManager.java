@@ -1,18 +1,21 @@
 package com.teamfp.aistock.domain.stock.service;
 
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Component;
 
-import com.teamfp.aistock.infra.ls.LsWebSocketClient;
+import com.teamfp.aistock.infra.marketdata.MarketDataWebSocketClient;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 종목별 LS증권 실시간 구독 여부를 관심종목(watchlist)/상세페이지 조회(viewing) 두 출처를
+ * 종목별 외부 시세 데이터 제공사 실시간 구독 여부를 관심종목(watchlist)/상세페이지 조회(viewing) 두 출처를
  * 합산한 참조 카운트로 관리한다. 참조 카운트가 0→1이 되는 시점에만 실제로 구독하고,
  * 1→0이 되는 시점에만 구독을 해제한다 — 여러 유저가 같은 종목을 동시에 보고/관심등록해도
  * 중복 구독하지 않기 위함이다.
@@ -20,7 +23,7 @@ import lombok.extern.slf4j.Slf4j;
  * 단일 서버 운영을 전제로 서버 메모리(ConcurrentHashMap)로 카운트를 관리한다. 다중 서버로
  * 확장되면 Redis 키로 승격이 필요하다(KNOWN_ISSUES.md 3번 참고).
  *
- * LsWebSocketClient는 ls.mode=real일 때만 빈으로 존재하므로 Optional로 주입받는다 — mock
+ * MarketDataWebSocketClient는 market-data.mode=real일 때만 빈으로 존재하므로 Optional로 주입받는다 — mock
  * 모드(Optional.empty())에서는 카운터만 갱신하고 실제 subscribe()/unsubscribe() 호출은
  * debug 로그만 남기고 건너뛴다(KNOWN_ISSUES.md 3번 참고).
  */
@@ -29,11 +32,11 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class StockSubscriptionManager {
 
-    // LS증권 소켓당 구독 가능 종목 수 제한. 초과 시 subscribe() 호출은 그대로 진행하되
+    // 외부 시세 데이터 제공사 소켓당 구독 가능 종목 수 제한. 초과 시 subscribe() 호출은 그대로 진행하되
     // warn 로그만 남긴다 — 본격적인 대응(초과 방지/거부)은 이 브랜치 범위 밖.
     private static final int MAX_SUBSCRIBABLE_STOCK_COUNT = 512;
 
-    private final Optional<LsWebSocketClient> lsWebSocketClient;
+    private final Optional<MarketDataWebSocketClient> marketDataWebSocketClient;
 
     private final ConcurrentHashMap<String, AtomicInteger> subscriptionRefCounts = new ConcurrentHashMap<>();
 
@@ -51,6 +54,18 @@ public class StockSubscriptionManager {
 
     public void decreaseViewingSubscription(String stockCode) {
         decrease(stockCode);
+    }
+
+    /**
+     * 현재 활성 구독 중인(참조 카운트 > 0) 종목코드 전체를 반환한다. {@code MockMarketDataGenerator}
+     * (market-data.mode=mock, feature/mock-broadcast)가 20초마다 폴링할 대상을 정하는 데 사용한다 —
+     * 아무도 보고 있지 않은 종목까지 매번 브로드캐스트하지 않기 위해서다.
+     */
+    public Set<String> getActiveSubscribedStockCodes() {
+        return subscriptionRefCounts.entrySet().stream()
+                .filter(entry -> entry.getValue().get() > 0)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     private void increase(String stockCode) {
@@ -84,21 +99,21 @@ public class StockSubscriptionManager {
                 .filter(count -> count.get() > 0)
                 .count();
         if (activeSubscriptionCount >= MAX_SUBSCRIBABLE_STOCK_COUNT) {
-            log.warn("LS증권 소켓당 구독 가능 종목 수({}개)를 초과할 수 있음: stockCode={}",
+            log.warn("외부 시세 데이터 제공사 소켓당 구독 가능 종목 수({}개)를 초과할 수 있음: stockCode={}",
                     MAX_SUBSCRIBABLE_STOCK_COUNT, stockCode);
         }
-        if (lsWebSocketClient.isEmpty()) {
-            log.debug("ls.mode=mock — LS 실시간 구독을 건너뜀: stockCode={}", stockCode);
+        if (marketDataWebSocketClient.isEmpty()) {
+            log.debug("market-data.mode=mock — 외부 시세 데이터 실시간 구독을 건너뜀: stockCode={}", stockCode);
             return;
         }
-        lsWebSocketClient.get().subscribe(stockCode);
+        marketDataWebSocketClient.get().subscribe(stockCode);
     }
 
     private void unsubscribe(String stockCode) {
-        if (lsWebSocketClient.isEmpty()) {
-            log.debug("ls.mode=mock — LS 실시간 구독 해제를 건너뜀: stockCode={}", stockCode);
+        if (marketDataWebSocketClient.isEmpty()) {
+            log.debug("market-data.mode=mock — 외부 시세 데이터 실시간 구독 해제를 건너뜀: stockCode={}", stockCode);
             return;
         }
-        lsWebSocketClient.get().unsubscribe(stockCode);
+        marketDataWebSocketClient.get().unsubscribe(stockCode);
     }
 }
