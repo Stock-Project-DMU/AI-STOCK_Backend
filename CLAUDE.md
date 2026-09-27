@@ -18,7 +18,7 @@
 
 - **백엔드**: Spring Boot 4.0.6 (Java 21), JPA, Spring Security, WebSocket/STOMP
 - **DB**: MySQL (AWS RDS), Redis (AWS ElastiCache)
-- **외부 API**: LS증권 OpenAPI(WebSocket 시세), Gemini API, Open DART, 네이버 뉴스 검색 API(NCP API Hub, AI 재무설계 상담 뉴스 검색), OAuth(카카오/네이버/구글)
+- **외부 API**: 외부 시세 데이터 제공사 OpenAPI(WebSocket 시세), Gemini API, Open DART, 네이버 뉴스 검색 API(NCP API Hub, AI 재무설계 상담 뉴스 검색), OAuth(카카오/네이버/구글)
   (Tavily는 뉴스 검색 백엔드로 쓰다가 2026-08-05 네이버로 교체, 관련 코드·설정은 2026-08-06 완전 삭제됨)
 - **인프라**: AWS EC2, AWS Parameter Store, Docker Compose(로컬)
 - **빌드**: Gradle
@@ -80,7 +80,7 @@ com.teamfp.aistock
 │   │                     RedisAiToolCacheService
 │   └── util           → DateUtil, SecurityUtil, ExternalApiInvoker, NewsRelevanceMatcher
 ├── infra
-│   ├── ls            → LsWebSocketClient, LsWebSocketHandler, LsReconnectService, dto
+│   ├── ls            → MarketDataWebSocketClient, MarketDataWebSocketHandler, MarketDataReconnectService, dto
 │   ├── gemini        → GeminiApiClient, dto
 │   ├── dart          → DartApiClient, dto
 │   ├── naver         → NaverNewsApiClient, dto (뉴스 검색 — infra/oauth의 NaverOAuthClient와는
@@ -222,12 +222,29 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
 
 ## 8. 아키텍처 필수 준수 사항
 
-- **실시간 시세**: LS증권 WebSocket 수신 → Throttle 200ms → Redis 캐싱 + STOMP 브로드캐스팅 동시 처리
+- **실시간 시세**: 외부 시세 데이터 제공사 WebSocket 수신 → Throttle 200ms → Redis 캐싱 + STOMP 브로드캐스팅 동시 처리
 - **STOMP 토픽**: `/topic/stock/{stockCode}` (브로드캐스팅), `/user/{userId}/queue` (유니캐스팅)
 - **tick 처리**: `@Async` + 전용 스레드풀 (`AsyncConfig`)
 - **지정가 체결**: tick 수신 시 `pending:orders` 확인 → 조건 충족 시 낙관적 락으로 체결
-- **서버 시작 순서**: `@PostConstruct`로 DB PENDING 주문 Redis 재적재 완료 후 LS WebSocket 연결
-- **LS 재연결**: 지수 백오프 (1→2→4→최대 30초)
+- **서버 시작 순서**: `@PostConstruct`로 DB PENDING 주문 Redis 재적재 완료 후 외부 시세 데이터 WebSocket 연결
+- **외부 시세 데이터 재연결**: 지수 백오프 (1→2→4→최대 30초)
+- **외부 시세 데이터 mock 모드**: `market-data.mode=mock`이면 `MarketDataApiClient.getCurrentPrice()`와
+  `StockService.getCurrentPrice()`/`getHoga()`가 실제 외부 시세 데이터 API·Redis 대신 `LocalMarketDataReader`로
+  시세·호가를 공급하고, `MockMarketDataGenerator`(20초 주기 폴링)가 `MarketDataWebSocketClient`(real 전용) 대신
+  변경분을 감지해 STOMP로 실시간 브로드캐스트한다. mock 전환 대상은 이 경로들뿐이며, 나머지 외부 시세 데이터
+  REST 메서드와 `MarketDataAccessTokenProvider`는 `market-data.mode`와 무관하게 항상 실제 외부 시세 데이터 API를 호출한다.
+  `LocalMarketDataReader`는 원본을 파일 또는 HTTP 둘 중 하나에서 읽는다:
+  - **파일 모드(로컬 개발 기본값)**: `market-data.url`이 비어있으면 `market-data.local-path`
+    디렉토리의 `market_data.json` 단일 파일(종목코드를 키로, 현재가·호가 필드가 함께 들어있는
+    맵, local-market-data-generator가 생성)을 직접 읽는다.
+  - **HTTP 모드(백엔드가 생성기와 파일 시스템을 공유 못 하는 배포 환경)**: 환경변수
+    `MARKET_DATA_URL`을 설정하면 파일 대신 그 URL로 GET 요청해 같은 JSON을 가져온다.
+    local-market-data-generator는 자체 HTTP 서버(기본 포트 8081)를 함께 띄워
+    `GET /market-data`(market_data.json 원문), `GET /health`(생존 확인용)를 노출한다 — 이
+    서버는 60초 주기 수집 루프와 무관하게 항상 켜져 있다(`HTTP_SERVER_ENABLED`로 끌 수 있음).
+  - **배포 시 주의**: `application-prod.yml`은 `market-data.mode: real`이 고정값이라(환경변수 오버라이드
+    없음) `prod` 프로필로는 mock 모드 자체를 켤 수 없다. mock 모드로 배포 서버를 띄워 이
+    데이터 흐름을 검증하려면 반드시 `--spring.profiles.active=dev`로 실행해야 한다.
 - **Gemini 호출 전** 반드시 `RedisRateLimiterService` 통과, 초과 시 429 즉시 반환
 - **온라인 추적**: `StompAuthInterceptor`의 CONNECT/DISCONNECT 시점에 `RedisOnlineStatusService`로
   `admin:online:users` 갱신. 클라이언트가 비정상 종료해 DISCONNECT 프레임 없이 끊기는 경우를
@@ -241,6 +258,14 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
 - **환경변수/시크릿**: AWS Parameter Store 사용, 코드에 API 키 하드코딩 절대 금지
 - **관리자 가입**: 회원가입 시 `role=ADMIN` 선택 시 `adminCode`를 서버 환경변수
   `ADMIN_SIGNUP_CODE`와 대조 후 일치할 때만 `Role.ADMIN`으로 가입 허용.
+- **CORS**: 환경변수 `CORS_ALLOWED_ORIGINS`(콤마로 여러 도메인 구분, 기본값
+  `http://localhost:3000`) 하나를 REST(`SecurityConfig.corsConfigurationSource()`)와
+  WebSocket(`WebSocketConfig.registerStompEndpoints()`의 `setAllowedOriginPatterns()`) 둘 다
+  똑같이 적용한다. 배포 시 프론트엔드 도메인을 한 곳에만 등록하면 된다.
+- **프론트엔드 환경변수 파일**: `AI-STOCK_Frontend/.env.local`(로컬 개발, git 추적 안 함),
+  `.env.production`(배포 빌드용, git 추적 안 함) — 둘 다 `NEXT_PUBLIC_API_BASE_URL`로 백엔드
+  주소를 지정한다. `https://`로 넣으면 STOMP 연결(`lib/api/realtime.ts`)이 자동으로
+  `wss://`로 바뀌므로 ws/wss를 별도 분기할 필요는 없다.
 
 ---
 

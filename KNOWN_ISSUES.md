@@ -12,7 +12,7 @@
 - **현상**: 우리 DB(13개 테이블) 중 `holdings`/`orders`/`watchlist`/`recent_viewed`
   4곳에만 `stock_name`이 저장되며, 그마저도 "누군가 그 종목을 이미 관심등록·매매·
   조회한 적 있을 때만" 채워진다. 별도의 "종목 마스터" 테이블이 schema.sql 13개
-  테이블에 없다. LS증권 WebSocket tick도 `LsTickData.stockName`이 항상 null로
+  테이블에 없다. 외부 시세 데이터 제공사 WebSocket tick도 `TickData.stockName`이 항상 null로
   온다(3주차 실측 확인).
 - **영향**: 아무도 다뤄본 적 없는 신규 상장 종목이나 미거래 종목은 실시간 시세
   브로드캐스팅·조회 API 응답에서 종목명 대신 종목코드만 노출된다
@@ -28,31 +28,38 @@
 
 ---
 
-## 2. StockSubscriptionManager의 mock 모드 처리 — MockLsDataGenerator 도입 시 재설계 필요
+## 2. (해소, 2026-09-21) StockSubscriptionManager의 mock 모드 처리 — MockMarketDataGenerator 도입으로 해결
 
 - **등록**: 4주차 `feature/stock-price`
-- **현상**: `LsWebSocketClient`는 `ls.mode=real`일 때만 스프링 빈으로 생성된다
-  (`@ConditionalOnProperty(name = "ls.mode", havingValue = "real")`). `mock` 모드
-  (dev 기본값)에서는 이 빈이 존재하지 않는다.
-- **이번 브랜치 처리**: `StockSubscriptionManager`가 `Optional<LsWebSocketClient>`로
-  생성자 주입받아, mock 모드(`Optional.empty()`)에서는 구독자 수 카운터만 갱신하고
-  실제 `subscribe()`/`unsubscribe()` 호출은 debug 로그만 남기고 건너뛴다. 임시방편이다.
-- **후속 조치**: 나중에 `MockLsDataGenerator`(mock 모드용 가짜 tick 생성기)를 만들 때
-  `StockSubscriptionManager`의 구독 호출 대상을 다시 설계해야 한다 — 예를 들어
-  `LsWebSocketClient`와 `MockLsDataGenerator`가 공통 인터페이스를 구현하도록 추상화하고
-  `StockSubscriptionManager`는 그 인터페이스 하나만 바라보게 바꾸는 방향을 검토한다
-  (지금은 `MockLsDataGenerator`가 없어 추상화할 대상이 없으므로 `Optional`로 임시 처리).
+- **현상**: `MarketDataWebSocketClient`는 `market-data.mode=real`일 때만 스프링 빈으로 생성된다
+  (`@ConditionalOnProperty(name = "market-data.mode", havingValue = "real")`). `mock` 모드
+  (dev 기본값)에서는 이 빈이 존재하지 않아, 실시간 tick을 만들어낼 소스 자체가 없었다 —
+  `local-market-data-generator`가 `market_data.json`을 주기적으로 갱신해도
+  `StockBroadcastService`(STOMP 브로드캐스팅)를 트리거해줄 게 없어서, mock 모드에서는
+  종목 상세 페이지를 새로고침해야만(REST 재조회) 새 값을 볼 수 있었다.
+- **해결 (`feature/mock-broadcast`)**: `MockMarketDataGenerator`(domain/stock/service,
+  `@ConditionalOnProperty(name = "market-data.mode", havingValue = "mock")`)를 추가해, 20초마다
+  `market_data.json`을 폴링하고 `StockSubscriptionManager.getActiveSubscribedStockCodes()`로
+  구독 중인 종목만 골라 `updatedAt` 변경을 감지, 바뀐 종목만 `MarketDataListener`
+  (`StockBroadcastService`)에 tick/호가를 전달하도록 했다. `StockSubscriptionManager`의
+  `subscribe()`/`unsubscribe()`는 여전히 `Optional<MarketDataWebSocketClient>` 패턴을 그대로
+  쓴다(mock 모드에서 실제 외부 시세 데이터 구독 호출 자체가 필요 없는 건 변함없음) — 이번에 바뀐 건 "구독
+  카운터를 유지하는 로직"이 아니라 "구독 중인 종목 목록을 외부에서 읽을 수 있는 조회 메서드
+  (`getActiveSubscribedStockCodes()`)가 추가됐다"는 점뿐이라, 당초 우려했던 것과 달리
+  `MarketDataWebSocketClient`/`MockMarketDataGenerator`를 공통 인터페이스로 묶는 재설계는 필요 없었다.
+  상세 설계는 `NAMING.md`의 `MockMarketDataGenerator`/`LocalMarketDataReader.getAllCurrentPrices()`
+  항목 참고.
 
 ---
 
-## 3. WatchlistService 트랜잭션 안에서 LS 소켓 I/O 호출
+## 3. WatchlistService 트랜잭션 안에서 외부 시세 데이터 소켓 I/O 호출
 
 - **등록**: 4주차 `feature/stock-price`
 - **현상**: `WatchlistService.addWatchlist()`/`removeWatchlist()`는 `@Transactional`
   범위 안에서 `StockSubscriptionManager.increase/decreaseWatchlistSubscription()`을
-  호출하는데, `ls.mode=real`이면 이 호출이 `LsWebSocketClient.subscribe()`/
+  호출하는데, `market-data.mode=real`이면 이 호출이 `MarketDataWebSocketClient.subscribe()`/
   `unsubscribe()`(외부 소켓 I/O)까지 이어진다. DB 트랜잭션이 열려 있는 동안 외부 I/O를
-  기다리게 되어, LS 쪽이 느려지거나 예외를 던지면 관심종목 저장/삭제 자체가 지연되거나
+  기다리게 되어, 외부 시세 데이터 쪽이 느려지거나 예외를 던지면 관심종목 저장/삭제 자체가 지연되거나
   롤백된다.
 - **영향**: `mock` 모드(dev 기본값)에서는 무해하다(`Optional.empty()`라 실제 I/O가
   없음). `real` 모드에서만 발현되며, 아직 실측으로 재현하지는 않았다.

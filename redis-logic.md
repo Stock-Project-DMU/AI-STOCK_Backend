@@ -265,7 +265,7 @@ public class RedisStockCacheService {
     private static final long PRICE_TTL_SECONDS = 5;  // 주가 5초
     private static final long HOGA_TTL_SECONDS  = 2;  // 호가 2초 (더 빠른 변동)
 
-    // 실시간 주가 저장 (LS증권 WebSocket tick 수신 시 호출)
+    // 실시간 주가 저장 (외부 시세 데이터 제공사 WebSocket tick 수신 시 호출)
     public void saveStockPrice(String stockCode, StockPriceDto dto) {
         try {
             redisTemplate.opsForValue().set(
@@ -323,7 +323,7 @@ public class RedisStockCacheService {
 1. 서버 시작
 2. DB에서 PENDING 주문 전체 조회
 3. Redis `pending:orders` 전체 적재 완료
-4. 그 다음에 LS증권 WebSocket 연결 시작
+4. 그 다음에 외부 시세 데이터 제공사 WebSocket 연결 시작
 
 순서가 바뀌면 WebSocket tick 수신 시 `pending:orders`가 비어있어 체결 누락이 발생한다.
 
@@ -437,7 +437,7 @@ public class RedisPendingOrderService {
 }
 ```
 
-**지정가 체결 조건 체크 (LS증권 tick 수신 시 호출하는 흐름 예시)**
+**지정가 체결 조건 체크 (외부 시세 데이터 제공사 tick 수신 시 호출하는 흐름 예시)**
 
 ```java
 List<PendingOrderDto> pending = getPendingOrders(stockCode);

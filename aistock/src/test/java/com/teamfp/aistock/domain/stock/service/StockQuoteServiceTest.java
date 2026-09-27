@@ -6,12 +6,12 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import com.teamfp.aistock.domain.stock.dto.StockPriceDto;
 import com.teamfp.aistock.global.redis.RedisStockCacheService;
-import com.teamfp.aistock.infra.ls.LsMarketDataApiClient;
-import com.teamfp.aistock.infra.ls.dto.LsCurrentPriceDetailDto;
+import com.teamfp.aistock.infra.marketdata.MarketDataApiClient;
+import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
 
 class StockQuoteServiceTest {
     private final RedisStockCacheService redis = mock(RedisStockCacheService.class);
-    private final LsMarketDataApiClient ls = mock(LsMarketDataApiClient.class);
+    private final MarketDataApiClient ls = mock(MarketDataApiClient.class);
     private final StockQuoteService service = new StockQuoteService(redis, ls);
 
     @Test void liveQuoteAvoidsExternalRequest() {
@@ -22,7 +22,7 @@ class StockQuoteServiceTest {
     }
 
     @Test void missingTickUsesServerQuoteWithoutPublishingFakeTick() {
-        when(ls.getCurrentPrice("005930")).thenReturn(Optional.of(LsCurrentPriceDetailDto.builder()
+        when(ls.getCurrentPrice("005930")).thenReturn(Optional.of(CurrentPriceDetailDto.builder()
                 .stockCode("005930").stockName("삼성전자").currentPrice(71000).build()));
         var quote = service.getStockPrice("005930");
         assertThat(quote.getStockName()).isEqualTo("삼성전자");
@@ -33,7 +33,7 @@ class StockQuoteServiceTest {
     @Test void unavailableOrInvalidQuoteCannotBeUsedForOrders() {
         when(ls.getCurrentPrice("005930")).thenReturn(Optional.empty());
         assertThat(service.getStockPrice("005930")).isNull();
-        when(ls.getCurrentPrice("005930")).thenReturn(Optional.of(LsCurrentPriceDetailDto.builder()
+        when(ls.getCurrentPrice("005930")).thenReturn(Optional.of(CurrentPriceDetailDto.builder()
                 .stockName("삼성전자").currentPrice(0).build()));
         assertThat(service.getStockPrice("005930")).isNull();
     }

@@ -1,7 +1,7 @@
 package com.teamfp.aistock.domain.stock.service;
 
-import com.teamfp.aistock.infra.ls.*;
-import com.teamfp.aistock.infra.ls.dto.*;
+import com.teamfp.aistock.infra.marketdata.*;
+import com.teamfp.aistock.infra.marketdata.dto.*;
 import com.teamfp.aistock.infra.naver.NaverNewsApiClient;
 import com.teamfp.aistock.infra.naver.dto.*;
 import com.teamfp.aistock.global.exception.*;
@@ -11,23 +11,23 @@ import java.util.List;
 
 @Service @RequiredArgsConstructor
 public class MarketQueryService {
-    private final LsHighItemApiClient lsHighItemApiClient;
-    private final LsMarketDataApiClient lsMarketDataApiClient;
+    private final HighItemApiClient highItemApiClient;
+    private final MarketDataApiClient marketDataApiClient;
     private final NaverNewsApiClient naverNewsApiClient;
-    private final LsIndustryApiClient lsIndustryApiClient;
-    private final LsInvestInfoApiClient lsInvestInfoApiClient;
+    private final IndustryApiClient industryApiClient;
+    private final InvestInfoApiClient investInfoApiClient;
     private final com.teamfp.aistock.infra.dart.DartApiClient dartApiClient;
-    @org.springframework.beans.factory.annotation.Value("${ls.app-key:}") private String appKey;
-    @org.springframework.beans.factory.annotation.Value("${ls.app-secret:}") private String appSecret;
+    @org.springframework.beans.factory.annotation.Value("${market-data.app-key:}") private String appKey;
+    @org.springframework.beans.factory.annotation.Value("${market-data.app-secret:}") private String appSecret;
 
     private void requireMarketConfigured() {
         if (appKey == null || appKey.isBlank() || appSecret == null || appSecret.isBlank())
             throw new CustomException(ErrorCode.MARKET_NOT_CONFIGURED);
     }
 
-    public LsOverseasIndexDto getExchangeRate() {
+    public OverseasIndexDto getExchangeRate() {
         requireMarketConfigured();
-        return lsInvestInfoApiClient.getOverseasIndex("R", "USDKRWSMBS")
+        return investInfoApiClient.getOverseasIndex("R", "USDKRWSMBS")
                 .orElseThrow(() -> new CustomException(ErrorCode.STOCK_PRICE_NOT_AVAILABLE));
     }
 
@@ -39,17 +39,17 @@ public class MarketQueryService {
                 .orElseThrow(() -> new CustomException(ErrorCode.STOCK_NOT_FOUND));
     }
 
-    public List<LsIndustryPriceDto> getIndexes() {
+    public List<IndustryPriceDto> getIndexes() {
         requireMarketConfigured();
-        return java.util.stream.Stream.of("코스피", "코스닥").map(lsIndustryApiClient::getCurrentPrice)
+        return java.util.stream.Stream.of("코스피", "코스닥").map(industryApiClient::getCurrentPrice)
                 .flatMap(java.util.Optional::stream).toList();
     }
 
     public Object getResearch(String stockCode, String section) {
         requireMarketConfigured();
         validateCode(stockCode);
-        if (section.equals("analysts")) return lsInvestInfoApiClient.getInvestmentOpinions(stockCode);
-        if (section.equals("peers")) return lsHighItemApiClient.getTopMarketCap();
+        if (section.equals("analysts")) return investInfoApiClient.getInvestmentOpinions(stockCode);
+        if (section.equals("peers")) return highItemApiClient.getTopMarketCap();
         String corpCode = dartApiClient.resolveCorpCodeByName(getDetail(stockCode).getStockName())
                 .orElseThrow(() -> new CustomException(ErrorCode.STOCK_NOT_FOUND));
         return switch (section) {
@@ -59,26 +59,26 @@ public class MarketQueryService {
             default -> throw new CustomException(ErrorCode.INVALID_INPUT);
         };
     }
-    public List<LsRankingItemDto> getRankings(String sort) {
+    public List<RankingItemDto> getRankings(String sort) {
         requireMarketConfigured();
         return switch (sort) {
-            case "volume" -> lsHighItemApiClient.getTopVolume();
-            case "value" -> lsHighItemApiClient.getTopTradingValue();
-            case "change" -> lsHighItemApiClient.getTopPriceChangeRate();
-            case "market-cap" -> lsHighItemApiClient.getTopMarketCap();
+            case "volume" -> highItemApiClient.getTopVolume();
+            case "value" -> highItemApiClient.getTopTradingValue();
+            case "change" -> highItemApiClient.getTopPriceChangeRate();
+            case "market-cap" -> highItemApiClient.getTopMarketCap();
             default -> throw new CustomException(ErrorCode.INVALID_INPUT);
         };
     }
-    public List<LsHistoricalPriceDto> getHistory(String stockCode, int months) {
+    public List<HistoricalPriceDto> getHistory(String stockCode, int months) {
         requireMarketConfigured();
         validateCode(stockCode);
         if (months < 1 || months > 60) throw new CustomException(ErrorCode.INVALID_INPUT);
-        return lsMarketDataApiClient.getHistoricalPrices(stockCode, months);
+        return marketDataApiClient.getHistoricalPrices(stockCode, months);
     }
-    public LsCurrentPriceDetailDto getDetail(String stockCode) {
+    public CurrentPriceDetailDto getDetail(String stockCode) {
         requireMarketConfigured();
         validateCode(stockCode);
-        return lsMarketDataApiClient.getCurrentPrice(stockCode)
+        return marketDataApiClient.getCurrentPrice(stockCode)
                 .orElseThrow(() -> new CustomException(ErrorCode.STOCK_PRICE_NOT_AVAILABLE));
     }
     public NaverNewsSearchResponse getNews(String query) {

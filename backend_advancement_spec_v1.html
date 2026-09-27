@@ -1,0 +1,638 @@
+﻿<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI STOCK 백엔드 고도화 명세서 v1 — 완료 기능 재검토·개선 후보</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Apple SD Gothic Neo','Malgun Gothic',-apple-system,BlinkMacSystemFont,sans-serif;
+    background:#121212; color:#e4e4e6; padding:48px 32px 80px;
+  }
+  .wrap { max-width:1360px; margin:0 auto; }
+  header { margin-bottom:30px; }
+  .eyebrow {
+    display:inline-block; font-size:12px; font-weight:700; letter-spacing:2px;
+    color:#aaa; background:#1e1e20; border:1px solid #303032;
+    padding:5px 12px; border-radius:20px; margin-bottom:16px;
+  }
+  h1 { font-size:32px; font-weight:800; letter-spacing:-0.5px; margin-bottom:8px; color:#f2f2f3; }
+  .subtitle { font-size:14.5px; color:#8f8f93; line-height:1.75; max-width:900px; }
+
+  .fix-box {
+    margin:24px 0 32px; background:#1a1a1c; border:1px solid #333335; border-left:3px solid #c8c8cc;
+    border-radius:0 12px 12px 0; padding:18px 22px;
+  }
+  .fix-box .tag { font-size:11px; font-weight:800; letter-spacing:1px; color:#c8c8cc; margin-bottom:8px; }
+  .fix-box p { font-size:13px; color:#a0a0a4; line-height:1.7; margin-bottom:10px; }
+  .fix-box p:last-child { margin-bottom:0; }
+
+  .note-box {
+    margin:24px 0 32px; background:#1a1a1c; border:1px solid #2a2a2c;
+    border-radius:12px; padding:16px 20px; font-size:12.5px; color:#9a9a9e; line-height:1.7;
+  }
+  .note-box b { color:#c8c8cc; }
+  .note-box .mono {
+    font-family:'SFMono-Regular',Consolas,monospace; font-size:11.5px; color:#e4e4e6;
+    background:#242426; border:1px solid #333335; border-radius:4px; padding:1px 6px;
+  }
+
+  .legend { display:flex; align-items:center; gap:14px; margin-bottom:22px; font-size:12px; color:#8f8f93; flex-wrap:wrap; }
+  .badge { display:inline-flex; align-items:center; padding:3px 10px; border-radius:5px; font-size:11px; font-weight:700; letter-spacing:0.3px; }
+  .b-easy { background:#242426; color:#a8a8ac; border:1px solid #333335; }
+  .b-mid  { background:#333335; color:#d4d4d6; border:1px solid #444446; }
+  .b-hard { background:#e4e4e6; color:#121212; border:1px solid #e4e4e6; }
+  .b-gap  { background:#3a2323; color:#e8b4b4; border:1px solid #4a2c2c; }
+  .b-improve { background:#22302a; color:#a9d9c3; border:1px solid #2c3f37; }
+  .b-arch { background:#232a3a; color:#b4c4e8; border:1px solid #2c344a; }
+
+  .phase-label {
+    font-size:13px; font-weight:800; color:#c8c8cc; letter-spacing:0.5px;
+    margin:34px 0 12px; padding-bottom:8px; border-bottom:1px solid #2a2a2c;
+  }
+
+  .board { display:grid; grid-template-columns: repeat(3,1fr); gap:14px; align-items:start; }
+  .person-col { display:flex; flex-direction:column; gap:12px; }
+  .person-head {
+    padding:15px 18px; border-radius:12px; font-size:14px; font-weight:800;
+    text-align:center; letter-spacing:0.3px; background:#1e1e20; color:#f2f2f3; border-top:3px solid #555;
+  }
+  .ph-a { border-top-color:#8a8a8e; }
+  .ph-b { border-top-color:#6a6a6e; }
+  .ph-c { border-top-color:#c8c8cc; }
+  .person-head .role { display:block; font-size:10.5px; font-weight:600; color:#8f8f93; margin-top:3px; letter-spacing:0; }
+
+  .card {
+    background:#1a1a1c; border:1px solid #2a2a2c; border-radius:10px; padding:16px 16px 14px;
+    display:flex; flex-direction:column; gap:8px;
+  }
+  .card .row-top { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .card .idx { font-size:11px; font-weight:800; color:#6f6f73; font-family:'SFMono-Regular',Consolas,monospace; }
+  .card .title { font-size:13.5px; font-weight:700; color:#f2f2f3; line-height:1.4; }
+  .card .loc {
+    font-size:10.5px; font-weight:600; font-family:'SFMono-Regular',Consolas,monospace;
+    color:#9a9a9e; background:#212123; border:1px solid #2c2c2e; border-radius:6px; padding:4px 8px;
+    word-break:break-all;
+  }
+  .card .field-label { font-size:9.5px; font-weight:800; letter-spacing:0.5px; color:#6f6f73; margin-top:2px; }
+  .card .field-text { font-size:11.5px; color:#a0a0a4; line-height:1.6; }
+  .card .field-text b { color:#c8c8cc; }
+
+  .summary { margin-top:38px; background:#1a1a1c; border:1px solid #2a2a2c; border-radius:14px; padding:26px 28px; }
+  .summary h2 { font-size:15px; margin-bottom:14px; color:#f2f2f3; }
+  .summary ul { list-style:none; display:grid; grid-template-columns:repeat(2,1fr); gap:10px 28px; }
+  .summary li { font-size:12.5px; color:#9a9a9e; line-height:1.6; padding-left:15px; position:relative; }
+  .summary li::before { content:'—'; position:absolute; left:0; color:#6f6f73; }
+
+  .appendix { display:flex; flex-direction:column; gap:12px; }
+  .appendix .card { padding:18px 20px; }
+  .appendix .step-num {
+    display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px;
+    border-radius:5px; background:#242426; border:1px solid #333335; color:#c8c8cc;
+    font-size:10.5px; font-weight:800; font-family:'SFMono-Regular',Consolas,monospace; flex-shrink:0;
+  }
+  .appendix .card-title { font-size:13.5px; font-weight:700; color:#f2f2f3; }
+  .appendix code {
+    font-family:'SFMono-Regular',Consolas,monospace; font-size:11px; color:#e4e4e6;
+    background:#242426; border:1px solid #333335; border-radius:4px; padding:1px 6px;
+  }
+  .appendix ol, .appendix ul.plain { margin:4px 0 0 18px; }
+  .appendix ol li, .appendix ul.plain li { font-size:11.5px; color:#a0a0a4; line-height:1.7; }
+  .appendix pre {
+    background:#111112; border:1px solid #2a2a2c; border-radius:8px; padding:12px 14px;
+    font-family:'SFMono-Regular',Consolas,monospace; font-size:11px; color:#c8c8cc; line-height:1.6;
+    overflow-x:auto; margin-top:6px;
+  }
+  .appendix .warn-tag {
+    display:inline-block; font-size:9.5px; font-weight:800; letter-spacing:0.3px; padding:2px 7px;
+    border-radius:4px; background:#3a2f1c; color:#e8cd9a; border:1px solid #4a3d24; margin-left:6px;
+  }
+
+  @media (max-width: 1100px) {
+    .board { grid-template-columns: 1fr; }
+    .summary ul { grid-template-columns:1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <span class="eyebrow">AI STOCK · TEAM FP BACKEND · 고도화 명세서 v1</span>
+    <h1>백엔드 고도화 명세서 — 완료 기능 재검토·개선 후보</h1>
+    <p class="subtitle">
+      <b>backend_8week_plan_v7</b>에서 담당자별로 완료했던 기능(A: 실시간·AI, B: 주문·계좌, C: 인증·조회·관리자)을
+      대상으로, 같은 기능 영역을 다시 살펴 고도화할 지점을 정리한 문서입니다. 아래 항목들은 <b>확정된 작업
+      지시가 아니라 코드 리뷰로 도출한 후보</b>입니다 — 우선순위·착수 여부·구현 방식은 팀 회의에서 확정합니다.
+      착수 전 CLAUDE.md·NAMING.md·schema.sql 최신본을 항상 먼저 확인하세요.
+    </p>
+  </header>
+
+  <div class="fix-box">
+    <div class="tag">이 문서가 다루는 범위</div>
+    <p>
+      팀원 A는 이번 명세서에서 <b>LS증권 연동 아키텍처 변경</b> 하나를 다룹니다 — 별도 로컬 시세 서버가
+      LS증권 실시간 시세를 수신·가공해 파일로 저장하고, 이 Spring Boot 프로젝트는 그 파일을 읽는 구조로
+      바꿉니다. 후보는 하나지만 선행조건이 있는 A-1~A-7 단계로 쪼개 아래 보드에 담았습니다. 팀원 B·C는
+      이미 완료된 주문·계좌 / 인증·조회·관리자 도메인 코드를 리뷰해서 나온 개선 후보 6개씩을 다룹니다.
+    </p>
+    <p>
+      A-1~A-7 단계가 공통으로 참조하는 세부 규칙(파일 조회 키 규칙, 이름 후보, 범위 밖 사항)은
+      문서 하단 "LS증권 최신화 아키텍처" 섹션에 정리했습니다. 파일 조회 키 규칙과 이름 후보는
+      아직 <b>미확정 제안</b>이며, 로컬 시세 서버를 실제로 만드는 쪽과 합의한 뒤 최종 확정합니다.
+    </p>
+  </div>
+
+  <div class="note-box">
+    <b>참고 문서</b>: <span class="mono">CLAUDE.md</span>(코딩 규칙) ·
+    <span class="mono">schema.sql</span>(DB 설계) · <span class="mono">redis-logic.md</span>(Redis 키 설계) ·
+    <span class="mono">KNOWN_ISSUES.md</span>(기존에 알려진 미해결 이슈) ·
+    <span class="mono">backend_8week_plan_v7.html</span>(담당자·완료 이력). 이 명세서의 "위치" 필드는
+    코드 리뷰 시점 기준이며, 실제 착수 전에는 dev pull 후 라인 번호가 달라졌는지 다시 확인하세요.
+  </div>
+
+  <div class="legend">
+    <span class="badge b-arch">아키텍처 변경</span><span>구조 자체를 바꾸는 결정</span>
+    <span class="badge b-gap">기능 공백</span><span>설계·화면은 있는데 구현이 비어있음</span>
+    <span class="badge b-improve">개선</span><span>동작은 하지만 다듬을 지점</span>
+    <span class="badge b-easy">쉬움</span>
+    <span class="badge b-mid">보통</span>
+    <span class="badge b-hard">어려움</span>
+  </div>
+
+  <div class="phase-label">고도화 후보 — 담당자별</div>
+
+  <div class="board">
+
+    <!-- A -->
+    <div class="person-col">
+      <div class="person-head ph-a">팀원 A<span class="role">실시간·AI 트랙</span></div>
+
+      <div class="card">
+        <div class="row-top">
+          <span class="idx">A-1</span>
+          <span class="badge b-arch">아키텍처 변경</span>
+          <span class="warn-tag" style="margin-left:0;">코드 작업 아님</span>
+        </div>
+        <div class="title">배경 확인 + 로컬 서버와 파일 조회 계약 확정</div>
+        <div class="loc">(팀 간 합의 — application.yml의 ls.* TR 코드 목록 기준)</div>
+        <div class="field-text">
+          현재 <b>LsWebSocketClient</b>만 <span class="mono">ls.mode</span> 조건이 걸려 있고,
+          AiPlanningService가 쓰는 9개 LS REST 클라이언트(LsMarketDataApiClient 등, 25개 도구)는
+          ls.mode와 무관하게 항상 실제 LS API를 직접 호출한다 — dev/CI에서 ls.mode=mock이어도 AI
+          상담 도구 호출은 매번 진짜 LS API를 태우는 상태다. 로컬 시세 서버가 채워줄 파일 경로
+          규칙과 TR별 JSON 스키마(LS 실제 응답 outBlock과 동일 구조)를 로컬 서버 구현 측과 먼저
+          합의한다 — 그래야 이후 단계에서 기존 parseXxx() 파싱 코드를 그대로 재사용할 수 있다.
+        </div>
+        <div class="field-text">
+          <b>진행 방향(후보)</b>: 9개 클라이언트 전체를 한 번에 합의하기 어려우면 현재가(t1102)부터
+          우선 합의하고 착수 후 순차 확장.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-top">
+          <span class="idx">A-2</span>
+          <span class="badge b-arch">아키텍처 변경</span>
+          <span class="badge b-easy">쉬움</span>
+        </div>
+        <div class="title">ls.mode 설정 확장 + 토큰 발급 분기</div>
+        <div class="loc">application.yml / infra/ls/LsAccessTokenProvider</div>
+        <div class="field-text">
+          <span class="mono">ls.mock-data-path</span>(가칭) 프로퍼티를 기존 ls.* 패턴대로 추가하고,
+          <code>LsAccessTokenProvider.issueAccessToken()</code>이 ls.mode=mock이면 실제 LS
+          인증서버 호출을 생략하고 더미 토큰을 반환하도록 수정한다. 이걸 빼먹으면 "파일만
+          읽는다"는 목표와 달리 매 호출마다 토큰 발급 API는 여전히 얻어맞는다.
+        </div>
+        <div class="field-text">
+          <b>진행 방향(후보)</b>: NAMING.md에 새 프로퍼티·클래스 이름을 먼저 등록한 뒤 진행(CLAUDE.md §11).
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-top">
+          <span class="idx">A-3</span>
+          <span class="badge b-arch">아키텍처 변경</span>
+          <span class="badge b-mid">보통</span>
+        </div>
+        <div class="title">로컬 파일 리더 컴포넌트 신규 작성</div>
+        <div class="loc">infra/ls (신규 컴포넌트, 가칭 LsMockDataFileReader)</div>
+        <div class="field-text">
+          trCd + 요청 파라미터로 A-1에서 합의한 파일 경로를 만들고 JSON을 읽어 REST 응답과 동일한
+          <code>Map&lt;String, Object&gt;</code>로 반환한다. 파일이 없거나 파싱 실패 시 기존과
+          동일하게 <code>CustomException(EXTERNAL_API_ERROR)</code>를 던져, 각 클라이언트의 기존
+          실패 처리(<code>catch → Optional.empty()</code>)가 그대로 동작하게 한다.
+        </div>
+        <div class="field-text">
+          <b>진행 방향(후보)</b>: 로컬 서버가 아직 없을 수 있으니 샘플 JSON 파일을 직접 만들어
+          단위 테스트로 먼저 검증.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-top">
+          <span class="idx">A-4</span>
+          <span class="badge b-arch">아키텍처 변경</span>
+          <span class="badge b-mid">보통</span>
+        </div>
+        <div class="title">LsApiClientSupport.call() 분기 연결 — 실제 전환 지점</div>
+        <div class="loc">infra/ls/LsApiClientSupport.call()</div>
+        <div class="field-text">
+          9개 클라이언트 전부가 거치는 이 한 지점에서 ls.mode에 따라 real→기존 REST 호출,
+          mock→A-3 리더로 위임하도록 분기한다. 25개 도구 각각의 <code>executeXxxLookup()</code>·
+          <code>parseXxx()</code>는 전혀 손대지 않는다 — <b>이 커밋부터 실제로 "로컬 파일
+          읽기"로 전환된다.</b>
+        </div>
+        <div class="field-text">
+          <b>진행 방향(후보)</b>: A-2·A-3이 각각 검증된 뒤 마지막에 연결해 리스크를 낮춘다.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-top">
+          <span class="idx">A-5</span>
+          <span class="badge b-arch">아키텍처 변경</span>
+          <span class="badge b-mid">보통</span>
+        </div>
+        <div class="title">검증 — mock/real 모드 회귀 확인</div>
+        <div class="loc">9개 LsXxxApiClientTest, AiPlanningServiceTest</div>
+        <div class="field-text">
+          mock 모드에서 대표 도구(현재가·재무랭킹·테마정보 등 데이터 형태가 다른 것 위주) 응답을
+          확인하고, real 모드가 기존과 동일하게 실제 LS API를 계속 호출하는지(이번 변경이 real
+          모드 동작을 건드리지 않았는지) 회귀 확인한다.
+        </div>
+        <div class="field-text">
+          <b>진행 방향(후보)</b>: 기존 9개 클라이언트 테스트에 mock 케이스 추가.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-top">
+          <span class="idx">A-6</span>
+          <span class="badge b-arch">아키텍처 변경</span>
+          <span class="badge b-easy">쉬움~보통</span>
+        </div>
+        <div class="title">Redis 30분 캐시(ai:tool:*) 조정</div>
+        <div class="loc">domain/ai/service/AiPlanningService.executeTool(), global/redis/RedisAiToolCacheService</div>
+        <div class="field-text">
+          LS 18개 도구는 지금 이 캐시 경로를 타고 있다(current_price 등 4개는 이미 캐시 우회
+          중). 파일 읽기로 전환되면 캐싱이 불필요해지지만, DART 4개·네이버뉴스 1개는 여전히 진짜
+          외부 API라 캐시가 계속 필요하다 — <code>RedisAiToolCacheService</code> 클래스 자체는
+          유지하고 LS 18개만 캐시 경로에서 뺀다.
+        </div>
+        <div class="field-text">
+          <b>진행 방향(후보)</b>: A-5 검증이 끝난 뒤 진행 — 안전망(캐시) 없이 먼저 빼면 파일 경로
+          문제가 검증 없이 바로 노출된다.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-top">
+          <span class="idx">A-7</span>
+          <span class="badge b-arch">아키텍처 변경</span>
+          <span class="badge b-easy">쉬움</span>
+        </div>
+        <div class="title">문서 동기화</div>
+        <div class="loc">CLAUDE.md, redis-logic.md, KNOWN_ISSUES.md, NAMING.md</div>
+        <div class="field-text">
+          CLAUDE.md §8에 "ls.mode=mock일 때 AI 상담 LS 도구는 로컬 파일을 읽는다" 추가,
+          redis-logic.md 변경 이력에 LS 18개 도구의 캐시 제외 반영, KNOWN_ISSUES.md 2번 항목
+          배경 갱신(WebSocket 통합 자체는 범위 밖이라 이슈는 유지), NAMING.md 최종 동기화.
+        </div>
+        <div class="field-text">
+          <b>진행 방향(후보)</b>: 구현(A-2~A-6)이 끝난 뒤 마지막에 진행해 구현과 다르게
+          문서화되는 걸 방지.
+        </div>
+      </div>
+    </div>
+
+    <!-- B -->
+    <div class="person-col">
+      <div class="person-head ph-b">팀원 B<span class="role">주문·계좌 트랙</span></div>
+
+      <div class="card">
+        <div class="row-top">
+          <span class="idx">B-1</span>
+          <span class="badge b-improve">개선</span>
+          <span class="badge b-mid">보통</span>
+        </div>
+        <div class="title">사용자 주문 내역 API에 페이지네이션 없음</div>
+        <div class="loc">OrderController.getMyOrderHistory / OrderService (주문 목록 조회)</div>
+        <div class="field-text">
+          <span class="mono">GET /api/orders</span>가 계좌의 전체 주문 내역을 List로 한 번에 반환한다.
+          관리자용 AdminTradeController는 이미 Pageable을 쓰는데 사용자용은 없다. 모의투자 특성상
+          반복 매매가 잦아 누적될수록 응답 크기·조회 비용이 계속 커진다.
+        </div>
+        <div class="field-text">
+          <b>개선 방향(후보)</b>: AdminTradeController와 동일하게 Pageable + Page&lt;OrderHistoryResponse&gt;로
+          전환, Repository에 페이징 조회 메서드 추가.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-top">
+          <span class="idx">B-2</span>
+          <span class="badge b-improve">개선</span>
+          <span class="badge b-easy">쉬움</span>
+        </div>
+        <div class="title">체결 알림 메시지 생성 로직이 두 서비스에 완전히 중복</div>
+        <div class="loc">OrderService.buildExecutionMessage / OrderExecutionService.buildExecutionMessage</div>
+        <div class="field-text">
+          시장가 체결(OrderService)과 지정가 체결(OrderExecutionService)의 메시지 생성 코드가
+          완전히 동일하다. HoldingSettlementService처럼 이미 공용화한 선례가 있는데 이 메서드만
+          남아있다 — 문구 포맷을 바꿀 때 한 곳을 빠뜨릴 위험.
+        </div>
+        <div class="field-text">
+          <b>개선 방향(후보)</b>: Order의 정적 헬퍼 또는 공용 컴포넌트로 통합.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-top">
+          <span class="idx">B-3</span>
+          <span class="badge b-improve">개선</span>
+          <span class="badge b-mid">보통</span>
+        </div>
+        <div class="title">관리자 거래 목록 API에 필터링이 없음</div>
+        <div class="loc">AdminTradeController / AdminTradeService</div>
+        <div class="field-text">
+          <span class="mono">GET /api/admin/trades</span>는 페이지네이션만 있고 userId·종목코드·
+          주문상태·기간으로 좁혀볼 방법이 없다. 거래가 쌓이면 관리자가 특정 사용자·기간의 이상
+          거래를 찾기 어려워진다.
+        </div>
+        <div class="field-text">
+          <b>개선 방향(후보)</b>: 검색 조건 DTO + Repository 동적 조회(QueryDSL 또는 Specification) 추가.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-top">
+          <span class="idx">B-4</span>
+          <span class="badge b-gap">기능 공백</span>
+          <span class="badge b-easy">쉬움~보통</span>
+        </div>
+        <div class="title">관리자 계좌 목록/검색 API 자체가 없음</div>
+        <div class="loc">AdminAccountController (단건 조회·상태변경만 존재)</div>
+        <div class="field-text">
+          <span class="mono">/api/admin/accounts</span>에는 accountId 단건 조회·정지 처리만 있고
+          목록 조회 엔드포인트가 없다. "정지된 계좌 전체"를 보려면 AdminUserController의 사용자
+          상세를 거쳐야만 accountId를 알 수 있다.
+        </div>
+        <div class="field-text">
+          <b>개선 방향(후보)</b>: <span class="mono">GET /api/admin/accounts?status=SUSPENDED</span>
+          같은 목록 API(Pageable + status 필터) 추가.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-top">
+          <span class="idx">B-5</span>
+          <span class="badge b-improve">개선</span>
+          <span class="badge b-easy">쉬움 (정책 판단 필요)</span>
+        </div>
+        <div class="title">평단가 계산의 정수 나눗셈 누적 오차</div>
+        <div class="loc">Holding.increase()</div>
+        <div class="field-text">
+          totalCost / quantity가 추가매수마다 원 단위로 내림 처리된다(의도된 동작으로 주석 있음).
+          같은 종목을 여러 번 소액 분할매수하면 평단가가 실제보다 계속 낮게 드리프트할 수 있다.
+          모의투자라 실거래 정산 요건은 없어 영향은 낮음.
+        </div>
+        <div class="field-text">
+          <b>개선 방향(후보)</b>: 내림 대신 반올림 전환 검토 — 값의 의미가 바뀌는 변경이라 팀 판단 필요.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-top">
+          <span class="idx">B-6</span>
+          <span class="badge b-improve">개선</span>
+          <span class="badge b-mid">보통</span>
+        </div>
+        <div class="title">지정가 매도 예약 수량이 화면에 노출되지 않음</div>
+        <div class="loc">OrderService.createLimitOrder(SELL) / OrderExecutionService.executeSell</div>
+        <div class="field-text">
+          매수는 frozenBalance로 예약이 잔고에 명시적으로 드러나는 반면, 매도는 등록 시점에만
+          수량을 검증하고 Holding에 "매도 예약 중" 필드가 없다. 사용자가 보유종목 화면에서
+          "지금 팔 수 있는 수량"을 구분할 수 없다.
+        </div>
+        <div class="field-text">
+          <b>개선 방향(후보)</b>: HoldingResponse에 pendingSellQuantity 필드 추가해 노출.
+        </div>
+      </div>
+    </div>
+
+    <!-- C -->
+    <div class="person-col">
+      <div class="person-head ph-c">팀원 C<span class="role">인증·조회·관리자 트랙</span></div>
+
+      <div class="card">
+        <div class="row-top">
+          <span class="idx">C-1</span>
+          <span class="badge b-gap">기능 공백</span>
+          <span class="badge b-hard">어려움</span>
+        </div>
+        <div class="title">소셜 로그인 3사(카카오/네이버/구글)가 전부 Mock 더미 — 우선순위 최상위 후보</div>
+        <div class="loc">infra/oauth/KakaoOAuthClient·NaverOAuthClient·GoogleOAuthClient.getUserInfo()</div>
+        <div class="field-text">
+          실제 토큰 교환·프로필 API 호출 없이 <span class="mono">code.hashCode()</span>로 만든 가짜
+          이메일·닉네임을 반환한다. "실제 카카오 토큰 발급 및 사용자 프로필 API 조회 로직 구현부"
+          TODO 주석이 그대로 남아있다. 지금 상태로는 소셜 로그인 버튼을 눌러도 실사용자 인증이
+          되지 않는다.
+        </div>
+        <div class="field-text">
+          <b>개선 방향(후보)</b>: Provider별 실제 토큰 발급 URL + 프로필 조회 URL 연동. DTO·인터페이스
+          골격은 이미 있어 구현체만 채우면 된다.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-top">
+          <span class="idx">C-2</span>
+          <span class="badge b-gap">기능 공백</span>
+          <span class="badge b-mid">보통</span>
+        </div>
+        <div class="title">회원 탈퇴(soft delete) 기능이 통째로 미구현</div>
+        <div class="loc">domain/user/entity/User.deactivate() — 호출부 0건, 탈퇴 엔드포인트 없음</div>
+        <div class="field-text">
+          schema.sql에 자식 테이블 8개 삭제 순서 + PII 익명화까지 설계돼 있고 User.deactivate()
+          엔티티 메서드도 있는데, 이를 오케스트레이션하는 서비스·컨트롤러가 없다. 사용자가 탈퇴할
+          방법이 API 레벨에 아예 없는 상태. AdminUserService 주석은 이미 탈퇴가 동작하는 것처럼
+          서술하고 있어 코드·주석 간 괴리도 있다.
+        </div>
+        <div class="field-text">
+          <b>개선 방향(후보)</b>: schema.sql에 명시된 순서(자식 테이블 삭제 → Redis 정리 → PII
+          익명화) 그대로 서비스 구현 + <span class="mono">DELETE /api/users/me</span> 추가.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-top">
+          <span class="idx">C-3</span>
+          <span class="badge b-improve">개선</span>
+          <span class="badge b-easy">쉬움</span>
+        </div>
+        <div class="title">이메일 인증코드 재발송에 쿨다운/레이트리밋 없음</div>
+        <div class="loc">AuthService.sendEmailCode() / RedisAuthCodeService.saveEmailCode()</div>
+        <div class="field-text">
+          같은 이메일로 연속 호출하면 매번 새 코드로 덮어쓰며 실제 메일이 계속 발송된다. 호출
+          횟수 제한이 없어 메일 스팸(폭탄) 벡터가 될 수 있다. Gemini 호출에는 이미 RedisRateLimiterService
+          패턴이 있어 대칭적으로 필요.
+        </div>
+        <div class="field-text">
+          <b>개선 방향(후보)</b>: auth:email_code:{email} 키가 살아있으면(TTL 남음) 재발송 거부
+          또는 최소 쿨다운 도입.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-top">
+          <span class="idx">C-4</span>
+          <span class="badge b-gap">기능 공백</span>
+          <span class="badge b-easy">쉬움</span>
+        </div>
+        <div class="title">관리자 액션(계정 정지, 문의 답변) 발생 시 사용자 알림이 안 감</div>
+        <div class="loc">AdminUserService.suspend() / AdminInquiryService.answerInquiry() / NotificationType</div>
+        <div class="field-text">
+          NotificationType에 SYSTEM/ORDER/AI/SIMULATION/NEWS만 있고 문의·계정상태변경용 타입이
+          없다. admin/auth/user 패키지 전체에서 NotificationService 호출이 0건 — 정지당하거나
+          문의 답변을 받아도 사용자는 다음 로그인 전까지 알 수 없다. 알림 인프라(STOMP 유니캐스팅)는
+          이미 있는데 관리자 도메인이 활용하지 않는 상태.
+        </div>
+        <div class="field-text">
+          <b>개선 방향(후보)</b>: NotificationType에 INQUIRY(또는 ACCOUNT) 추가 후 두 지점에서
+          notify() 호출 연결.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-top">
+          <span class="idx">C-5</span>
+          <span class="badge b-gap">기능 공백</span>
+          <span class="badge b-mid">보통</span>
+        </div>
+        <div class="title">비밀번호 변경/재설정 API 부재</div>
+        <div class="loc">UserController/UserService, AuthController — 해당 엔드포인트 없음</div>
+        <div class="field-text">
+          회원가입 시점 외에 비밀번호를 바꿀 경로가 코드에 없다. 로그인 상태에서 바꾸는 것도,
+          잊어버렸을 때 재설정하는 것도 둘 다 없다 — 실사용 서비스라면 필수 기능인데 완전히
+          비어있다. UserService.updateMyInfo()는 "loginId/비밀번호/투자성향은 이 API로 바꾸지
+          않는다"고 명시적으로 제외하고 있다.
+        </div>
+        <div class="field-text">
+          <b>개선 방향(후보)</b>: <span class="mono">PATCH /api/users/me/password</span>(현재
+          비번 확인 후 변경) + 기존 이메일 인증 인프라(RedisAuthCodeService) 재사용한 재설정 플로우.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row-top">
+          <span class="idx">C-6</span>
+          <span class="badge b-improve">개선</span>
+          <span class="badge b-easy">쉬움</span>
+        </div>
+        <div class="title">알림 목록 조회 API에 페이지네이션 없음</div>
+        <div class="loc">NotificationRepository.findAllByUserIdOrderByCreatedAtDesc / NotificationService.getMyNotifications</div>
+        <div class="field-text">
+          List&lt;Notification&gt;을 통째로 반환 — Pageable이 적용되지 않았다. 같은 계층의
+          AdminInquiryService/AdminUserService는 이미 Page&lt;T&gt;를 쓰고 있어 일관성도 어긋난다.
+          체결 알림처럼 빈도 높은 타입은 누적될수록 응답 크기·쿼리 비용이 계속 증가한다.
+        </div>
+        <div class="field-text">
+          <b>개선 방향(후보)</b>: Pageable 파라미터 추가, 또는 최소 "최근 N개 + 안읽음만" 상한 도입.
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="phase-label">LS증권 최신화 아키텍처</div>
+
+  <div class="fix-box">
+    <div class="tag">배경 재확인 — 코드 조사로 확인된 사실</div>
+    <p>
+      지금 <span class="mono">ls.mode</span> 조건은 <b>LsWebSocketClient에만</b> 걸려 있다.
+      <b>LsAccessTokenProvider</b>와 9개 REST 클라이언트는 클래스 주석에 "ls.mode와 무관하게 항상
+      동작해야 한다"고 <b>의도적으로</b> 설계돼 있다. 그런데 <span class="mono">application-dev.yml</span>은
+      "CI/테스트 및 LS 연동이 필요 없는 로컬 개발에서는..."이라는 주석과 함께
+      <span class="mono">ls.mode</span> 기본값을 <b>mock</b>으로 두고 있다 — 즉 dev/CI 환경은
+      애초에 "LS 연동 없이 돌린다"는 의도였는데, REST 클라이언트 9개는 이 의도와 무관하게 계속
+      실제 LS API를 호출해왔다는 뜻이다.
+    </p>
+    <p>
+      더 결정적으로, <span class="mono">application-prod.yml</span>에는 이미
+      <span class="mono">mode: real  # 추후 Mock 전환 브랜치에서 다시 바뀔 값이지만 지금은 실제
+      LS 연동을 사용한다</span>는 주석이 있다. 즉 <b>이번 변경은 이미 코드에 예고돼 있던 "Mock
+      전환"을 실제로 완성하는 작업</b>이다 — production을 언젠가 ls.mode=mock으로 돌릴 계획이
+      이미 있었고, 그 mock의 실제 데이터 소스를 이번에 "로컬 파일"로 확정하는 것. A-1~A-7의
+      단계별 실행 순서는 위 "고도화 후보 — 담당자별" 보드의 팀원 A 카드를 참고하고, 아래는 그
+      단계들이 공통으로 참조하는 세부 규칙이다.
+    </p>
+  </div>
+
+  <div class="appendix">
+
+    <div class="card">
+      <div class="card-title">파일 조회 키 규칙 (제안 — 로컬 서버 구현 측과 합의 전)</div>
+      <div class="field-text" style="font-size:11.5px;color:#a0a0a4;line-height:1.7;margin-top:4px;">
+        LS 요청 바디는 전부 <code>{trCd}InBlock</code> 한 겹 규칙을 따른다(예:
+        <span class="mono">t1102InBlock</span>, <span class="mono">t1716InBlock</span>). 즉 "무슨
+        데이터를 요청했는지"는 trCd + 그 안의 파라미터로 전부 결정되고, <code>url</code>(market-data-url
+        등)은 LS 쪽 라우팅일 뿐 파일 조회에는 의미가 없다. 파일 키는 trCd + 정렬된 파라미터
+        문자열로 만든다 — AiPlanningService.buildCacheKey()가 이미 쓰는 "파라미터를 키 기준으로
+        정렬해 문자열화"하는 원칙을 그대로 재사용한다.
+      </div>
+      <pre>{ls.mock-data-path}/{trCd}/{key}.json
+예) 현재가(t1102, shcode=005930)      → t1102/shcode=005930.json
+예) 등락율상위(t1441, 파라미터 없음)   → t1441/default.json
+파일 내용 = LS 실제 응답의 outBlock과 동일한 JSON 구조
+  (각 parseXxx()가 지금 읽는 hname/price/sign 등 키를 그대로 채움 → 파싱 코드 무변경)</pre>
+      <div class="field-text" style="font-size:11.5px;color:#a0a0a4;line-height:1.7;margin-top:6px;">
+        이 JSON 스키마가 로컬 시세 서버 쪽에 전달해야 할 "계약"이 된다. 9개 클라이언트가 쓰는
+        TR 코드 전체 목록은 <span class="mono">application.yml</span>의 <span class="mono">ls.*</span>
+        섹션 주석에 이미 정리돼 있다(t1102/t1716/t3401/t3202/t3341/t3521/t8428/t1441/t1444/t1452/
+        t1463/t1466/t1481/t1482/t1531/t1533/t1537 등) — 로컬 서버 착수 전 이 목록을 그대로 전달한다.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row-top"><span class="card-title">이름 후보</span><span class="warn-tag">NAMING.md 등록 전 팀 확정 필요</span></div>
+      <ul class="plain">
+        <li>파일 읽기 담당 컴포넌트: <code>LsMockDataFileReader</code> 또는
+          <code>LsLocalMarketDataReader</code> (infra/ls)</li>
+        <li>프로퍼티: <code>ls.mock-data-path</code> (또는 <code>ls.local-data-path</code>)</li>
+        <li>실패 로그 라벨: 기존 "LS OO 조회 실패" 패턴과 통일 — 예:
+          "LS 로컬 파일 조회 실패"</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="card-title">이번 범위에서 확정하지 않는 것</div>
+      <ul class="plain">
+        <li>로컬 시세 서버 자체의 구현(언어·배포 방식·파일 쓰기 주기)은 이 Spring Boot 프로젝트
+          범위 밖 — 위 "파일 조회 키 규칙"이 그 서버가 지켜야 할 계약이다</li>
+        <li>LsWebSocketClient/StockBroadcastService(실시간 브로드캐스팅)와의 장기 통합은 이번
+          변경 이후 KNOWN_ISSUES.md 2번 항목과 함께 별도 브랜치로 진행</li>
+      </ul>
+    </div>
+
+  </div>
+
+
+  <div class="summary">
+    <h2>운영 원칙 / 다음 단계</h2>
+    <ul>
+      <li>이 문서의 모든 항목은 <b>후보</b>다 — 우선순위·착수 순서·구현 방식은 팀 회의에서 확정한 뒤 브랜치를 딴다</li>
+      <li>구분: <b>아키텍처 변경</b>(A-1~A-7, 구조 자체를 바꾸는 결정) / <b>기능 공백</b>(설계는 있는데 구현이 비어있어 실사용에 지장) / <b>개선</b>(동작은 하지만 다듬을 지점)</li>
+      <li>C-1(소셜 로그인 mock)·C-2(회원 탈퇴 미구현)·C-5(비밀번호 변경/재설정 부재)·B-4(관리자 계좌 목록 API 부재)는 "화면·설계는 있는데 실제 기능이 비어있는" 기능 공백이라, 다른 개선 항목보다 먼저 팀 회의 안건으로 다룰 것을 권장한다</li>
+      <li>A-1~A-7(LS증권 최신화 아키텍처)은 기존에 확정한 ls.mode(real/mock) 구조의 연장 — 별개의 새 결정이 아니라 mock의 실제 구현 방식을 바꾸는 것. A-4에서 실제 전환이 발생하고, A-6(캐시 조정)은 A-5 검증 이후 진행. 파일 조회 키 규칙은 로컬 서버 구현 측과 합의 전 제안 단계(문서 하단 "LS증권 최신화 아키텍처" 참고)</li>
+      <li>브랜치 시작 전 항상 dev pull 후 CLAUDE.md·NAMING.md·schema.sql 최신본 확인, 새 클래스·메서드·필드는 코드 작성 전 NAMING.md에 먼저 등록</li>
+      <li>구현 중 이 명세서에 없는 새 테이블·Redis 키·폴더가 필요해지면 임의로 만들지 말고 먼저 팀에 확인한다(CLAUDE.md 10번 원칙과 동일)</li>
+      <li>B-5(평단가 반올림)처럼 값의 의미가 바뀌는 변경은 구현 전 반드시 팀 합의를 거친다</li>
+      <li>완료된 항목은 KNOWN_ISSUES.md와 마찬가지로, 해소되면 이 문서에서 제거하거나 "완료" 표시로 갱신한다</li>
+    </ul>
+  </div>
+
+</div>
+</body>
+</html>
