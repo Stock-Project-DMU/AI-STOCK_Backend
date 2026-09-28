@@ -176,7 +176,7 @@ class UserServiceTest {
     class SaveSurvey {
 
         // 투자성향·자금성향·투자레벨 전부 answers만으로 서버가 계산한다(SurveyTendencyEvaluator,
-        // SurveyLevelEvaluator). [1,2,3,1,4,5,3,3] → 투자성향 4(적극투자형), 자금성향 1(안정저축형),
+        // SurveyLevelEvaluator). [1,2,3,1,4,5,3,3] → 투자성향 4(적극투자형), 자금성향 1(수익추구형),
         // 레벨 EXPERT(5번=4, 8번=3).
         private SurveyRequest requestOf(List<Integer> answers) {
             return new SurveyRequest(answers);

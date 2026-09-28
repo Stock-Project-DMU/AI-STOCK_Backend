@@ -166,9 +166,14 @@ public class AiNewsService {
 
     /**
      * 언론사·브리핑 시각 설정 저장/변경. 언론사는 한 번에 하나만 고를 수 있다(2026-08-24 확정)
-     * — 이미 설정이 있으면 교체하고, 없으면 새로 만든다. 브리핑 시각(0~23시, KST)은
-     * generateDailyBriefings()가 매시 정각 실행될 때 이 값과 현재 시각이 일치하는
+     * — 이미 설정이 있으면 교체하고, 없으면 새로 만든다. 브리핑 시각(시:분:초, KST)은
+     * generateDailyBriefings()가 매초 실행될 때 이 값과 현재 시각이 일치하는
      * 사용자만 골라내는 데 쓰인다.
+     *
+     * briefingTime은 아직 이 값을 보내지 않는 구버전 프론트와의 호환을 위해 null을 허용한다.
+     * 신규 설정(null이면 NewsBriefingSetting 생성자가 DEFAULT_BRIEFING_TIME=07:00:00을 적용)과
+     * 기존 설정 변경(null이면 기존 값을 그대로 둠 — 언론사만 바꾸는 요청이 시각을 07:00으로
+     * 되돌려버리면 안 되므로)을 다르게 처리한다.
      */
     @Transactional
     public NewsBriefingSettingResponse updateMySetting(Long userId, String outletDomain, java.time.LocalTime briefingTime) {
@@ -184,7 +189,9 @@ public class AiNewsService {
                     .build();
         } else {
             setting.changeOutlet(outletDomain);
-            setting.changeBriefingTime(briefingTime);
+            if (briefingTime != null) {
+                setting.changeBriefingTime(briefingTime);
+            }
         }
         NewsBriefingSetting saved = newsBriefingSettingRepository.save(setting);
         return NewsBriefingSettingResponse.from(saved);
@@ -227,9 +234,17 @@ public class AiNewsService {
      * 그날 아침 7시에 이미 처리됐으므로 건너뛴다(뒤이어 generateBriefingForUser()의
      * existsByUserIdAndBriefingDate 체크로도 중복 생성을 한 번 더 막는다).
      *
+     * 대상자 조회 방식과 그 변경 배경(PR#45 리뷰 반려 사유 4번, 2026-09-28)은
+     * {@link com.teamfp.aistock.domain.ai.repository.NewsBriefingSettingRepository#findDueSettings}
+     * 주석 참고 — 같은 설명을 여기서 반복하지 않는다.
+     *
      * 초 단위 정밀도를 지원하려면 매시 정각이 아니라 매초 깨어나야 한다 — 실제 브리핑
      * 생성(Gemini 호출 등)은 대상자가 있을 때만 실행되므로, 대상자가 없는 대부분의 초에는
-     * 이 메서드가 목록 조회 한 번만 하고 끝난다(가벼운 폴링).
+     * 이 메서드가 목록 조회 한 번만 하고 끝난다(가벼운 폴링). 다만 같은 초에 여러 명이
+     * 몰리면 아래 for문이 한 명씩 순차 처리(Gemini 호출 포함)하므로 뒤 사용자는 앞 사용자
+     * 처리가 끝날 때까지 기다린다 — 이번 수정은 "매초 전체조회" 비용만 없앴을 뿐 이 순차
+     * 처리 자체는 그대로다(사용자 수가 늘어 문제가 되면 별도 개선 필요, 지금은 과설계로
+     * 보고 손대지 않음).
      *
      * 재무설계사의 Gemini 호출과 달리 사용자가 직접 요청한 게 아니라 서버가 스스로 도는
      * 배치 작업이라, 대화용으로 설계된 RedisRateLimiterService(분당3/일일10)는 여기 적용하지
@@ -238,15 +253,14 @@ public class AiNewsService {
      */
     @Scheduled(cron = "* * * * * *", zone = "Asia/Seoul")
     public void generateDailyBriefings() {
-        java.time.LocalTime currentTime = java.time.LocalDateTime.now(KST).toLocalTime().withNano(0);
-        List<NewsBriefingSetting> settings = newsBriefingSettingRepository.findAllWithUser().stream()
-                .filter(setting -> setting.getBriefingTime().equals(currentTime))
-                .toList();
+        java.time.LocalDateTime now = java.time.LocalDateTime.now(KST);
+        LocalDate today = now.toLocalDate();
+        List<NewsBriefingSetting> settings = newsBriefingSettingRepository
+                .findDueSettings(now.toLocalTime().withNano(0), today);
         if (settings.isEmpty()) {
             return;
         }
-        LocalDate today = LocalDate.now(KST);
-        log.info("뉴스 브리핑 배치 시작 - {} 대상 사용자 {}명", currentTime, settings.size());
+        log.info("뉴스 브리핑 배치 시작 - {} 대상 사용자 {}명", now.toLocalTime(), settings.size());
 
         int successCount = 0;
         for (NewsBriefingSetting setting : settings) {
@@ -260,7 +274,7 @@ public class AiNewsService {
                 log.error("뉴스 브리핑 생성 실패 - userId: {}", setting.getUser().getUserId(), e);
             }
         }
-        log.info("뉴스 브리핑 배치 종료 - {}, 성공 {}건 / 대상 {}건", currentTime, successCount, settings.size());
+        log.info("뉴스 브리핑 배치 종료 - {}, 성공 {}건 / 대상 {}건", now.toLocalTime(), successCount, settings.size());
     }
 
     // 비정상 종료 시 화면에 보여줄 안내문 — 사유 2가지를 구분해서 보여준다("기사 자체가

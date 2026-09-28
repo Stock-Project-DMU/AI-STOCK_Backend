@@ -233,11 +233,11 @@ CREATE TABLE social_accounts (
     4: 적극투자형   - 높은 수익 위해 일정 손실 감수, 성장주/ETF
     5: 공격투자형   - 최대 수익, 고위험 자산(레버리지/테마주) OK
 
-  자금성향 (4단계)
-    1: 안정저축형   - 목돈 모으기, 적금/CMA 위주
-    2: 수익추구형   - 투자 수익 목적, 주식/펀드 중심
-    3: 목표달성형   - 내 집 마련, 은퇴 등 구체적 목표
-    4: 자유소비형   - 여유 자금 운용, 유동성 중시
+  자금성향 (3단계 — refactor/enhancement-plan-b, 2026-09-28 리뷰 반려 사유 3번 대응으로
+  프론트 실제 선택지 수(3개)에 맞춰 4단계에서 축소)
+    1: 수익추구형   - 자산증식 목적, 주식/펀드 중심
+    2: 자유소비형   - 생활비 마련, 유동성 중시
+    3: 목표달성형   - 채무상환 등 구체적 목표
 
   investment_level (영문 통일 — 다른 ENUM들과 네이밍 일관성 유지)
     BEGINNER     : 초보자
@@ -250,7 +250,7 @@ CREATE TABLE investment_profile (
     investment_tendency   TINYINT     NOT NULL
                           COMMENT '1:안정형 2:안정추구형 3:위험중립형 4:적극투자형 5:공격투자형',
     fund_tendency         TINYINT     NOT NULL
-                          COMMENT '1:안정저축형 2:수익추구형 3:목표달성형 4:자유소비형',
+                          COMMENT '1:수익추구형 2:자유소비형 3:목표달성형',
     investment_level      ENUM('BEGINNER','INTERMEDIATE','EXPERT')
                                       NOT NULL DEFAULT 'BEGINNER',
     survey_answers        JSON,                      -- 설문 문항별 원본 응답

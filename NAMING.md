@@ -118,7 +118,7 @@
 | `SimulationRepository` | `findAllByUserIdOrderByCreatedAtDesc(Long userId)`, `findByUserIdAndSimulationId(Long userId, Long simulationId)`, `deleteByUserId(Long userId)` |
 | `RecentViewedRepository` | `findAllByUserIdOrderByViewedAtDesc(Long userId)`, `findByUserIdAndStockCode(Long userId, String stockCode)`, `touchViewedAt(Long userId, String stockCode)`(mypage-account 추가 — `@Modifying`, 이미 본 종목을 다시 볼 때 새 행 대신 viewedAt만 UPDATE. delete 후 재삽입 방식은 `RecentViewed`가 `@GeneratedValue(IDENTITY)`라 save()가 즉시 INSERT를 실행해버려 아직 flush 안 된 DELETE와 충돌해 `uq_user_stock_view` 위반이 나는 버그가 있어 이 방식으로 교체했다), `deleteByUserId(Long userId)`, `findFirstByStockCode(String stockCode)`(4주차 `feature/stock-price` 추가 — `StockNameResolver`용, 8-4 참고) |
 | `NotificationRepository` | `findAllByUserIdOrderByCreatedAtDesc(Long userId)`, `countByUserIdAndIsReadFalse(Long userId)`, `findByNotiIdAndUserId(Long notiId, Long userId)` |
-| `NewsBriefingSettingRepository` (feature/ai-news 추가) | `findByUserId(Long userId)`, `findAllWithUser()`(스케줄러가 전체 사용자 순회용 — `@Query` JOIN FETCH user, 트랜잭션 밖에서도 LazyInitializationException 없이 순회하기 위함), `deleteByUserId(Long userId)`(탈퇴 처리용) |
+| `NewsBriefingSettingRepository` (feature/ai-news 추가) | `findByUserId(Long userId)`, `findDueSettings(LocalTime briefingTime, LocalDate today)`(refactor/enhancement-plan-b, PR#45 리뷰 반려 사유 4번 대응 — 스케줄러가 매초 실행될 때 전체 사용자를 다 불러오던 `findAllWithUser()`를 대체. "지금 이 시각에 해당하고 아직 오늘자 브리핑 없음" 조건을 DB에서 직접 걸러오며, `@Query` JOIN FETCH user로 트랜잭션 밖에서도 LazyInitializationException 없이 순회 가능), `deleteByUserId(Long userId)`(탈퇴 처리용) |
 | `NewsBriefingRepository` (feature/ai-news 추가) | `findByUserIdAndBriefingDate(Long userId, LocalDate briefingDate)`, `existsByUserIdAndBriefingDate(Long userId, LocalDate briefingDate)`(스케줄러 중복 생성 방지), `deleteByUserId(Long userId)`(탈퇴 처리용) |
 | `InquiryRepository` | `findAllByUserIdOrderByCreatedAtDesc(Long userId)`(사용자 본인 문의 목록), `findByInquiryIdAndUserId(Long inquiryId, Long userId)`(본인 문의 상세, 소유권 검증), `findAllByOrderByStatusDescCreatedAtDesc()`(관리자 전체 목록, 무인자 `List` 버전 — "PENDING"이 "ANSWERED"보다 알파벳순 뒤(P > A)라 status 내림차순 정렬해야 미답변 우선 노출), `findAllByOrderByStatusDescCreatedAtDesc(Pageable pageable)`(같은 정렬 기준의 `Page` 오버로드 — `AdminInquiryService.getInquiries()`용. feature/admin-inquiry 코드리뷰 반영: `@Query` JOIN FETCH user로 N+1 방지, 8-18 참고), `deleteByUserId(Long userId)`(탈퇴 처리용) |
 
@@ -598,9 +598,11 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 >   먼저 호출한 뒤 아래 두 메서드를 호출한다.
 > - `SurveyTendencyEvaluator.evaluateInvestmentTendency(List<Integer> answers)` → `int`(1~5).
 >   2·3·4·5·6·7번 문항 가중합산(6번×3, 4·7번×2, 나머지×1) 후 10~44점을 폭 7점씩 5구간으로 매핑.
-> - `SurveyTendencyEvaluator.evaluateFundTendency(List<Integer> answers)` → `int`(1~4). 1번 문항
->   답을 그대로 반환(선택지 순서가 등급 순서와 1:1로 맞춰져 있다는 전제 — 프론트 `surveyQuestions.ts`
->   1번 문항이 "목돈 모으기·저축/자산 늘리기/채무 상환/생활비 마련" 순서여야 함).
+> - `SurveyTendencyEvaluator.evaluateFundTendency(List<Integer> answers)` → `int`(1~3, 2026-09-28
+>   리뷰 반려 사유 3번 대응으로 4→3 축소). 1번 문항 답을 그대로 반환(선택지 순서가 등급
+>   순서와 1:1로 맞춰져 있다는 전제 — `FRONTEND_API_IMPLEMENTATION.md`가 문서화한 실제 프론트
+>   `surveyQuestions.ts` 1번 문항 순서 "자산증식→수익추구형/생활비→자유소비형/채무상환→목표달성형"
+>   기준).
 
 > **계좌 다중화 반영(원래 문서 초안은 계좌 1개 시절 기준이었음)**: `feature/mypage-account`부터
 > 유저 1명이 계좌를 최대 3개까지 가질 수 있게 됐고, 계좌 A/B/C는 서로 완전히 독립된 영역이라

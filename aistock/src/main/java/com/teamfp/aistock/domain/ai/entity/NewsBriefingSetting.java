@@ -9,6 +9,8 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import com.teamfp.aistock.domain.user.entity.User;
 
+import org.hibernate.annotations.ColumnDefault;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EntityListeners;
@@ -59,6 +61,7 @@ public class NewsBriefingSetting {
     public static final LocalTime DEFAULT_BRIEFING_TIME = LocalTime.of(7, 0, 0);
 
     @Column(name = "briefing_time", nullable = false)
+    @ColumnDefault("'07:00:00'")
     private LocalTime briefingTime;
 
     @CreatedDate

@@ -27,9 +27,10 @@ class SurveyTendencyEvaluatorTest {
         assertThat(SurveyTendencyEvaluator.evaluateInvestmentTendency(List.of(1, 4, 4, 4, 4, 3, 3, 1))).isEqualTo(4);
     }
 
-    // 자금성향은 1번 문항 답을 그대로 반환한다(선택지 순서 = 등급 순서로 1:1 매핑).
+    // 자금성향은 1번 문항 답을 그대로 반환한다(프론트 3개 선택지 순서 = 등급 순서로 1:1 매핑,
+    // FRONTEND_API_IMPLEMENTATION.md 참고).
     @Test void returnsFirstAnswerAsFundTendencyDirectly() {
-        for (int purpose = 1; purpose <= 4; purpose++) {
+        for (int purpose = 1; purpose <= 3; purpose++) {
             assertThat(SurveyTendencyEvaluator.evaluateFundTendency(List.of(purpose, 1, 1, 1, 1, 1, 1, 1))).isEqualTo(purpose);
         }
     }

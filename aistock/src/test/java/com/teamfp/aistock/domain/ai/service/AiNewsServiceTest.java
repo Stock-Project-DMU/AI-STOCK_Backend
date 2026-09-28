@@ -1,8 +1,6 @@
 package com.teamfp.aistock.domain.ai.service;
 
-import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
@@ -47,7 +45,6 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class AiNewsServiceTest {
 
-    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final Long USER_ID = 1L;
 
     @Mock private NewsBriefingSettingRepository newsBriefingSettingRepository;
@@ -114,17 +111,18 @@ class AiNewsServiceTest {
     @DisplayName("정기 브리핑 배치 — 시각 필터링")
     class GenerateDailyBriefings {
 
+        // 시:분:초 매칭은 findDueSettings() 안에서 DB 조건(briefingTime 등호 비교)으로
+        // 처리하므로(PR#45 리뷰 반려 사유 4번 대응, 2026-09-28), 여기서는 레포지토리가
+        // 반환한 대상자를 서비스가 그대로 처리하는지만 검증한다 — 이전엔 테스트 쪽과 서비스
+        // 쪽이 각각 LocalDateTime.now()를 따로 재는 구조라 그 사이 초 경계를 넘으면 가끔
+        // 실패하는 플레이키 테스트였는데, 이 구조에서는 그 레이스 자체가 사라진다.
         @Test
-        @DisplayName("현재 시:분:초와 브리핑 시각이 일치하는 사용자만 처리하고, 다른 시각을 고른 사용자는 건너뛴다")
-        void onlyProcessesSettingsMatchingCurrentHour() {
-            LocalTime currentTime = LocalDateTime.now(KST).toLocalTime().withNano(0);
-            LocalTime otherTime = currentTime.plusHours(1);
-
-            NewsBriefingSetting matching = NewsBriefingSetting.builder()
-                    .user(user).outletDomain("hankyung.com").briefingTime(currentTime).build();
-            NewsBriefingSetting notMatching = NewsBriefingSetting.builder()
-                    .user(user).outletDomain("mk.co.kr").briefingTime(otherTime).build();
-            when(newsBriefingSettingRepository.findAllWithUser()).thenReturn(List.of(matching, notMatching));
+        @DisplayName("findDueSettings()가 돌려준 대상자만 처리한다")
+        void processesOnlySettingsReturnedByRepository() {
+            NewsBriefingSetting due = NewsBriefingSetting.builder()
+                    .user(user).outletDomain("hankyung.com").briefingTime(LocalTime.of(9, 0, 0)).build();
+            when(newsBriefingSettingRepository.findDueSettings(any(), any()))
+                    .thenReturn(List.of(due));
 
             // generateDailyBriefings()는 self 프록시(@Lazy)를 통해 generateBriefingForUser()를
             // 호출하므로, 실제 프록시 대신 스파이를 주입해 어떤 setting으로 호출됐는지만 검증한다
@@ -135,8 +133,21 @@ class AiNewsServiceTest {
 
             aiNewsService.generateDailyBriefings();
 
-            verify(self, times(1)).generateBriefingForUser(eq(matching), any());
-            verify(self, never()).generateBriefingForUser(eq(notMatching), any());
+            verify(self, times(1)).generateBriefingForUser(eq(due), any());
+        }
+
+        @Test
+        @DisplayName("findDueSettings()가 빈 목록을 돌려주면 아무도 처리하지 않는다")
+        void doesNothingWhenNoOneIsDue() {
+            when(newsBriefingSettingRepository.findDueSettings(any(), any()))
+                    .thenReturn(List.of());
+
+            AiNewsService self = spy(aiNewsService);
+            ReflectionTestUtils.setField(aiNewsService, "self", self);
+
+            aiNewsService.generateDailyBriefings();
+
+            verify(self, never()).generateBriefingForUser(any(), any());
         }
     }
 
