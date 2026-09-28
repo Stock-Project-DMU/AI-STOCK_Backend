@@ -16,8 +16,14 @@ final class SurveyTendencyEvaluator {
     // 나머지(연소득 2번·자산비중 3번·금융지식 5번)를 보조 지표로 가중합산한다.
     // 합계 범위는 10~44점(각 문항 최저 선택 시 10, 최고 선택 시 44)이며, 폭 7점씩 5구간으로
     // 나눠 등급을 매긴다.
+    //
+    // 4번 문항(투자경험)만 "6 - 답"으로 방향을 뒤집는다 — 이 문항은 프론트 선택지가
+    // 1번(선물·옵션 등 최고위험)부터 5번(무경험)까지 내림차순으로 배치돼 있어서, 다른
+    // 문항들(번호가 클수록 공격적)과 반대로 번호가 작을수록 공격적인 답이다. 이전 코드는
+    // 이 문항도 그냥 답 번호를 그대로 곱해서 공격형 점수를 반대로 줬었다(우혁 2026-09-29
+    // 재반려 사유 3-2 지적).
     static int evaluateInvestmentTendency(List<Integer> answers) {
-        int score = answers.get(1) + answers.get(2) + 2 * answers.get(3)
+        int score = answers.get(1) + answers.get(2) + 2 * (6 - answers.get(3))
                 + answers.get(4) + 3 * answers.get(5) + 2 * answers.get(6);
         return Math.min(5, (score - 10) / 7 + 1);
     }

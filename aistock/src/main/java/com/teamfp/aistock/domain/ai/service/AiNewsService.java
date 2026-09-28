@@ -167,8 +167,8 @@ public class AiNewsService {
     /**
      * 언론사·브리핑 시각 설정 저장/변경. 언론사는 한 번에 하나만 고를 수 있다(2026-08-24 확정)
      * — 이미 설정이 있으면 교체하고, 없으면 새로 만든다. 브리핑 시각(시:분:초, KST)은
-     * generateDailyBriefings()가 매초 실행될 때 이 값과 현재 시각이 일치하는
-     * 사용자만 골라내는 데 쓰인다.
+     * generateDailyBriefings()가 매분 실행될 때 이 값이 현재 시각을 이미 지났는지(<=)
+     * 판단하는 데 쓰인다(2026-09-29 재반려로 정확히-일치 비교에서 범위 비교로 변경).
      *
      * briefingTime은 아직 이 값을 보내지 않는 구버전 프론트와의 호환을 위해 null을 허용한다.
      * 신규 설정(null이면 NewsBriefingSetting 생성자가 DEFAULT_BRIEFING_TIME=07:00:00을 적용)과
@@ -228,35 +228,32 @@ public class AiNewsService {
     }
 
     /**
-     * 매초(KST) — 언론사를 설정해둔 사용자 중 지금 시:분:초를 브리핑 시각으로 고른
-     * 사용자만 골라 오늘의 브리핑을 생성한다(사용자별 시:분:초 선택 지원, v15). 예를 들어
-     * 09:00:00 실행에서는 briefingTime=09:00:00인 사용자만 처리하고, 07:00:00인 사용자는
-     * 그날 아침 7시에 이미 처리됐으므로 건너뛴다(뒤이어 generateBriefingForUser()의
-     * existsByUserIdAndBriefingDate 체크로도 중복 생성을 한 번 더 막는다).
+     * 매분(KST) — 언론사를 설정해둔 사용자 중 설정 시각이 지금 이 순간을 이미 지난(<=)
+     * 사용자 중, 아직 오늘자 브리핑을 못 받은 사람만 골라 생성한다(뒤이어
+     * generateBriefingForUser()의 existsByUserIdAndBriefingDate 체크로도 중복 생성을 한 번
+     * 더 막는다).
      *
-     * 대상자 조회 방식과 그 변경 배경(PR#45 리뷰 반려 사유 4번, 2026-09-28)은
+     * 대상자 조회 방식과 그 변경 배경(PR#45 리뷰 반려 사유 4번, 2026-09-28 최초 대응 →
+     * 2026-09-29 우혁 재반려로 매분+범위비교 방식으로 재수정)은
      * {@link com.teamfp.aistock.domain.ai.repository.NewsBriefingSettingRepository#findDueSettings}
      * 주석 참고 — 같은 설명을 여기서 반복하지 않는다.
      *
-     * 초 단위 정밀도를 지원하려면 매시 정각이 아니라 매초 깨어나야 한다 — 실제 브리핑
-     * 생성(Gemini 호출 등)은 대상자가 있을 때만 실행되므로, 대상자가 없는 대부분의 초에는
-     * 이 메서드가 목록 조회 한 번만 하고 끝난다(가벼운 폴링). 다만 같은 초에 여러 명이
-     * 몰리면 아래 for문이 한 명씩 순차 처리(Gemini 호출 포함)하므로 뒤 사용자는 앞 사용자
-     * 처리가 끝날 때까지 기다린다 — 이번 수정은 "매초 전체조회" 비용만 없앴을 뿐 이 순차
-     * 처리 자체는 그대로다(사용자 수가 늘어 문제가 되면 별도 개선 필요, 지금은 과설계로
-     * 보고 손대지 않음).
+     * 대상자가 없는 대부분의 분에는 이 메서드가 목록 조회 한 번만 하고 끝난다(가벼운 폴링).
+     * 같은 분에 여러 명이 몰리면 아래 for문이 한 명씩 순차 처리(Gemini 호출 포함)하므로
+     * 뒤 사용자는 앞 사용자 처리가 끝날 때까지 기다리지만, 이번 분을 넘겨도 다음 분 폴링에서
+     * "아직 오늘자 브리핑 없음" 조건으로 다시 잡히므로 완전히 놓치지는 않는다.
      *
      * 재무설계사의 Gemini 호출과 달리 사용자가 직접 요청한 게 아니라 서버가 스스로 도는
      * 배치 작업이라, 대화용으로 설계된 RedisRateLimiterService(분당3/일일10)는 여기 적용하지
      * 않는다 — 그 한도는 사용자 한 명이 채팅을 남용하는 것을 막기 위한 것이지, 서버가 하루
      * 한 번 대신 요약해주는 이 기능과는 목적이 다르다.
      */
-    @Scheduled(cron = "* * * * * *", zone = "Asia/Seoul")
+    @Scheduled(cron = "0 * * * * *", zone = "Asia/Seoul")
     public void generateDailyBriefings() {
         java.time.LocalDateTime now = java.time.LocalDateTime.now(KST);
         LocalDate today = now.toLocalDate();
         List<NewsBriefingSetting> settings = newsBriefingSettingRepository
-                .findDueSettings(now.toLocalTime().withNano(0), today);
+                .findDueSettings(now.toLocalTime(), today);
         if (settings.isEmpty()) {
             return;
         }

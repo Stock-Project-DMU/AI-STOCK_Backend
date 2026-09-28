@@ -20,8 +20,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * refactor/enhancement-plan-b — NewsBriefingSettingRepository.findDueSettings() 실제 MySQL
- * 연동 테스트. 시각 비교(HOUR/MINUTE/SECOND 대신 briefingTime 등호 비교로 단순화, PR#45 리뷰
- * 반려 사유 4번 대응)와 "오늘자 브리핑 없음" NOT EXISTS 서브쿼리가 JPQL 문자열 안에만 있어
+ * 연동 테스트. 시각 비교(briefingTime <= now 범위 비교, 2026-09-29 우혁 재반려로 정확히-일치
+ * 비교에서 변경됨)와 "오늘자 브리핑 없음" NOT EXISTS 서브쿼리가 JPQL 문자열 안에만 있어
  * 자바 코드로는 더 이상 직접 검증할 수 없으므로(2차 코드리뷰 발견 — AiNewsServiceTest는
  * findDueSettings() 자체를 mock으로 대체해 이 로직을 더 이상 통과시키지 않는다), 실제 DB로
  * 쿼리 자체를 검증한다.
@@ -49,20 +49,27 @@ class NewsBriefingSettingRepositoryIntegrationTest {
     }
 
     @Test
-    @DisplayName("briefingTime이 정확히 일치하는 설정만 반환하고, 다른 시각을 고른 설정은 제외한다")
-    void findDueSettings_matchesExactBriefingTimeOnly() {
-        User user = newUser(String.valueOf(System.nanoTime()));
-        LocalTime dueTime = LocalTime.of(9, 30, 15);
-        NewsBriefingSetting matching = newsBriefingSettingRepository.save(NewsBriefingSetting.builder()
-                .user(user).outletDomain("hankyung.com").briefingTime(dueTime).build());
+    @DisplayName("briefingTime이 지금 이 순간보다 이전이거나 같은 설정만 반환하고, 아직 안 지난 시각은 제외한다")
+    void findDueSettings_matchesSettingsAtOrBeforeNow() {
+        LocalTime now = LocalTime.of(9, 30, 15);
+        LocalDate today = LocalDate.now();
 
-        User otherUser = newUser(String.valueOf(System.nanoTime()));
+        User earlierUser = newUser(String.valueOf(System.nanoTime()));
+        NewsBriefingSetting earlier = newsBriefingSettingRepository.save(NewsBriefingSetting.builder()
+                .user(earlierUser).outletDomain("hankyung.com").briefingTime(now.minusMinutes(5)).build());
+
+        User exactUser = newUser(String.valueOf(System.nanoTime()));
+        NewsBriefingSetting exact = newsBriefingSettingRepository.save(NewsBriefingSetting.builder()
+                .user(exactUser).outletDomain("mk.co.kr").briefingTime(now).build());
+
+        User notYetDueUser = newUser(String.valueOf(System.nanoTime()));
         newsBriefingSettingRepository.save(NewsBriefingSetting.builder()
-                .user(otherUser).outletDomain("mk.co.kr").briefingTime(dueTime.plusSeconds(1)).build());
+                .user(notYetDueUser).outletDomain("hankyung.com").briefingTime(now.plusMinutes(5)).build());
 
-        List<NewsBriefingSetting> due = newsBriefingSettingRepository.findDueSettings(dueTime, LocalDate.now());
+        List<NewsBriefingSetting> due = newsBriefingSettingRepository.findDueSettings(now, today);
 
-        assertThat(due).extracting(NewsBriefingSetting::getSettingId).containsExactly(matching.getSettingId());
+        assertThat(due).extracting(NewsBriefingSetting::getSettingId)
+                .containsExactlyInAnyOrder(earlier.getSettingId(), exact.getSettingId());
     }
 
     @Test
