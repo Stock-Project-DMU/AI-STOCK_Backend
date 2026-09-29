@@ -2488,7 +2488,10 @@ public class AiPlanningService {
         findPrimaryHolding(userId).ifPresent(holding ->
                 promptBuilder.append("[보유종목]\n").append(describeHolding(holding)).append('\n'));
 
-        promptBuilder.append(planningPreferencesService.describeConnections(userId));
+        String connectedData = planningPreferencesService.describeConnections(userId);
+        if (connectedData != null && !connectedData.isBlank()) {
+            promptBuilder.append(connectedData).append('\n');
+        }
         promptBuilder.append("[사용자 질문]\n").append(userContent);
         return promptBuilder.toString();
     }

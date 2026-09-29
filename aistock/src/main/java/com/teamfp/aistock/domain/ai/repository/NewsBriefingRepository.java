@@ -1,6 +1,7 @@
 package com.teamfp.aistock.domain.ai.repository;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -21,6 +22,9 @@ public interface NewsBriefingRepository extends JpaRepository<NewsBriefing, Long
 
     @Query("select case when count(n) > 0 then true else false end from NewsBriefing n where n.user.userId = :userId and n.briefingDate = :briefingDate")
     boolean existsByUserIdAndBriefingDate(@Param("userId") Long userId, @Param("briefingDate") LocalDate briefingDate);
+
+    @Query("select n from NewsBriefing n where n.user.userId = :userId and n.briefingDate in :dates order by n.briefingDate desc")
+    List<NewsBriefing> findByUserIdAndBriefingDateIn(@Param("userId") Long userId, @Param("dates") List<LocalDate> dates);
 
     // 탈퇴 처리용 — schema.sql users 테이블 주석의 자식 테이블 명시적 삭제 순서(v12) 참고.
     @Modifying
