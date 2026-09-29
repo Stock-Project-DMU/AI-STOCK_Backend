@@ -94,6 +94,48 @@ class UserServiceTest {
     }
 
     @Nested
+    @DisplayName("투자 성향 설문 완료 확인")
+    class SurveyCompletion {
+        @Test
+        @DisplayName("가입 시 생성된 기본 투자 정보는 설문 완료로 취급하지 않는다")
+        void defaultProfileRequiresSurvey() {
+            InvestmentProfile profile = InvestmentProfile.builder().user(user)
+                    .investmentTendency(3).fundTendency(1).build();
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+            when(investmentProfileRepository.findByUserId(USER_ID)).thenReturn(Optional.of(profile));
+
+            assertThat(userService.getInvestmentProfile(USER_ID).surveyCompleted()).isFalse();
+            assertThatThrownBy(() -> userService.requireCompletedSurvey(USER_ID))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(error -> ((CustomException) error).getErrorCode())
+                    .isEqualTo(ErrorCode.SURVEY_REQUIRED);
+        }
+
+        @Test
+        @DisplayName("설문 응답이 저장된 계정은 상담을 이용할 수 있다")
+        void savedSurveyAllowsChat() {
+            InvestmentProfile profile = InvestmentProfile.builder().user(user)
+                    .investmentTendency(3).fundTendency(1).surveyAnswers("[1,2,3,1,4,5,3,3]").build();
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+            when(investmentProfileRepository.findByUserId(USER_ID)).thenReturn(Optional.of(profile));
+
+            assertThat(userService.getInvestmentProfile(USER_ID).surveyCompleted()).isTrue();
+            userService.requireCompletedSurvey(USER_ID);
+        }
+
+        @Test
+        @DisplayName("투자 정보가 없는 계정도 설문 완료 전에는 상담을 이용할 수 없다")
+        void missingProfileRequiresSurvey() {
+            when(investmentProfileRepository.findByUserId(USER_ID)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> userService.requireCompletedSurvey(USER_ID))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(error -> ((CustomException) error).getErrorCode())
+                    .isEqualTo(ErrorCode.SURVEY_REQUIRED);
+        }
+    }
+
+    @Nested
     @DisplayName("내 정보 조회")
     class GetMyInfo {
 

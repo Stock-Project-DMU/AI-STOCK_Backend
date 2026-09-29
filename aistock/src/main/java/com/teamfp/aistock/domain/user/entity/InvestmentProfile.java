@@ -84,4 +84,8 @@ public class InvestmentProfile {
         this.fundTendency = fundTendency;
         this.investmentLevel = investmentLevel;
     }
+
+    public boolean hasCompletedSurvey() {
+        return surveyAnswers != null && !surveyAnswers.isBlank();
+    }
 }
