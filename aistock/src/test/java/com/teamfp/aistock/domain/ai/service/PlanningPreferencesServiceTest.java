@@ -94,4 +94,30 @@ class PlanningPreferencesServiceTest {
 
         assertThat(context).contains("house", "500000원", "2026-09-01", "사용자가 저장한 시장 요약");
     }
+    @Test void rejectsMoreThanTwoLinkedGoals() {
+        assertThatThrownBy(() -> service.savePreferences(2L,
+            new PlanningPreferencesRequest(List.of(), List.of(), List.of(1L, 2L, 3L))))
+            .isInstanceOf(CustomException.class);
+        verify(preferences, never()).save(any());
+    }
+    @Test void rejectsMoreThanFiveTotalConnections() {
+        var dates = List.of(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 2),
+            LocalDate.of(2026, 9, 3), LocalDate.of(2026, 9, 4));
+        assertThatThrownBy(() -> service.savePreferences(2L,
+            new PlanningPreferencesRequest(dates, dates, List.of(1L, 2L))))
+            .isInstanceOf(CustomException.class);
+        verify(preferences, never()).save(any());
+    }
+    @Test void acceptsFiveConnectionsIncludingTwoGoals() {
+        var dates = List.of(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 2), LocalDate.of(2026, 9, 3));
+        for (var date : dates) when(news.existsByUserIdAndBriefingDate(2L, date)).thenReturn(true);
+        var goal = mock(GoalPlan.class);
+        when(goal.isSaved()).thenReturn(true);
+        when(goals.findByPlanIdAndUserId(1L, 2L)).thenReturn(Optional.of(goal));
+        when(goals.findByPlanIdAndUserId(2L, 2L)).thenReturn(Optional.of(goal));
+        var request = new PlanningPreferencesRequest(dates, dates, List.of(1L, 2L));
+
+        assertThat(service.savePreferences(2L, request)).isEqualTo(request);
+        verify(preferences).save(any());
+    }
 }
