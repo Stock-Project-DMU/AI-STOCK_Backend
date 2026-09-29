@@ -90,6 +90,8 @@ public class AuthService {
     // 회원가입 직후 자동 생성되는 첫 계좌의 이름. 이후 유저가 추가하는 계좌와 동일하게
     // AccountService.createAccount()를 그대로 재사용한다(NAMING.md 8-7 참고).
     private static final String DEFAULT_ACCOUNT_NAME = "기본 계좌";
+    // 3단계 자금성향의 1번은 수익추구형이다. 기존 4단계의 기본값 2와 의미를 맞춘다.
+    private static final int DEFAULT_FUND_TENDENCY = 1;
 
     private final UserRepository userRepository;
     private final SocialAccountRepository socialAccountRepository;
@@ -368,7 +370,7 @@ public class AuthService {
 
         if (request.getInvestmentLevel() != null) {
             investmentProfileRepository.save(com.teamfp.aistock.domain.user.entity.InvestmentProfile.builder()
-                    .user(user).investmentTendency(3).fundTendency(2).investmentLevel(request.getInvestmentLevel()).build());
+                    .user(user).investmentTendency(3).fundTendency(DEFAULT_FUND_TENDENCY).investmentLevel(request.getInvestmentLevel()).build());
         }
 
         return SignupResponse.builder()
