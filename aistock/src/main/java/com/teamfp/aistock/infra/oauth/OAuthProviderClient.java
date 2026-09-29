@@ -5,6 +5,7 @@ import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.infra.oauth.dto.SocialUserDto;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.env.Environment;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -13,12 +14,17 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.util.UriComponentsBuilder;
 import tools.jackson.databind.JsonNode;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 /** 인증 코드/토큰/비밀키를 로그에 남기지 않습니다. */
 @Component @RequiredArgsConstructor
+@Slf4j
 public class OAuthProviderClient {
     private final Environment environment;
 
@@ -31,9 +37,39 @@ public class OAuthProviderClient {
     }
 
     private void requireConfigured(SocialProvider provider) {
-        if (setting(provider, "CLIENT_ID").isBlank() || setting(provider, "REDIRECT_URI").isBlank()
-                || (provider != SocialProvider.KAKAO && setting(provider, "CLIENT_SECRET").isBlank()))
-            throw new CustomException(ErrorCode.OAUTH_NOT_CONFIGURED);
+        List<String> missing = new ArrayList<>();
+        if (setting(provider, "CLIENT_ID").isBlank()) missing.add(settingName(provider, "CLIENT_ID"));
+        if (setting(provider, "REDIRECT_URI").isBlank()) missing.add(settingName(provider, "REDIRECT_URI"));
+        if (provider != SocialProvider.KAKAO && setting(provider, "CLIENT_SECRET").isBlank()) {
+            missing.add(settingName(provider, "CLIENT_SECRET"));
+        }
+        if (!missing.isEmpty()) {
+            String names = String.join(", ", missing);
+            log.warn("OAuth 설정 누락: provider={}, keys={}", provider, names);
+            throw new CustomException(ErrorCode.OAUTH_NOT_CONFIGURED, "소셜 로그인 설정 누락: " + names);
+        }
+        String redirectUri = setting(provider, "REDIRECT_URI");
+        try {
+            URI uri = new URI(redirectUri);
+            String scheme = uri.getScheme();
+            if (scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))
+                    || uri.getHost() == null || uri.getHost().isBlank()
+                    || uri.getRawUserInfo() != null || uri.getRawFragment() != null
+                    || uri.getPort() > 65535) {
+                throw new URISyntaxException(redirectUri, "Invalid OAuth redirect URI");
+            }
+        } catch (URISyntaxException exception) {
+            String key = settingName(provider, "REDIRECT_URI");
+            log.warn("OAuth 리디렉션 URI 형식 오류: provider={}, key={}", provider, key);
+            throw new CustomException(ErrorCode.OAUTH_NOT_CONFIGURED,
+                    "소셜 로그인 리디렉션 주소 형식 오류: " + key + " (http/https URI 필요)");
+        }
+    }
+
+    private String settingName(SocialProvider provider, String suffix) {
+        String primary = provider.name() + "_OAUTH_" + suffix;
+        return provider == SocialProvider.GOOGLE && !"REDIRECT_URI".equals(suffix)
+                ? primary + " 또는 GOOGLE_" + suffix : primary;
     }
 
     public String authorizationUrl(SocialProvider provider, String state) {
@@ -76,10 +112,11 @@ public class OAuthProviderClient {
         try {
             JsonNode token = client.post().uri(tokenUrl).contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .body(form).retrieve().body(JsonNode.class);
-            if (token == null || token.path("access_token").asText("").isBlank()) throw new CustomException(ErrorCode.INVALID_TOKEN);
+            if (token == null || token.path("access_token").asText("").isBlank())
+                throw new CustomException(ErrorCode.OAUTH_PROVIDER_RESPONSE_INVALID);
             JsonNode profile = client.get().uri(userUrl).headers(headers -> headers.setBearerAuth(token.path("access_token").asText()))
                     .retrieve().body(JsonNode.class);
-            if (profile == null) throw new CustomException(ErrorCode.INVALID_TOKEN);
+            if (profile == null) throw new CustomException(ErrorCode.OAUTH_PROVIDER_RESPONSE_INVALID);
             return mapUserInfo(provider, profile);
         } catch (CustomException e) {
             throw e;
@@ -90,6 +127,10 @@ public class OAuthProviderClient {
     }
 
     static SocialUserDto mapUserInfo(SocialProvider provider, JsonNode profile) {
+        if (profile == null || (provider == SocialProvider.NAVER
+                && !"00".equals(profile.path("resultcode").asText("")))) {
+            throw new CustomException(ErrorCode.OAUTH_PROVIDER_RESPONSE_INVALID);
+        }
         JsonNode account = provider == SocialProvider.NAVER ? profile.path("response")
                 : provider == SocialProvider.KAKAO ? profile.path("kakao_account") : profile;
         String id = provider == SocialProvider.GOOGLE ? profile.path("sub").asText("")
@@ -100,9 +141,10 @@ public class OAuthProviderClient {
         String email = verified ? account.path("email").asText("") : "";
         String name = provider == SocialProvider.KAKAO ? account.path("profile").path("nickname").asText("")
                 : account.path("name").asText("");
-        if (id.isBlank()) throw new CustomException(ErrorCode.INVALID_TOKEN);
+        if (id.isBlank()) throw new CustomException(ErrorCode.OAUTH_PROVIDER_RESPONSE_INVALID);
         // 이메일 동의가 없거나 인증되지 않은 경우에도 제공자 ID로 계정을 식별한다.
-        // 검증되지 않은 이메일로 기존 계정을 자동 연동하지 않도록 null로 전달한다.
+        // 검증되지 않은 이메일로 기존 계정을 자동 연동하지 않도록 null로 전달하고,
+        // 필수 정보는 소셜 로그인 후 회원정보 입력 단계에서 받는다.
         return new SocialUserDto(id, email.isBlank() ? null : email.toLowerCase(Locale.ROOT), name.isBlank() ? "회원" : name);
     }
 }

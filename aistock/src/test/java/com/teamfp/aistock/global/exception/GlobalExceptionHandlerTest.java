@@ -22,6 +22,17 @@ class GlobalExceptionHandlerTest {
     private final GlobalExceptionHandler handler = new GlobalExceptionHandler();
 
     @Test
+    void oauthConfigurationErrorIncludesMissingSettingInResponse() {
+        var exception = new CustomException(ErrorCode.OAUTH_NOT_CONFIGURED,
+                "소셜 로그인 설정 누락: GOOGLE_OAUTH_REDIRECT_URI");
+
+        ResponseEntity<ApiResponse<Void>> response = handler.handleCustomException(exception);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(response.getBody().getMessage()).contains("GOOGLE_OAUTH_REDIRECT_URI");
+    }
+
+    @Test
     @DisplayName("필수 쿼리 파라미터 누락 시 500이 아니라 400으로 응답한다")
     void handleMissingServletRequestParameterException_returns400() {
         MissingServletRequestParameterException exception =
