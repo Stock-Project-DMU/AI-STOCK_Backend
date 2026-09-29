@@ -175,8 +175,12 @@ class UserServiceTest {
     @DisplayName("투자성향 설문 저장")
     class SaveSurvey {
 
-        private SurveyRequest requestOf(int investmentTendency, int fundTendency) {
-            return new SurveyRequest(List.of(1, 2, 3, 1, 4, 5, 3, 3), investmentTendency, fundTendency);
+        // 투자성향·자금성향·투자레벨 전부 answers만으로 서버가 계산한다(SurveyTendencyEvaluator,
+        // SurveyLevelEvaluator). [1,2,3,1,4,5,3,3] → 투자성향 5(공격투자형 — 4번 문항이
+        // "6-답"으로 방향이 뒤집혀서 1(최고위험)이 최대 기여를 함, 우혁 2026-09-29 재반려
+        // 사유 3-2 대응), 자금성향 1(수익추구형), 레벨 EXPERT(5번=4, 8번=3).
+        private SurveyRequest requestOf(List<Integer> answers) {
+            return new SurveyRequest(answers);
         }
 
         @Test
@@ -185,11 +189,11 @@ class UserServiceTest {
             when(investmentProfileRepository.findByUserId(USER_ID)).thenReturn(Optional.empty());
             when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
 
-            InvestmentProfileResponse response = userService.saveSurvey(USER_ID, requestOf(4, 2));
+            InvestmentProfileResponse response = userService.saveSurvey(USER_ID, requestOf(List.of(1, 2, 3, 1, 4, 5, 3, 3)));
 
-            assertThat(response.investmentTendency()).isEqualTo(4);
+            assertThat(response.investmentTendency()).isEqualTo(5);
             assertThat(response.investmentLevel()).isEqualTo(com.teamfp.aistock.domain.user.entity.InvestmentLevel.EXPERT);
-            assertThat(response.fundTendency()).isEqualTo(2);
+            assertThat(response.fundTendency()).isEqualTo(1);
             verify(investmentProfileRepository).save(any(InvestmentProfile.class));
         }
 
@@ -204,9 +208,12 @@ class UserServiceTest {
                     .build();
             when(investmentProfileRepository.findByUserId(USER_ID)).thenReturn(Optional.of(existing));
 
-            InvestmentProfileResponse response = userService.saveSurvey(USER_ID, requestOf(5, 3));
+            // [3,1,1,1,4,1,1,3] → 투자성향 2(안정추구형 — 4번 문항 답 1이 "6-답" 반전으로 최대
+            // 기여를 해서 예전 기준(안정형)보다 한 구간 높게 나옴), 자금성향 3(목표달성형),
+            // 레벨 EXPERT(5번=4, 8번=3)
+            InvestmentProfileResponse response = userService.saveSurvey(USER_ID, requestOf(List.of(3, 1, 1, 1, 4, 1, 1, 3)));
 
-            assertThat(response.investmentTendency()).isEqualTo(5);
+            assertThat(response.investmentTendency()).isEqualTo(2);
             assertThat(response.investmentLevel()).isEqualTo(com.teamfp.aistock.domain.user.entity.InvestmentLevel.EXPERT);
             assertThat(response.fundTendency()).isEqualTo(3);
             verify(investmentProfileRepository, never()).save(any(InvestmentProfile.class));
@@ -222,7 +229,7 @@ class UserServiceTest {
                     .thenThrow(new org.springframework.dao.DataIntegrityViolationException(
                             "Duplicate entry '1' for key 'investment_profile.uq_user_profile'"));
 
-            assertThatThrownBy(() -> userService.saveSurvey(USER_ID, requestOf(4, 2)))
+            assertThatThrownBy(() -> userService.saveSurvey(USER_ID, requestOf(List.of(1, 2, 3, 1, 4, 5, 3, 3))))
                     .isInstanceOf(CustomException.class)
                     .extracting(e -> ((CustomException) e).getErrorCode())
                     .isEqualTo(ErrorCode.OPTIMISTIC_LOCK_CONFLICT);
@@ -237,7 +244,7 @@ class UserServiceTest {
                     new org.springframework.dao.DataIntegrityViolationException("some other constraint violated");
             when(investmentProfileRepository.save(any(InvestmentProfile.class))).thenThrow(unrelated);
 
-            assertThatThrownBy(() -> userService.saveSurvey(USER_ID, requestOf(4, 2)))
+            assertThatThrownBy(() -> userService.saveSurvey(USER_ID, requestOf(List.of(1, 2, 3, 1, 4, 5, 3, 3))))
                     .isSameAs(unrelated);
         }
     }

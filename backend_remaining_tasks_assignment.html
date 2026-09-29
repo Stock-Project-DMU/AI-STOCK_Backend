@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI STOCK 백엔드 잔여 작업 역할 분배</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0e1014;
+      --panel: #171a20;
+      --panel-2: #1d2129;
+      --line: #2b313c;
+      --text: #f1f3f7;
+      --muted: #9ba3b1;
+      --woohyeok: #63b3ed;
+      --jinwoo: #b794f4;
+      --yuchan: #68d391;
+      --shared: #f6ad55;
+      --done: #68d391;
+      --waiting: #f6ad55;
+      --ready: #90cdf4;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 10% 0%, rgba(99,179,237,.10), transparent 32rem),
+        radial-gradient(circle at 90% 8%, rgba(183,148,244,.10), transparent 30rem),
+        var(--bg);
+      color: var(--text);
+      font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+      line-height: 1.55;
+    }
+
+    .wrap { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 56px 0 80px; }
+    header { margin-bottom: 28px; }
+    .eyebrow { color: #7f8a9a; font-size: 12px; font-weight: 800; letter-spacing: .16em; }
+    h1 { margin: 10px 0 8px; font-size: clamp(28px, 4vw, 42px); letter-spacing: -.04em; }
+    .lead { margin: 0; color: var(--muted); font-size: 15px; }
+
+    .summary {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 28px 0;
+    }
+    .summary-card { padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: rgba(23,26,32,.88); }
+    .summary-card .name { font-weight: 850; }
+    .summary-card .count { margin-top: 6px; color: var(--muted); font-size: 13px; }
+    .summary-card.woohyeok { border-top: 3px solid var(--woohyeok); }
+    .summary-card.jinwoo { border-top: 3px solid var(--jinwoo); }
+    .summary-card.yuchan { border-top: 3px solid var(--yuchan); }
+    .summary-card.shared { border-top: 3px solid var(--shared); }
+
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+    table { width: 100%; min-width: 920px; border-collapse: collapse; }
+    th, td { padding: 15px 14px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: var(--panel-2); color: #bbc2cd; font-size: 12px; letter-spacing: .04em; }
+    td { font-size: 14px; }
+    tbody tr:last-child td { border-bottom: 0; }
+    tbody tr:hover { background: rgba(255,255,255,.025); }
+    .num { width: 52px; color: #7f8a9a; font-weight: 800; text-align: center; }
+    .task { font-weight: 750; }
+    .note { margin-top: 4px; color: var(--muted); font-size: 12.5px; }
+
+    .owner, .status {
+      display: inline-flex; align-items: center; white-space: nowrap;
+      padding: 4px 9px; border: 1px solid currentColor; border-radius: 999px;
+      font-size: 11px; font-weight: 850;
+    }
+    .owner.woohyeok { color: var(--woohyeok); }
+    .owner.jinwoo { color: var(--jinwoo); }
+    .owner.yuchan { color: var(--yuchan); }
+    .owner.shared { color: var(--shared); }
+    .status.done { color: var(--done); }
+    .status.waiting { color: var(--waiting); }
+    .status.ready { color: var(--ready); }
+
+    .footnote {
+      margin-top: 18px; padding: 18px 20px; border: 1px solid var(--line);
+      border-radius: 14px; background: var(--panel); color: var(--muted); font-size: 13px;
+    }
+    .footnote strong { color: var(--text); }
+    code { color: #cbd5e0; font-family: Consolas, monospace; }
+
+    @media (max-width: 760px) {
+      .wrap { width: min(100% - 24px, 1180px); padding-top: 34px; }
+      .summary { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header>
+      <div class="eyebrow">AI STOCK · BACKEND TASK ASSIGNMENT</div>
+      <h1>백엔드 잔여 작업 역할 분배</h1>
+      <p class="lead">Longtxt의 할 일을 14주 백엔드 계획에 정의된 담당 영역을 기준으로 배분했습니다.</p>
+    </header>
+
+    <section class="summary" aria-label="담당자별 작업 수">
+      <div class="summary-card woohyeok"><div class="name">전우혁</div><div class="count">5개 · 시세/데이터/외부 연동</div></div>
+      <div class="summary-card jinwoo"><div class="name">김진우</div><div class="count">5개 · 주문/AI/뉴스</div></div>
+      <div class="summary-card yuchan"><div class="name">전유찬</div><div class="count">3개 · 회원/소셜 인증</div></div>
+      <div class="summary-card shared"><div class="name">공동</div><div class="count">1개 · 환경파일 정리</div></div>
+    </section>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="num">번호</th>
+            <th>해야 할 일</th>
+            <th>담당자</th>
+            <th>배분 근거</th>
+            <th>현재 상태</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="num">01</td>
+            <td><div class="task">이메일 인증(SMTP)</div><div class="note">발신용 이메일 계정 준비 필요</div></td>
+            <td><span class="owner yuchan">전유찬</span></td>
+            <td><code>auth-signup</code> 이메일 인증 담당</td>
+            <td><span class="status waiting">결정 대기</span></td>
+          </tr>
+          <tr>
+            <td class="num">02</td>
+            <td><div class="task">카카오·네이버·구글 앱 등록</div><div class="note">앱 등록 후 키값 준비</div></td>
+            <td><span class="owner yuchan">전유찬</span></td>
+            <td><code>auth-login</code> 소셜 로그인 담당</td>
+            <td><span class="status waiting">결정 대기</span></td>
+          </tr>
+          <tr>
+            <td class="num">03</td>
+            <td><div class="task">순위·지수·차트·ETF 시세 검증</div></td>
+            <td><span class="owner woohyeok">전우혁</span></td>
+            <td>실시간 시세 및 <code>stock-price</code> 담당</td>
+            <td><span class="status ready">진행 가능</span></td>
+          </tr>
+          <tr>
+            <td class="num">04</td>
+            <td><div class="task">ETF <code>exchgubun</code> 신규 필드 반영</div></td>
+            <td><span class="owner woohyeok">전우혁</span></td>
+            <td>시세 데이터 및 Entity 관련 작업</td>
+            <td><span class="status ready">진행 가능</span></td>
+          </tr>
+          <tr>
+            <td class="num">05</td>
+            <td><div class="task">외부 장애와 빈 목록 구분 처리</div></td>
+            <td><span class="owner woohyeok">전우혁</span></td>
+            <td>LS 외부 시세 연동 및 장애 처리 담당</td>
+            <td><span class="status ready">진행 가능</span></td>
+          </tr>
+          <tr>
+            <td class="num">06</td>
+            <td><div class="task">비회원 호가 제공</div></td>
+            <td><span class="owner woohyeok">전우혁</span></td>
+            <td>WebSocket 및 실시간 시세 담당</td>
+            <td><span class="status ready">진행 가능</span></td>
+          </tr>
+          <tr>
+            <td class="num">07</td>
+            <td><div class="task">투자성향 설문 채점 기준 반영</div><div class="note">문항별 점수와 등급 기준표 필요</div></td>
+            <td><span class="owner jinwoo">김진우</span></td>
+            <td>AI 상담 및 투자계획 기능 담당</td>
+            <td><span class="status waiting">기준 대기</span></td>
+          </tr>
+          <tr>
+            <td class="num">08</td>
+            <td><div class="task">소셜 계정 재인증 방식 구현</div><div class="note">재로그인·이메일 인증·생략 중 선택 필요</div></td>
+            <td><span class="owner yuchan">전유찬</span></td>
+            <td>로그인 및 소셜 인증 담당</td>
+            <td><span class="status waiting">방식 대기</span></td>
+          </tr>
+          <tr>
+            <td class="num">09</td>
+            <td><div class="task">뉴스검색 채팅·정기 브리핑 실연동 검증</div><div class="note">브리핑 시각 사용자 선택 기능은 별도 개발</div></td>
+            <td><span class="owner jinwoo">김진우</span></td>
+            <td><code>ai-planning</code>, <code>ai-news</code> 담당</td>
+            <td><span class="status waiting">호출 승인 대기</span></td>
+          </tr>
+          <tr>
+            <td class="num">10</td>
+            <td><div class="task">정기 브리핑 07시 생성 검증</div></td>
+            <td><span class="owner jinwoo">김진우</span></td>
+            <td>AI 뉴스 및 정기 브리핑 기능 담당</td>
+            <td><span class="status waiting">호출 승인 대기</span></td>
+          </tr>
+          <tr>
+            <td class="num">11</td>
+            <td><div class="task">AI 상담·DART 재무자료 검증</div></td>
+            <td><span class="owner jinwoo">김진우</span></td>
+            <td>Gemini·DART 클라이언트 담당</td>
+            <td><span class="status waiting">호출 승인 대기</span></td>
+          </tr>
+          <tr>
+            <td class="num">12</td>
+            <td><div class="task">지정가 실시간 체결 검증 및 커밋</div><div class="note">체결 로직 수정 및 테스트 완료, 커밋만 남음</div></td>
+            <td><span class="owner jinwoo">김진우</span></td>
+            <td><code>order-limit</code> 지정가 주문 담당</td>
+            <td><span class="status done">테스트 완료</span></td>
+          </tr>
+          <tr>
+            <td class="num">13</td>
+            <td><div class="task">상승·하락 순위 범위 확정 및 반영</div><div class="note">현재 화면 재정렬 또는 전체 시장 순위 중 선택</div></td>
+            <td><span class="owner woohyeok">전우혁</span></td>
+            <td>주식 시세 및 순위 데이터 담당</td>
+            <td><span class="status waiting">범위 대기</span></td>
+          </tr>
+          <tr>
+            <td class="num">14</td>
+            <td><div class="task">환경파일(<code>.env</code>) 정리</div></td>
+            <td><span class="owner shared">공동</span></td>
+            <td>각 담당 영역의 외부 연동 키를 함께 관리</td>
+            <td><span class="status ready">진행 가능</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="footnote">
+      <strong><code>.env</code> 세부 분담:</strong>
+      전우혁은 LS 시세 관련 값, 김진우는 Gemini·DART·네이버 관련 값,
+      전유찬은 SMTP·소셜 로그인 관련 값을 정리하고 마지막에 공동 점검합니다.
+    </div>
+  </main>
+</body>
+</html>

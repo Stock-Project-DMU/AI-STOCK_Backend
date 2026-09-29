@@ -78,18 +78,36 @@ public class AiNewsService {
     // 설정상 같은 모델(gemini-3.1-flash-lite)이라 검증 호출도 별도 모델의 "다른 시각"을 보장하진
     // 못하지만, 같은 모델이라도 "생성"과 "이미 만들어진 결과를 원문과 대조하는 것"은 서로 다른
     // 과제라 생성 단계에서 놓친 오류를 재검토 단계에서 잡아낼 여지가 있다고 판단했다.
+    //
+    // 완화(2026-09-21): 원래 문구("하나라도 들어가 있으면 근거 없음")가 너무 엄격해서, 원문
+    // 기사 제목에 이미 있는 사실(예: 기사 제목 "삼성전자 5% 급등 '27만전자' 회복")을 살짝 다른
+    // 말로 바꿔 썼을 뿐인데도("5%가량 급등하며 27만원대 회복") 연합뉴스 라이브 테스트에서 5회
+    // 연속 UNSAFE로 오판했다. 완전히 새로 지어낸 사실만 걸러내도록 완화했었는데, 그 직후
+    // 디지털타임스 라이브 테스트에서 부작용이 나왔다 — 원문 "7천피 회복"을 브리핑이 "2,700선
+    // 회복"이라고 자릿수 자체가 다른 숫자로 썼는데도 "표현 차이"로 오인해 SAFE 처리했다(같은
+    // 문구를 1차 시도에선 정확히 UNSAFE로 잡았다가 재시도에서 판정이 뒤집힌 것으로 보아, 완화된
+    // 지시가 "반올림"과 "완전히 다른 수치"의 경계를 판단 AI에게 명확히 못 줬던 것이 원인으로
+    // 추정된다). 그래서 "반올림/대략화(오차 10% 이내)"와 "자릿수·크기 자체가 다른 수치"를
+    // 명시적으로 구분하고, 애매하면 안전한 쪽(근거 없음)으로 판단하라는 지시를 추가해 재조정했다.
     private static final String VERIFICATION_SYSTEM_INSTRUCTION =
-            "당신은 AI STOCK 뉴스 브리핑의 팩트체커입니다. [원본 기사 목록]에 실제로 나온 내용만 "
-                    + "가지고 [브리핑 초안]이 작성됐는지 문장 단위로 대조합니다. 원본 기사에 없는 "
-                    + "회사명, 수치, 사건, 원인이 브리핑에 하나라도 들어가 있으면 근거 없음으로 "
-                    + "판단합니다. 다른 설명 없이, 문제가 없으면 'SAFE' 한 단어만 답하고, 문제가 "
-                    + "있으면 'UNSAFE: ' 뒤에 근거 없는 문장을 그대로 인용해 한 줄로만 답합니다.";
+            "당신은 AI STOCK 뉴스 브리핑의 팩트체커입니다. [원본 기사 목록]에 실제로 나온 사실을 "
+                    + "근거로 [브리핑 초안]이 작성됐는지 확인합니다. 같은 수치를 반올림하거나 "
+                    + "대략적으로 표현한 경우(원본과 10% 이내 오차, 예: '5% 급등'을 '5%가량 "
+                    + "급등'으로, '27만전자'를 '27만원대'로 쓴 경우)는 문제 삼지 않습니다. 하지만 "
+                    + "원본의 수치와 자릿수·크기 자체가 다른 경우(예: 원본 '7,000선'인데 브리핑에 "
+                    + "'2,700선'처럼 명백히 다른 값), 원본 기사 어디에도 등장하지 않는 회사명·사건을 "
+                    + "새로 지어낸 경우는 반드시 근거 없음으로 판단합니다. 반올림인지 완전히 다른 "
+                    + "수치인지 애매하면 안전한 쪽(근거 없음)으로 판단합니다. 다른 설명 없이, 문제가 "
+                    + "없으면 'SAFE' 한 단어만 답하고, 문제가 있으면 'UNSAFE: ' 뒤에 근거 없는 문장을 "
+                    + "그대로 인용해 한 줄로만 답합니다.";
 
-    // 재생성까지 포함해 최대 몇 번 요약을 만들어볼지. 무제한 재시도는 검증 호출 자체가 실패하는
-    // 경우(예: Gemini 응답이 'SAFE'도 'UNSAFE'도 아닌 애매한 문구) 무한 호출로 비용이 새는 것을
-    // 막기 위해 2회로 제한한다 — 2회차도 근거 없음으로 판정되면 그냥 그 결과를 그대로 쓴다
-    // (완전히 막지는 못해도 1회만 생성할 때보다 지어내기 노출 빈도를 낮추는 것이 목표).
-    private static final int MAX_SUMMARY_ATTEMPTS = 2;
+    // 재생성까지 포함해 최대 몇 번 요약을 만들어볼지. 완전 무제한 재시도는 검증 호출 자체가
+    // 실패하는 경우(예: Gemini 응답이 'SAFE'도 'UNSAFE'도 아닌 애매한 문구) 무한 호출로 비용이
+    // 새는 것을 막기 위해 상한을 둔다 — 2026-09-21 사용자 확정: "실패하면 그냥 넘어가지 말고
+    // 될 때까지 다시 시도하라"는 요구로 기존 2회에서 5회로 늘렸다. 5회차까지도 근거 없음으로
+    // 판정되면(마지막 시도까지 UNSAFE) generateVerifiedSummary()가 null을 반환해 이번 브리핑은
+    // 폐기한다 — 지어낸 내용을 유저에게 보내느니 아예 안 보내는 게 낫다는 원칙은 그대로 유지.
+    private static final int MAX_SUMMARY_ATTEMPTS = 5;
 
     // notifications.content가 VARCHAR(500)이라 Gemini 요약이 그보다 길면 잘라서 저장한다.
     private static final int NOTIFICATION_CONTENT_MAX_LENGTH = 500;
@@ -147,11 +165,18 @@ public class AiNewsService {
     }
 
     /**
-     * 언론사 설정 저장/변경. 언론사는 한 번에 하나만 고를 수 있다(2026-08-24 확정) — 이미
-     * 설정이 있으면 교체하고, 없으면 새로 만든다.
+     * 언론사·브리핑 시각 설정 저장/변경. 언론사는 한 번에 하나만 고를 수 있다(2026-08-24 확정)
+     * — 이미 설정이 있으면 교체하고, 없으면 새로 만든다. 브리핑 시각(시:분:초, KST)은
+     * generateDailyBriefings()가 매분 실행될 때 이 값이 현재 시각을 이미 지났는지(<=)
+     * 판단하는 데 쓰인다(2026-09-29 재반려로 정확히-일치 비교에서 범위 비교로 변경).
+     *
+     * briefingTime은 아직 이 값을 보내지 않는 구버전 프론트와의 호환을 위해 null을 허용한다.
+     * 신규 설정(null이면 NewsBriefingSetting 생성자가 DEFAULT_BRIEFING_TIME=07:00:00을 적용)과
+     * 기존 설정 변경(null이면 기존 값을 그대로 둠 — 언론사만 바꾸는 요청이 시각을 07:00으로
+     * 되돌려버리면 안 되므로)을 다르게 처리한다.
      */
     @Transactional
-    public NewsBriefingSettingResponse updateMySetting(Long userId, String outletDomain) {
+    public NewsBriefingSettingResponse updateMySetting(Long userId, String outletDomain, java.time.LocalTime briefingTime) {
         validateOutlet(outletDomain);
 
         NewsBriefingSetting setting = newsBriefingSettingRepository.findByUserId(userId).orElse(null);
@@ -160,9 +185,13 @@ public class AiNewsService {
             setting = NewsBriefingSetting.builder()
                     .user(user)
                     .outletDomain(outletDomain)
+                    .briefingTime(briefingTime)
                     .build();
         } else {
             setting.changeOutlet(outletDomain);
+            if (briefingTime != null) {
+                setting.changeBriefingTime(briefingTime);
+            }
         }
         NewsBriefingSetting saved = newsBriefingSettingRepository.save(setting);
         return NewsBriefingSettingResponse.from(saved);
@@ -199,17 +228,36 @@ public class AiNewsService {
     }
 
     /**
-     * 매일 아침 7시(KST) — 언론사를 설정해둔 사용자 전체를 순회하며 오늘의 브리핑을 생성한다.
+     * 매분(KST) — 언론사를 설정해둔 사용자 중 설정 시각이 지금 이 순간을 이미 지난(<=)
+     * 사용자 중, 아직 오늘자 브리핑을 못 받은 사람만 골라 생성한다(뒤이어
+     * generateBriefingForUser()의 existsByUserIdAndBriefingDate 체크로도 중복 생성을 한 번
+     * 더 막는다).
+     *
+     * 대상자 조회 방식과 그 변경 배경(PR#45 리뷰 반려 사유 4번, 2026-09-28 최초 대응 →
+     * 2026-09-29 우혁 재반려로 매분+범위비교 방식으로 재수정)은
+     * {@link com.teamfp.aistock.domain.ai.repository.NewsBriefingSettingRepository#findDueSettings}
+     * 주석 참고 — 같은 설명을 여기서 반복하지 않는다.
+     *
+     * 대상자가 없는 대부분의 분에는 이 메서드가 목록 조회 한 번만 하고 끝난다(가벼운 폴링).
+     * 같은 분에 여러 명이 몰리면 아래 for문이 한 명씩 순차 처리(Gemini 호출 포함)하므로
+     * 뒤 사용자는 앞 사용자 처리가 끝날 때까지 기다리지만, 이번 분을 넘겨도 다음 분 폴링에서
+     * "아직 오늘자 브리핑 없음" 조건으로 다시 잡히므로 완전히 놓치지는 않는다.
+     *
      * 재무설계사의 Gemini 호출과 달리 사용자가 직접 요청한 게 아니라 서버가 스스로 도는
      * 배치 작업이라, 대화용으로 설계된 RedisRateLimiterService(분당3/일일10)는 여기 적용하지
      * 않는다 — 그 한도는 사용자 한 명이 채팅을 남용하는 것을 막기 위한 것이지, 서버가 하루
      * 한 번 대신 요약해주는 이 기능과는 목적이 다르다.
      */
-    @Scheduled(cron = "0 0 7 * * *", zone = "Asia/Seoul")
+    @Scheduled(cron = "0 * * * * *", zone = "Asia/Seoul")
     public void generateDailyBriefings() {
-        List<NewsBriefingSetting> settings = newsBriefingSettingRepository.findAllWithUser();
-        LocalDate today = LocalDate.now(KST);
-        log.info("뉴스 브리핑 일일 배치 시작 - 대상 사용자 {}명", settings.size());
+        java.time.LocalDateTime now = java.time.LocalDateTime.now(KST);
+        LocalDate today = now.toLocalDate();
+        List<NewsBriefingSetting> settings = newsBriefingSettingRepository
+                .findDueSettings(now.toLocalTime(), today);
+        if (settings.isEmpty()) {
+            return;
+        }
+        log.info("뉴스 브리핑 배치 시작 - {} 대상 사용자 {}명", now.toLocalTime(), settings.size());
 
         int successCount = 0;
         for (NewsBriefingSetting setting : settings) {
@@ -223,12 +271,26 @@ public class AiNewsService {
                 log.error("뉴스 브리핑 생성 실패 - userId: {}", setting.getUser().getUserId(), e);
             }
         }
-        log.info("뉴스 브리핑 일일 배치 종료 - 성공 {}건 / 대상 {}건", successCount, settings.size());
+        log.info("뉴스 브리핑 배치 종료 - {}, 성공 {}건 / 대상 {}건", now.toLocalTime(), successCount, settings.size());
     }
 
+    // 비정상 종료 시 화면에 보여줄 안내문 — 사유 2가지를 구분해서 보여준다("기사 자체가
+    // 없음"과 "AI가 지어내서 못 믿음"은 서로 다른 상황이라 뭉뚱그리면 안 된다는 2026-09-21
+    // 사용자 지적으로 다시 분리). 이전에는 이 경우 아무 행도 저장하지 않아 getTodayBriefing()이
+    // NEWS_BRIEFING_NOT_FOUND(404 성격)를 던졌는데, 그러면 프론트가 "오류"와 "그냥 오늘은
+    // 뉴스가 없음"을 구분하지 못한다 — 그래서 실패해도 화면에 보여줄 문구를 담은 행을 항상
+    // 저장한다. 다만 "검증 실패" 케이스에 원문 기사 링크까지 보여주는 건 별개 문제로
+    // 걷어냈다("AI가 신뢰 못 한 기사를 왜 보여주냐"는 지적) — 원문 기사는 실제 요약이
+    // 완성된 날에만(= AI가 근거로 삼은 기사를 "이 요약의 출처"로 보여줄 때만) 첨부한다.
+    private static final String NO_ARTICLES_TEMPLATE = BRIEFING_GREETING + "오늘은 %s에서 시황 관련 기사를 찾지 못했어요. 내일 다시 확인해 주세요.";
+    private static final String VERIFICATION_FAILED_TEMPLATE = BRIEFING_GREETING + "오늘은 신뢰할 수 있는 요약을 만들지 못했어요. 내일 다시 확인해 주세요.";
+
     /**
-     * @return 실제로 브리핑을 새로 만들었으면 true, 이미 있어서 건너뛰었거나 기사가 없어
-     * 만들지 못했으면 false.
+     * @return 실제로 AI 요약을 만들어 브리핑을 완성했으면 true. 이미 오늘 처리된 경우(건너뜀),
+     * 기사를 못 찾은 경우, 근거 검증을 끝내 통과하지 못한 경우는 전부 false를 반환하지만—
+     * 뒤의 두 실패 케이스는 그냥 건너뛰지 않고 사유별로 다른 안내 문구를 담은 행을 저장한다
+     * (사용자가 "왜 아무것도 안 보이는지" 알 수 있어야 한다는 2026-09-21 요청 반영). 원문 기사
+     * 링크(sourceLinks)는 실제 요약이 완성된 경우(true)에만 채워지고, 실패 시엔 항상 비어있다.
      */
     @Transactional
     public boolean generateBriefingForUser(NewsBriefingSetting setting, LocalDate today) {
@@ -237,35 +299,47 @@ public class AiNewsService {
             return false;
         }
 
+        String outletName = NewsRelevanceMatcher.OUTLET_NAMES.getOrDefault(setting.getOutletDomain(), "확인된 매체");
         NaverNewsSearchResponse newsResponse = naverNewsApiClient.searchByOutlet(setting.getOutletDomain());
+
+        String content;
+        List<NewsSourceLinkDto> sourceLinks;
+        boolean generated;
         if (newsResponse.results().isEmpty()) {
             log.info("뉴스 브리핑 생성 스킵 - 조건에 맞는 기사 없음 (userId={}, outlet={})", userId, setting.getOutletDomain());
-            return false;
+            content = String.format(NO_ARTICLES_TEMPLATE, outletName);
+            sourceLinks = List.of();
+            generated = false;
+        } else {
+            String summary = generateVerifiedSummary(newsResponse, outletName);
+            if (summary == null) {
+                log.warn("뉴스 브리핑 생성 스킵 - 최대 재시도까지 근거 검증 실패 (userId={}, outlet={})", userId, setting.getOutletDomain());
+                content = VERIFICATION_FAILED_TEMPLATE;
+                sourceLinks = List.of();
+                generated = false;
+            } else {
+                sourceLinks = newsResponse.results().stream()
+                        .map(result -> new NewsSourceLinkDto(result.title(), result.link(), result.outlet()))
+                        .toList();
+                content = summary;
+                generated = true;
+            }
         }
-
-        String outletName = NewsRelevanceMatcher.OUTLET_NAMES.getOrDefault(setting.getOutletDomain(), "확인된 매체");
-        String summary = generateVerifiedSummary(newsResponse, outletName);
-        if (summary == null) {
-            log.warn("뉴스 브리핑 생성 스킵 - 최대 재시도까지 근거 검증 실패 (userId={}, outlet={})", userId, setting.getOutletDomain());
-            return false;
-        }
-
-        List<NewsSourceLinkDto> sourceLinks = newsResponse.results().stream()
-                .map(result -> new NewsSourceLinkDto(result.title(), result.link(), result.outlet()))
-                .toList();
 
         NewsBriefing briefing = NewsBriefing.builder()
                 .user(setting.getUser())
                 .outletDomain(setting.getOutletDomain())
                 .briefingDate(today)
-                .content(summary)
+                .content(content)
                 .sourceLinksJson(serializeSourceLinks(sourceLinks))
                 .build();
         newsBriefingRepository.save(briefing);
 
-        notificationService.notify(userId, NotificationType.NEWS,
-                outletName + " 오늘의 브리핑이 도착했어요", truncateForNotification(summary));
-        return true;
+        if (generated) {
+            notificationService.notify(userId, NotificationType.NEWS,
+                    outletName + " 오늘의 브리핑이 도착했어요", truncateForNotification(content));
+        }
+        return generated;
     }
 
     /**

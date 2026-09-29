@@ -31,7 +31,6 @@ import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.redis.RedisAiToolCacheService;
-import com.teamfp.aistock.global.redis.RedisRateLimiterService;
 import com.teamfp.aistock.infra.dart.DartApiClient;
 import com.teamfp.aistock.infra.dart.dto.DartFinancialResponse;
 import com.teamfp.aistock.infra.gemini.GeminiApiClient;
@@ -70,9 +69,10 @@ import static org.mockito.Mockito.when;
 /**
  * feature/ai-planning — AiPlanningService 단위 테스트.
  *
- * 2026-07-31 코드리뷰 후속 수정 사항이 실제로 지켜지는지 검증한다: rate-limit increment 호출
- * 순서, Gemini 실패 시 사용자 메시지가 남지 않는지(orphan 메시지 방지), 대표 계좌를
- * AccountService를 통해서만 조회하는지, 세션 소유권 검증, 세션 제목이 최초 1회만 채워지는지.
+ * 2026-07-31 코드리뷰 후속 수정 사항이 실제로 지켜지는지 검증한다: Gemini 실패 시 사용자
+ * 메시지가 남지 않는지(orphan 메시지 방지), 대표 계좌를 AccountService를 통해서만
+ * 조회하는지, 세션 소유권 검증, 세션 제목이 최초 1회만 채워지는지.
+ * (분당3/일일10 자체 호출 제한은 2026-09-21 제거됨 — rate-limit 관련 테스트도 함께 삭제)
  */
 @ExtendWith(MockitoExtension.class)
 class AiPlanningServiceTest {
@@ -90,8 +90,6 @@ class AiPlanningServiceTest {
     private AccountService accountService;
     @Mock
     private HoldingValuationService holdingValuationService;
-    @Mock
-    private RedisRateLimiterService rateLimiterService;
     @Mock
     private RedisAiToolCacheService aiToolCacheService;
     @Mock
@@ -173,49 +171,12 @@ class AiPlanningServiceTest {
     }
 
     @Nested
-    @DisplayName("메시지 전송 - rate limit")
-    class SendMessageRateLimit {
-
-        @Test
-        @DisplayName("분당/일일 한도를 초과하면 Gemini를 호출하지 않고 즉시 예외를 던진다")
-        void fail_rateLimitExceeded() {
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(false);
-
-            assertThatThrownBy(() -> aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("안녕")))
-                    .isInstanceOf(CustomException.class)
-                    .extracting(e -> ((CustomException) e).getErrorCode())
-                    .isEqualTo(ErrorCode.GEMINI_RATE_LIMIT_EXCEEDED);
-
-            verify(rateLimiterService, never()).increment(anyLong());
-            verify(geminiApiClient, never()).generate(any());
-        }
-
-        @Test
-        @DisplayName("한도를 통과하면 DART/네이버/Gemini 호출보다 먼저 increment로 카운터를 올린다")
-        void success_incrementsBeforeGeminiCall() {
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
-            stubHappyPathUpTo(new GeminiResponse("답변", 5));
-            // increment()가 Gemini 호출 이전에 이미 반영돼 있어야 한다
-            // (RedisRateLimiterService 계약: isAllowed() 통과 "직후" increment).
-            when(geminiApiClient.generate(any())).thenAnswer(invocation -> {
-                verify(rateLimiterService).increment(USER_ID);
-                return new GeminiResponse("답변", 5);
-            });
-
-            aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("삼성전자 어때?"));
-
-            verify(rateLimiterService).increment(USER_ID);
-        }
-    }
-
-    @Nested
     @DisplayName("메시지 전송 - Gemini 실패 시 orphan 메시지 방지")
     class SendMessageGeminiFailure {
 
         @Test
         @DisplayName("Gemini 호출이 실패하면 사용자 메시지도 저장되지 않는다")
         void fail_geminiFailure_doesNotSaveAnyMessage() {
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             when(sessionRepository.findByUserIdAndSessionId(USER_ID, SESSION_ID)).thenReturn(Optional.of(session));
             when(messageRepository.findRecentBySessionId(anyLong(), any())).thenReturn(List.of());
             when(accountService.getMyAccounts(USER_ID)).thenReturn(List.of());
@@ -238,7 +199,6 @@ class AiPlanningServiceTest {
         @Test
         @DisplayName("계좌가 없으면 보유종목 조회 자체를 하지 않는다")
         void noAccounts_skipsHoldingLookup() {
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             stubHappyPathUpTo(new GeminiResponse("답변", 5));
 
             aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("질문"));
@@ -252,7 +212,6 @@ class AiPlanningServiceTest {
             AccountInfoResponse accountInfo = new AccountInfoResponse(
                     ACCOUNT_ID, "계좌A", "ACC-0001", 1_000_000L, 0L, 1_000_000L, 0, AccountStatus.ACTIVE);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             when(sessionRepository.findByUserIdAndSessionId(USER_ID, SESSION_ID)).thenReturn(Optional.of(session));
             when(messageRepository.findRecentBySessionId(anyLong(), any())).thenReturn(List.of());
             when(accountService.getMyAccounts(USER_ID)).thenReturn(List.of(accountInfo));
@@ -273,7 +232,6 @@ class AiPlanningServiceTest {
         @Test
         @DisplayName("Gemini가 도구 호출이 필요없다고 판단하면(바로 텍스트 응답) 네이버를 호출하지 않고 Gemini도 1번만 부른다")
         void noFunctionCall_skipsToolAndCallsGeminiOnce() {
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             stubHappyPathUpTo(new GeminiResponse("어떤 SK 계열사를 말씀하시는지 알려주세요.", null));
 
             AiChatResponse response = aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("SK 어때?"));
@@ -291,7 +249,6 @@ class AiPlanningServiceTest {
             GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
             GeminiResponse finalResponse = new GeminiResponse("삼성전기는 최근 실적이...", 12);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             when(sessionRepository.findByUserIdAndSessionId(USER_ID, SESSION_ID)).thenReturn(Optional.of(session));
             when(messageRepository.findRecentBySessionId(anyLong(), any())).thenReturn(List.of());
             when(accountService.getMyAccounts(USER_ID)).thenReturn(List.of());
@@ -327,7 +284,6 @@ class AiPlanningServiceTest {
             GeminiResponse parallelResponse = new GeminiResponse(null, null, List.of(newsCall, financialsCall));
             GeminiResponse finalResponse = new GeminiResponse("실적과 뉴스를 종합하면...", 20);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             when(sessionRepository.findByUserIdAndSessionId(USER_ID, SESSION_ID)).thenReturn(Optional.of(session));
             when(messageRepository.findRecentBySessionId(anyLong(), any())).thenReturn(List.of());
             when(accountService.getMyAccounts(USER_ID)).thenReturn(List.of());
@@ -380,7 +336,6 @@ class AiPlanningServiceTest {
             GeminiResponse functionCallResponse = new GeminiResponse(null, null, List.of(functionCall));
             GeminiResponse forcedFinalResponse = new GeminiResponse("검색 결과를 반영해 답변드립니다.", 5);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             when(sessionRepository.findByUserIdAndSessionId(USER_ID, SESSION_ID)).thenReturn(Optional.of(session));
             when(messageRepository.findRecentBySessionId(anyLong(), any())).thenReturn(List.of());
             when(accountService.getMyAccounts(USER_ID)).thenReturn(List.of());
@@ -415,7 +370,6 @@ class AiPlanningServiceTest {
             GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
             GeminiResponse finalResponse = new GeminiResponse("지금은 관련 뉴스를 확인할 수 없지만...", 8);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             when(sessionRepository.findByUserIdAndSessionId(USER_ID, SESSION_ID)).thenReturn(Optional.of(session));
             when(messageRepository.findRecentBySessionId(anyLong(), any())).thenReturn(List.of());
             when(accountService.getMyAccounts(USER_ID)).thenReturn(List.of());
@@ -437,7 +391,6 @@ class AiPlanningServiceTest {
             GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
             GeminiResponse finalResponse = new GeminiResponse("실적 관련 소식은 찾지 못했습니다...", 10);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             stubHappyPathUpTo(firstResponse);
             when(geminiApiClient.generate(any())).thenReturn(firstResponse).thenReturn(finalResponse);
             // NaverNewsApiClient는 주제까지 맞는 근거가 없으면 results=빈 리스트를 준다
@@ -463,7 +416,6 @@ class AiPlanningServiceTest {
             GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
             GeminiResponse finalResponse = new GeminiResponse("어떤 종목인지 먼저 알려주세요...", 5);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             stubHappyPathUpTo(firstResponse);
             when(geminiApiClient.generate(any())).thenReturn(firstResponse).thenReturn(finalResponse);
 
@@ -481,7 +433,6 @@ class AiPlanningServiceTest {
             GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
             GeminiResponse finalResponse = new GeminiResponse("유상증자 내역을 정리하면...", 10);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             stubHappyPathUpTo(firstResponse);
             when(geminiApiClient.generate(any())).thenReturn(firstResponse).thenReturn(finalResponse);
             when(dartApiClient.resolveCorpCodeByName("삼성전자")).thenReturn(Optional.of("00126380"));
@@ -509,7 +460,6 @@ class AiPlanningServiceTest {
             GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
             GeminiResponse finalResponse = new GeminiResponse("유상증자 내역을 정리하면...", 10);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             stubHappyPathUpTo(firstResponse);
             when(geminiApiClient.generate(any())).thenReturn(firstResponse).thenReturn(finalResponse);
             when(dartApiClient.resolveCorpCodeByName("삼성전자")).thenReturn(Optional.of("00126380"));
@@ -533,7 +483,6 @@ class AiPlanningServiceTest {
             GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
             GeminiResponse finalResponse = new GeminiResponse("어떤 종목인지 먼저 알려주세요...", 5);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             stubHappyPathUpTo(firstResponse);
             when(geminiApiClient.generate(any())).thenReturn(firstResponse).thenReturn(finalResponse);
 
@@ -555,7 +504,6 @@ class AiPlanningServiceTest {
             GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
             GeminiResponse finalResponse = new GeminiResponse("최대주주 현황을 알려드리면...", 10);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             stubHappyPathUpTo(firstResponse);
             when(geminiApiClient.generate(any())).thenReturn(firstResponse).thenReturn(finalResponse);
             when(dartApiClient.resolveCorpCodeByName("삼성전자")).thenReturn(Optional.of("00126380"));
@@ -581,7 +529,6 @@ class AiPlanningServiceTest {
             GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
             GeminiResponse finalResponse = new GeminiResponse("최대주주 정보는 확인이 어렵습니다...", 10);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             stubHappyPathUpTo(firstResponse);
             when(geminiApiClient.generate(any())).thenReturn(firstResponse).thenReturn(finalResponse);
             when(dartApiClient.resolveCorpCodeByName("SK쉴더스")).thenReturn(Optional.of("00999999"));
@@ -610,7 +557,6 @@ class AiPlanningServiceTest {
             GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
             GeminiResponse finalResponse = new GeminiResponse("최대주주는 최근 안 바뀌었어요...", 10);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             stubHappyPathUpTo(firstResponse);
             when(geminiApiClient.generate(any())).thenReturn(firstResponse).thenReturn(finalResponse);
             when(dartApiClient.resolveCorpCodeByName("삼성전자")).thenReturn(Optional.of("00126380"));
@@ -642,7 +588,6 @@ class AiPlanningServiceTest {
             GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
             GeminiResponse finalResponse = new GeminiResponse("소송 관련 공시를 확인해보면...", 10);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             stubHappyPathUpTo(firstResponse);
             when(geminiApiClient.generate(any())).thenReturn(firstResponse).thenReturn(finalResponse);
             when(dartApiClient.resolveCorpCodeByName("삼성전자")).thenReturn(Optional.of("00126380"));
@@ -674,7 +619,6 @@ class AiPlanningServiceTest {
             GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
             GeminiResponse finalResponse = new GeminiResponse("아까 본 실적 기준으로 보면...", 10);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             when(sessionRepository.findByUserIdAndSessionId(USER_ID, SESSION_ID)).thenReturn(Optional.of(session));
             when(messageRepository.findRecentBySessionId(anyLong(), any())).thenReturn(List.of());
             when(accountService.getMyAccounts(USER_ID)).thenReturn(List.of());
@@ -705,7 +649,6 @@ class AiPlanningServiceTest {
             GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
             GeminiResponse finalResponse = new GeminiResponse("실적을 정리하면...", 10);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             when(sessionRepository.findByUserIdAndSessionId(USER_ID, SESSION_ID)).thenReturn(Optional.of(session));
             when(messageRepository.findRecentBySessionId(anyLong(), any())).thenReturn(List.of());
             when(accountService.getMyAccounts(USER_ID)).thenReturn(List.of());
@@ -738,7 +681,6 @@ class AiPlanningServiceTest {
             GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
             GeminiResponse finalResponse = new GeminiResponse("최근 외국인이 순매수 중입니다...", 10);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             stubHappyPathUpTo(firstResponse);
             when(geminiApiClient.generate(any())).thenReturn(firstResponse).thenReturn(finalResponse);
             when(dartApiClient.resolveStockCodeByName("삼성전자")).thenReturn(Optional.of("005930"));
@@ -770,7 +712,6 @@ class AiPlanningServiceTest {
             GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
             GeminiResponse finalResponse = new GeminiResponse("목표주가를 상향 조정했습니다...", 10);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             stubHappyPathUpTo(firstResponse);
             when(geminiApiClient.generate(any())).thenReturn(firstResponse).thenReturn(finalResponse);
             when(dartApiClient.resolveStockCodeByName("삼성전자")).thenReturn(Optional.of("005930"));
@@ -801,7 +742,6 @@ class AiPlanningServiceTest {
             GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
             GeminiResponse finalResponse = new GeminiResponse("올해 주주총회는 3월입니다...", 10);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             stubHappyPathUpTo(firstResponse);
             when(geminiApiClient.generate(any())).thenReturn(firstResponse).thenReturn(finalResponse);
             when(dartApiClient.resolveStockCodeByName("삼성전자")).thenReturn(Optional.of("005930"));
@@ -828,7 +768,6 @@ class AiPlanningServiceTest {
             GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
             GeminiResponse finalResponse = new GeminiResponse("어떤 종목인지 먼저 알려주세요...", 5);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             stubHappyPathUpTo(firstResponse);
             when(geminiApiClient.generate(any())).thenReturn(firstResponse).thenReturn(finalResponse);
 
@@ -845,7 +784,6 @@ class AiPlanningServiceTest {
             GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
             GeminiResponse finalResponse = new GeminiResponse("확인이 어렵습니다...", 5);
 
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             stubHappyPathUpTo(firstResponse);
             when(geminiApiClient.generate(any())).thenReturn(firstResponse).thenReturn(finalResponse);
             when(dartApiClient.resolveStockCodeByName("존재안함")).thenReturn(Optional.empty());
@@ -863,7 +801,6 @@ class AiPlanningServiceTest {
         @Test
         @DisplayName("내 세션이 아니면 AI_SESSION_NOT_FOUND 예외를 던지고 Gemini를 호출하지 않는다")
         void fail_notMySession() {
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             when(sessionRepository.findByUserIdAndSessionId(USER_ID, SESSION_ID)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("질문")))
@@ -882,7 +819,6 @@ class AiPlanningServiceTest {
         @Test
         @DisplayName("첫 메시지에서만 세션 제목을 채우고, 이후 메시지에서는 덮어쓰지 않는다")
         void savesTitleOnlyOnce() {
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             stubHappyPathUpTo(new GeminiResponse("답변", 5));
 
             aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("첫 질문입니다"));
@@ -895,7 +831,6 @@ class AiPlanningServiceTest {
         @Test
         @DisplayName("메시지를 주고받을 때마다 세션의 updatedAt이 갱신된다")
         void recordsActivityOnEveryTurn() {
-            when(rateLimiterService.isAllowed(USER_ID)).thenReturn(true);
             stubHappyPathUpTo(new GeminiResponse("답변", 5));
 
             aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("질문"));

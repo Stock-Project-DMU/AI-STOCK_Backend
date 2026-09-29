@@ -1,5 +1,26 @@
 -- =====================================================
--- AI STOCK MySQL Schema (최종본 v12)
+-- AI STOCK MySQL Schema (최종본 v15)
+-- 변경사항 v14 → v15:
+--   1. news_briefing_settings.briefing_hour(TINYINT, 0~23시) → briefing_time(TIME, 시:분:초)로 변경
+--      (2026-09-24 사용자 요청 — 브리핑 생성 시각을 시 단위가 아니라 분·초 단위까지
+--       고를 수 있어야 한다는 요구. 이에 맞춰 AiNewsService.generateDailyBriefings()도
+--       "매시 정각에 깨어나 시각이 일치하는 사용자만 처리"에서 "매초 깨어나 시:분:초가
+--       모두 일치하는 사용자만 처리"로 바뀐다 — 자세한 내용은 AiNewsService 주석 참고.)
+-- =====================================================
+-- 변경사항 v13 → v14:
+--   1. news_briefing_settings에 briefing_hour 컬럼 추가
+--      (feature/ai-news — 브리핑 생성 시각을 서버 고정(새벽 7시) 대신 사용자가 0~23시
+--       중 원하는 시각으로 고를 수 있게 함. 기본값 7은 기존 고정 시각과 동일해 기존
+--       사용자의 체감 동작을 바꾸지 않는다. 이에 맞춰 AiNewsService.generateDailyBriefings()도
+--       "매일 7시 1회 전체 순회"에서 "매시 정각에 깨어나 그 시각을 고른 사용자만 순회"로
+--       바뀐다 — 자세한 내용은 AiNewsService 주석 참고.)
+-- =====================================================
+-- 변경사항 v12 → v13 (뒤늦게 기록 — 해당 PR에서 이 changelog 갱신이 누락됐던 것을
+-- 2026-09-21에 실제 테이블 정의를 보고 소급 작성함. 정확한 작업일자·근거 문서는
+-- 각 테이블 주석 참고):
+--   1. charge_requests, account_transactions, audit_logs 테이블 신규 추가 (16, 17, 18번째 테이블)
+--      (관리자 API·충전 승인·계좌 원장·감사 로그 관련. ADMIN_API_BACKEND_HANDOFF.md 기반)
+-- =====================================================
 -- 변경사항 v11 → v12:
 --   1. news_briefing_settings, news_briefings 테이블 신규 추가 (14, 15번째 테이블)
 --      (feature/ai-news — 맞춤형 뉴스 브리핑. AI 재무설계사와 달리 대화형이 아니라,
@@ -212,11 +233,11 @@ CREATE TABLE social_accounts (
     4: 적극투자형   - 높은 수익 위해 일정 손실 감수, 성장주/ETF
     5: 공격투자형   - 최대 수익, 고위험 자산(레버리지/테마주) OK
 
-  자금성향 (4단계)
-    1: 안정저축형   - 목돈 모으기, 적금/CMA 위주
-    2: 수익추구형   - 투자 수익 목적, 주식/펀드 중심
-    3: 목표달성형   - 내 집 마련, 은퇴 등 구체적 목표
-    4: 자유소비형   - 여유 자금 운용, 유동성 중시
+  자금성향 (3단계 — refactor/enhancement-plan-b, 2026-09-28 리뷰 반려 사유 3번 대응으로
+  프론트 실제 선택지 수(3개)에 맞춰 4단계에서 축소)
+    1: 수익추구형   - 자산증식 목적, 주식/펀드 중심
+    2: 자유소비형   - 생활비 마련, 유동성 중시
+    3: 목표달성형   - 채무상환 등 구체적 목표
 
   investment_level (영문 통일 — 다른 ENUM들과 네이밍 일관성 유지)
     BEGINNER     : 초보자
@@ -229,7 +250,7 @@ CREATE TABLE investment_profile (
     investment_tendency   TINYINT     NOT NULL
                           COMMENT '1:안정형 2:안정추구형 3:위험중립형 4:적극투자형 5:공격투자형',
     fund_tendency         TINYINT     NOT NULL
-                          COMMENT '1:안정저축형 2:수익추구형 3:목표달성형 4:자유소비형',
+                          COMMENT '1:수익추구형 2:자유소비형 3:목표달성형',
     investment_level      ENUM('BEGINNER','INTERMEDIATE','EXPERT')
                                       NOT NULL DEFAULT 'BEGINNER',
     survey_answers        JSON,                      -- 설문 문항별 원본 응답
@@ -618,6 +639,9 @@ CREATE TABLE news_briefing_settings (
     setting_id     BIGINT          NOT NULL AUTO_INCREMENT,
     user_id        BIGINT          NOT NULL,
     outlet_domain  VARCHAR(50)     NOT NULL,
+    briefing_time  TIME            NOT NULL DEFAULT '07:00:00'
+                                    COMMENT '브리핑 생성 희망 시각(시:분:초, KST) — v14에서 시 단위로
+                                    추가됐다가 v15에서 분·초 단위까지 지원하도록 변경',
     created_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP
                                              ON UPDATE CURRENT_TIMESTAMP,

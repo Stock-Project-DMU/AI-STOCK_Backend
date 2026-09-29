@@ -38,7 +38,6 @@ import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.redis.RedisAiToolCacheService;
-import com.teamfp.aistock.global.redis.RedisRateLimiterService;
 import com.teamfp.aistock.global.util.DateUtil;
 import com.teamfp.aistock.infra.dart.DartApiClient;
 import com.teamfp.aistock.infra.dart.dto.DartFinancialRequest;
@@ -193,6 +192,19 @@ public class AiPlanningService {
     // "도구 1라운드(도구 몇 개든 동시에) + 강제 마지막 응답" 2번으로 끝난다 — 유료 등급으로
     // 전환하기 전까지의 임시 조치다.
     private static final int MAX_TOOL_CALL_ROUNDS = 1;
+
+    // 2026-09-24 추가 — 라이브 테스트에서, SYSTEM_PREAMBLE의 [도구 호출과 함께 보내는 텍스트]
+    // 절대 규칙("도구가 필요하면 반드시 실제 functionCall로 요청하고, 흉내만 내는 텍스트로
+    // 끝내지 마라")이 있는데도 가끔 어기는 사례가 확인됐다 — 실제 functionCall 없이
+    // "(도구 호출: get_market_ranking(...), get_industry_info(...))"처럼 내부 처리 과정을
+    // 텍스트로 그대로 노출하고 끝내버렸다. 프롬프트 지시만으로는 모델이 100% 따르지 않는
+    // 확률적 이탈이라(호칭을 "사용자님"으로 고정하라는 지시도 종종 어겨지는 것과 같은
+    // 종류의 문제), 이런 패턴이 보이면 그 응답을 사용자에게 그대로 보내지 않고 같은
+    // 라운드를 다시 요청해서 걸러낸다. 실제 함수 호출 문법(예: get_xxx(param='value'))은
+    // 자연스러운 한국어 대화 문장에 나올 리 없는 패턴이라 오탐 위험이 낮다.
+    private static final java.util.regex.Pattern FAKE_TOOL_CALL_NARRATION_PATTERN =
+            java.util.regex.Pattern.compile("[a-zA-Z_][a-zA-Z0-9_]*\\([a-zA-Z_][a-zA-Z0-9_]*\\s*=");
+    private static final int MAX_FAKE_TOOL_CALL_RETRIES = 2;
 
     /**
      * "판단 로직"의 핵심 — 사용자 문장을 원문 그대로 검색어로 쓰지 않고, Gemini 스스로 이
@@ -943,6 +955,13 @@ public class AiPlanningService {
               친구 같은 재무설계사다. "핵심 요약 / 근거 / 실행 조언" 같은 제목이 달린 항목별
               리포트 형식으로 딱딱하게 끊어 쓰지 말고, 사람이 옆에서 말로 설명해주듯 자연스러운
               대화체 문단으로 풀어서 답해라.
+            - 마크다운 문법을 쓰지 말고 순수한 평문으로만 답해라(2026-09-25 추가 — 라이브
+              테스트에서 답변에 "**종목명**"(굵게), "* 항목"(글머리 기호) 같은 마크다운 문법이
+              섞여 나오는 게 반복 확인됨. 이 채팅 화면은 마크다운을 해석해서 굵게·목록으로
+              그려주지 않고 별표 기호를 문자 그대로 노출하므로, 강조하고 싶은 단어가 있어도
+              별표로 감싸지 말고 그냥 문장 안에서 자연스럽게 강조해라(예: "특히 삼성전자가
+              주목받고 있어요"). 여러 항목을 나열할 때도 글머리 기호나 번호 목록 대신, 쉼표나
+              "그리고", 줄바꿈으로 자연스럽게 풀어써라.
             - 한 번의 답변에 모든 걸 욱여넣지 마라. 실제 재무설계사도 손님을 만나자마자 결론부터
               쏟아붓지 않고, 대화를 주고받으며 조금씩 이해시킨다. 새 주제가 나오면 먼저 핵심
               정보 한두 가지만 짧게 짚어주고, 사용자의 반응·후속 질문을 따라가며 대화를
@@ -968,6 +987,11 @@ public class AiPlanningService {
             - 확정적인 수익을 보장하는 듯한 표현은 쓰지 말고, 참고용 정보임을 자연스럽게
               언급해라 — 매번 정형화된 면책 문구를 따로 떼어 붙이지 말고 설명 흐름 안에 녹여라.
             - 사용자의 투자성향에 맞춰 설명 난이도와 톤을 조절해라.
+            - 사용자를 부를 때는 투자 레벨과 무관하게 항상 "사용자님"으로 통일해라(2026-09-21
+              추가 — 라이브 테스트에서 투자 레벨을 "전문가님"처럼 등급별 호칭으로 바꿔 부르는
+              현상이 확인됨). "전문가님", "고수님"처럼 레벨을 반영한 호칭을 만들어 부르지 마라
+              — 투자 레벨은 설명 난이도·톤 조절에만 참고하고, 호칭 자체는 항상 "사용자님"으로
+              고정한다.
             - 톤은 친근하되 차분해야 한다(2026-08-11 추가 — 라이브 테스트에서 "영업 톤 같다",
               "너무 촐싹댄다"는 피드백을 받음). "걱정 마세요!", "아주 쉽게!"처럼 느낌표와
               과장된 감탄사를 남발하지 마라. 매 답변 끝마다 습관적으로 "~해볼까요?"를 붙이는
@@ -996,6 +1020,14 @@ public class AiPlanningService {
               명시적 조회 질문에는 이 원칙을 강요하지 마라. 그런 질문은 물어본 값만 정확히
               답하고 끝내도 충분하다 — 매 답변 끝에 습관적으로 다음 종목·다음 화제를
               끼워 넣지 말고, 자연스럽게 이어질 만한 맥락이 있을 때만 짧게 얹어라.
+            - "추천해줘", "골라줘", "찝어줘"처럼 사용자가 구체적인 답을 직접 요청하면(2026-09-24
+              추가 — 라이브 테스트에서 사용자가 "추천해줄래?"라고 명확히 물었는데도 "어떤
+              업종이 궁금하세요?"처럼 되묻기만 하고 실제 종목명을 하나도 안 주는 회피 패턴이
+              확인됨), 조건을 더 물어 대답을 미루지 마라. 지금까지 나눈 대화 맥락(투자성향,
+              앞서 언급된 업종·종목)만으로 지금 답할 수 있으면, 실제 종목명을 최소 1~3개
+              짚어서 제시하고 각각 왜 골랐는지 한 줄 이유를 붙여라. 더 물어볼 조건이 있더라도
+              질문부터 던지지 말고 "이 중에서는 A, B가 있는데, 혹시 배당을 더 중요하게
+              보시나요?"처럼 답을 먼저 주고 나서 덧붙여라.
             - search_securities_news, get_disclosure_info 결과에는 각 항목마다 "(링크: ...)"
               형태로 원문 URL이 함께 온다. 사용자가 따로 요청하지 않아도, 뉴스나 공시 내용을
               인용해서 답할 때는 그 링크를 답변 끝에 자연스럽게 붙여줘라(예: "자세한 내용은
@@ -1040,7 +1072,6 @@ public class AiPlanningService {
     // Holding/RedisStockCacheService를 직접 참조하지 않고 order 도메인이 이미 공용으로 쓰는
     // 평가 로직을 그대로 재사용한다(AccountService와 동일한 방식 — 도메인 경계 준수).
     private final HoldingValuationService holdingValuationService;
-    private final RedisRateLimiterService rateLimiterService;
     private final RedisAiToolCacheService aiToolCacheService;
     private final GeminiApiClient geminiApiClient;
     private final DartApiClient dartApiClient;
@@ -1120,20 +1151,11 @@ public class AiPlanningService {
      * "성공 이후"에 저장하는 이유는 saveTurn()의 주석 참고 — 실패 시 AI 응답 없는 메시지가 남는
      * 것을 막기 위함이다.
      *
-     * 한 턴 안에서 converseWithTools()가 Gemini를 1번(도구 불필요) 또는 2번(도구 사용) 부를 수
-     * 있지만, rate limit 카운터는 "사용자 턴" 기준으로 여기서 1번만 increment한다 — 분당3/
-     * 일일10 한도는 원래 "사용자가 몇 번 물어봤는지" 기준으로 잡힌 정책이라, 내부적으로 몇 번
-     * Gemini를 호출했는지는 사용자 체감 한도와 무관하게 숨긴다.
+     * 분당3/일일10 자체 호출 제한(RedisRateLimiterService)은 2026-09-21 사용자 요청으로
+     * 제거했다 — "몇 번 대화하다 짤리면 안 된다"는 이유로, 이제는 Gemini API 자체 한도에만
+     * 걸린다.
      */
     public AiChatResponse sendMessage(Long userId, Long sessionId, AiChatRequest request) {
-        if (!rateLimiterService.isAllowed(userId)) {
-            throw new CustomException(ErrorCode.GEMINI_RATE_LIMIT_EXCEEDED);
-        }
-        // RedisRateLimiterService 계약: isAllowed() 통과 "직후"에 increment한다(javadoc 참고).
-        // 뒤이은 DART/Tavily/Gemini 호출까지 기다렸다가 increment하면, 한도 직전에 몰린 동시
-        // 요청이 서로 increment 전에 isAllowed()를 통과해버려 한도를 우회할 수 있다.
-        rateLimiterService.increment(userId);
-
         List<HistoryTurn> history = self.loadHistory(userId, sessionId);
 
         GeminiResponse geminiResponse = converseWithTools(userId, sessionId, request.content(), history);
@@ -1195,8 +1217,20 @@ public class AiPlanningService {
             // 쓴다. 판단 라운드에서 도구 없이 바로 텍스트로 답하는 경우(잡담·되묻기 등)는 그
             // 자체가 "단순 작업"이라 JUDGE 모델의 답을 최종 답변으로 그대로 쓴다.
             GeminiRequest.GeminiModel model = isFinalRound ? GeminiRequest.GeminiModel.ANSWER : GeminiRequest.GeminiModel.JUDGE;
-            GeminiResponse response = geminiApiClient.generate(
-                    new GeminiRequest(SYSTEM_PREAMBLE, prompt, history, toolsForThisRound, exchangeRounds, model));
+            GeminiRequest request = new GeminiRequest(SYSTEM_PREAMBLE, prompt, history, toolsForThisRound, exchangeRounds, model);
+            GeminiResponse response = geminiApiClient.generate(request);
+
+            int fakeCallRetries = 0;
+            while (isFakeToolCallNarration(response) && fakeCallRetries < MAX_FAKE_TOOL_CALL_RETRIES) {
+                log.warn("가짜 도구 호출 서술 감지, 재시도 {}/{}회 - userId: {}, content: {}",
+                        fakeCallRetries + 1, MAX_FAKE_TOOL_CALL_RETRIES, userId, response.content());
+                response = geminiApiClient.generate(request);
+                fakeCallRetries++;
+            }
+            if (isFakeToolCallNarration(response)) {
+                log.error("가짜 도구 호출 서술이 재시도 후에도 반복됨 - userId: {}, content: {}", userId, response.content());
+                return new GeminiResponse("죄송합니다, 지금은 답변을 완성하지 못했습니다 — 잠시 후 다시 한 번 질문해 주시겠어요?", null);
+            }
 
             if (!response.isFunctionCall()) {
                 if (confirmedCurrentPrices.isEmpty()) {
@@ -1223,11 +1257,10 @@ public class AiPlanningService {
             // 그대로 유지된다.
             //
             // aiToolTaskExecutor(코어10/최대20/큐200)가 포화되면 supplyAsync()가
-            // RejectedExecutionException을 즉시 던진다(코드리뷰 반영) — 이 시점엔 이미
-            // sendMessage()에서 rateLimiterService.increment()로 이번 턴 할당량이 소모된
-            // 뒤라, 여기서 예외가 그대로 위로 새어나가면 사용자는 500만 받고 대화 기록도 안
-            // 남는다(위 "tools 없이 보낸 마지막 라운드" 방어와 같은 원칙). 잡아서 다른
-            // 도구 실패와 동일하게 안내 문구로 이번 턴을 끝낸다.
+            // RejectedExecutionException을 즉시 던진다(코드리뷰 반영) — 여기서 예외가 그대로
+            // 위로 새어나가면 사용자는 500만 받고 대화 기록도 안 남는다(위 "tools 없이 보낸
+            // 마지막 라운드" 방어와 같은 원칙). 잡아서 다른 도구 실패와 동일하게 안내 문구로
+            // 이번 턴을 끝낸다.
             List<CompletableFuture<GeminiRequest.FunctionExchange>> exchangeFutures;
             try {
                 exchangeFutures = response.functionCalls().stream()
@@ -1251,11 +1284,20 @@ public class AiPlanningService {
 
         // tools 없이 보낸 마지막 라운드는 API 규격상 functionCall을 낼 수 없어 이 지점에 도달하지
         // 않아야 하지만, 혹시 Gemini가 규격을 어기고 functionCall만 반환하면 CustomException을
-        // 던지는 대신 안전한 안내 문구로 답을 완성한다 — 이미 rateLimiterService.increment()로
-        // 이번 턴의 Gemini 호출 할당량이 소모된 뒤이므로, 여기서 예외를 던지면 사용자는 응답도
-        // 대화 기록도 없이 할당량만 잃는다.
+        // 던지는 대신 안전한 안내 문구로 답을 완성한다 — 여기서 예외를 던지면 사용자는 응답도
+        // 대화 기록도 없이 이번 턴을 잃는다.
         log.error("Gemini가 도구 없이도 최종 텍스트 응답을 내지 않음 - userId: {}", userId);
         return new GeminiResponse("죄송합니다, 지금은 답변을 완성하지 못했습니다 — 잠시 후 다시 한 번 질문해 주시겠어요?", null);
+    }
+
+    // functionCall이 아닌 텍스트 응답인데, 그 내용이 "get_xxx(param='value')"처럼 실제 함수
+    // 호출 문법을 그대로 흉내 낸 경우를 걸러낸다. 이미 진짜 functionCall로 온 응답은 대상이
+    // 아니다(도구 실행 결과 문자열 자체에 비슷한 패턴이 있어도 사용자에게 그대로 노출되지 않으므로
+    // 걸러낼 필요가 없다).
+    private boolean isFakeToolCallNarration(GeminiResponse response) {
+        return !response.isFunctionCall()
+                && response.content() != null
+                && FAKE_TOOL_CALL_NARRATION_PATTERN.matcher(response.content()).find();
     }
 
     /**

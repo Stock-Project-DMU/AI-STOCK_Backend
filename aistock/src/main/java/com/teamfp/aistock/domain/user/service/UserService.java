@@ -109,7 +109,11 @@ public class UserService {
      */
     @Transactional
     public InvestmentProfileResponse saveSurvey(Long userId, SurveyRequest request) {
+        // SurveyLevelEvaluator.evaluate()가 answers의 문항 개수·선택지 범위를 검증하므로,
+        // 아래 SurveyTendencyEvaluator 호출들은 이 검증을 통과한 뒤에만 실행되어야 한다(순서 유지).
         var investmentLevel = SurveyLevelEvaluator.evaluate(request.answers());
+        int investmentTendency = SurveyTendencyEvaluator.evaluateInvestmentTendency(request.answers());
+        int fundTendency = SurveyTendencyEvaluator.evaluateFundTendency(request.answers());
         // RedisStockCacheService의 다른 ObjectMapper 사용처와 동일하게, 직렬화 실패를 raw
         // 예외로 흘려보내지 않고 CustomException으로 감싼다(List<Integer> 특성상 실질적으로는
         // 거의 발생하지 않지만, 프로젝트 전체의 예외 처리 관례와 일관성을 맞춘다).
@@ -125,8 +129,8 @@ public class UserService {
             User user = findUser(userId);
             profile = InvestmentProfile.builder()
                     .user(user)
-                    .investmentTendency(request.investmentTendency())
-                    .fundTendency(request.fundTendency())
+                    .investmentTendency(investmentTendency)
+                    .fundTendency(fundTendency)
                     .surveyAnswers(surveyAnswersJson)
                     .investmentLevel(investmentLevel)
                     .build();
@@ -139,8 +143,8 @@ public class UserService {
                 throw e;
             }
         } else {
-            profile.updateSurvey(request.investmentTendency(), request.fundTendency(), surveyAnswersJson);
-            profile.updatePreferences(request.investmentTendency(), request.fundTendency(), investmentLevel);
+            profile.updateSurvey(investmentTendency, fundTendency, surveyAnswersJson);
+            profile.updatePreferences(investmentTendency, fundTendency, investmentLevel);
         }
 
         return InvestmentProfileResponse.from(profile);

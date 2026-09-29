@@ -38,7 +38,6 @@ import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.repository.InvestmentProfileRepository;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.redis.RedisAiToolCacheService;
-import com.teamfp.aistock.global.redis.RedisRateLimiterService;
 import com.teamfp.aistock.infra.dart.DartApiClient;
 import com.teamfp.aistock.infra.gemini.GeminiApiClient;
 import com.teamfp.aistock.infra.marketdata.MarketDataAccessTokenProvider;
@@ -122,7 +121,6 @@ class LiveGeminiManualCheck {
         redisTemplate.setHashValueSerializer(new StringRedisSerializer());
         redisTemplate.afterPropertiesSet();
 
-        RedisRateLimiterService rateLimiterService = new RedisRateLimiterService(redisTemplate);
         RedisAiToolCacheService aiToolCacheService = new RedisAiToolCacheService(redisTemplate);
 
         GeminiApiClient geminiApiClient = new GeminiApiClient(RestClient.builder());
@@ -192,7 +190,7 @@ class LiveGeminiManualCheck {
         AiPlanningService aiPlanningService = new AiPlanningService(
                 org.mockito.Mockito.mock(com.teamfp.aistock.domain.ai.service.PlanningPreferencesService.class),
                 sessionRepository, messageRepository, userRepository, investmentProfileRepository,
-                accountService, holdingValuationService, rateLimiterService, aiToolCacheService,
+                accountService, holdingValuationService, aiToolCacheService,
                 geminiApiClient, dartApiClient, naverNewsApiClient, marketDataApiClient,
                 investorTrendApiClient, investInfoApiClient, highItemApiClient, sectorApiClient,
                 etfApiClient, programApiClient, investorApiClient, etcApiClient, industryApiClient,

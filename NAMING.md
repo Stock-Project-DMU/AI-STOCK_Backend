@@ -56,12 +56,13 @@
 | `RecentViewed` | `viewId`, `user`, `stockCode`, `stockName`, `viewedAt` |
 | `Notification` | `notiId`, `user`, `type`, `title`, `content`, `isRead`, `createdAt` |
 | `Inquiry` | `inquiryId`, `user`, `title`, `content`, `status`, `answer`, `answeredBy`, `answeredAt`, `createdAt`, `updatedAt` |
-| `NewsBriefingSetting` (feature/ai-news 추가) | `settingId`, `user`, `outletDomain`, `createdAt`, `updatedAt` |
+| `NewsBriefingSetting` (feature/ai-news 추가) | `settingId`, `user`, `outletDomain`, `briefingTime`(시:분:초 KST, 기본값 07:00:00 — schema.sql v14에서 시 단위로 추가, v15에서 분·초 단위까지 지원), `createdAt`, `updatedAt` |
 | `NewsBriefing` (feature/ai-news 추가) | `briefingId`, `user`, `outletDomain`, `briefingDate`, `content`, `sourceLinksJson`(요약 근거 기사 JSON, 2026-08-24 추가), `createdAt` |
 
 - **뉴스 브리핑 설정 변경 메서드 (feature/ai-news 추가)**: `NewsBriefingSetting.changeOutlet(String
-  outletDomain)` — 언론사 재선택(예: 한국경제 → 매일경제). `NewsBriefing`은 하루치 완성된
-  결과라 변경 메서드 없이 생성만 한다.
+  outletDomain)` — 언론사 재선택(예: 한국경제 → 매일경제). `NewsBriefingSetting.
+  changeBriefingTime(LocalTime briefingTime)`(schema.sql v15) — 브리핑 생성 시각 재선택(시:분:초).
+  `NewsBriefing`은 하루치 완성된 결과라 변경 메서드 없이 생성만 한다.
 - 연관관계 필드(`user`, `account`, `session`)는 `@ManyToOne` 객체 참조로 두고,
   DB 컬럼명(`user_id` 등)은 `@JoinColumn(name = "user_id")`로 매핑한다.
 - `Inquiry.answeredBy`도 동일하게 `User` 타입 `@ManyToOne` 참조이며
@@ -117,7 +118,7 @@
 | `SimulationRepository` | `findAllByUserIdOrderByCreatedAtDesc(Long userId)`, `findByUserIdAndSimulationId(Long userId, Long simulationId)`, `deleteByUserId(Long userId)` |
 | `RecentViewedRepository` | `findAllByUserIdOrderByViewedAtDesc(Long userId)`, `findByUserIdAndStockCode(Long userId, String stockCode)`, `touchViewedAt(Long userId, String stockCode)`(mypage-account 추가 — `@Modifying`, 이미 본 종목을 다시 볼 때 새 행 대신 viewedAt만 UPDATE. delete 후 재삽입 방식은 `RecentViewed`가 `@GeneratedValue(IDENTITY)`라 save()가 즉시 INSERT를 실행해버려 아직 flush 안 된 DELETE와 충돌해 `uq_user_stock_view` 위반이 나는 버그가 있어 이 방식으로 교체했다), `deleteByUserId(Long userId)`, `findFirstByStockCode(String stockCode)`(4주차 `feature/stock-price` 추가 — `StockNameResolver`용, 8-4 참고) |
 | `NotificationRepository` | `findAllByUserIdOrderByCreatedAtDesc(Long userId)`, `countByUserIdAndIsReadFalse(Long userId)`, `findByNotiIdAndUserId(Long notiId, Long userId)` |
-| `NewsBriefingSettingRepository` (feature/ai-news 추가) | `findByUserId(Long userId)`, `findAllWithUser()`(스케줄러가 전체 사용자 순회용 — `@Query` JOIN FETCH user, 트랜잭션 밖에서도 LazyInitializationException 없이 순회하기 위함), `deleteByUserId(Long userId)`(탈퇴 처리용) |
+| `NewsBriefingSettingRepository` (feature/ai-news 추가) | `findByUserId(Long userId)`, `findDueSettings(LocalTime briefingTime, LocalDate today)`(refactor/enhancement-plan-b, PR#45 리뷰 반려 사유 4번 대응 — 스케줄러가 매초 실행될 때 전체 사용자를 다 불러오던 `findAllWithUser()`를 대체. "지금 이 시각에 해당하고 아직 오늘자 브리핑 없음" 조건을 DB에서 직접 걸러오며, `@Query` JOIN FETCH user로 트랜잭션 밖에서도 LazyInitializationException 없이 순회 가능), `deleteByUserId(Long userId)`(탈퇴 처리용) |
 | `NewsBriefingRepository` (feature/ai-news 추가) | `findByUserIdAndBriefingDate(Long userId, LocalDate briefingDate)`, `existsByUserIdAndBriefingDate(Long userId, LocalDate briefingDate)`(스케줄러 중복 생성 방지), `deleteByUserId(Long userId)`(탈퇴 처리용) |
 | `InquiryRepository` | `findAllByUserIdOrderByCreatedAtDesc(Long userId)`(사용자 본인 문의 목록), `findByInquiryIdAndUserId(Long inquiryId, Long userId)`(본인 문의 상세, 소유권 검증), `findAllByOrderByStatusDescCreatedAtDesc()`(관리자 전체 목록, 무인자 `List` 버전 — "PENDING"이 "ANSWERED"보다 알파벳순 뒤(P > A)라 status 내림차순 정렬해야 미답변 우선 노출), `findAllByOrderByStatusDescCreatedAtDesc(Pageable pageable)`(같은 정렬 기준의 `Page` 오버로드 — `AdminInquiryService.getInquiries()`용. feature/admin-inquiry 코드리뷰 반영: `@Query` JOIN FETCH user로 N+1 방지, 8-18 참고), `deleteByUserId(Long userId)`(탈퇴 처리용) |
 
@@ -327,7 +328,7 @@ redis-logic.md(수정본) 기준 확정된 이름 그대로 사용:
 | `RedisAuthCodeService` | `saveEmailCode`, `verifyAndDeleteEmailCode`, `markEmailVerified`(v8 추가), `consumeEmailVerified`(v8 추가), `incrementLoginFail`, `isLoginLocked`, `resetLoginFail` |
 | `RedisStockCacheService` | `saveStockPrice`, `getStockPrice`, `saveHogaData`, `getHogaData`, `getStockPrices(Collection<String> stockCodes)`(feature/mypage-profit 코드리뷰 반영 — Redis MGET으로 여러 종목 시세를 한 번에 배치 조회. 종목마다 `getStockPrice()`를 순차 호출하면 보유종목이 N개일 때 N번 왕복이 생기는 문제를 막기 위함. 캐시 미스 종목은 반환 `Map`에서 키 자체가 빠짐) |
 | `RedisPendingOrderService` | `initPendingOrders`, `addPendingOrder`, `getPendingOrders`, `removePendingOrder` |
-| `RedisRateLimiterService` | `isAllowed`, `increment`, `getRemainingDaily` |
+| `RedisRateLimiterService` | `isAllowed`, `increment`, `getRemainingDaily` — 2026-09-21부터 `SimulationService`만 사용(분당3/일일10). `AiPlanningService`(AI 재무설계사)는 사용자 요청으로 이 서비스 의존성 자체를 제거함(생성자 파라미터에서도 빠짐) |
 | `RedisOnlineStatusService` (v8 추가) | `clearOnlineStatus()`(서버 재시작 시 `@PostConstruct` 초기화, v9), `addOnline(Long userId)`, `removeOnline(Long userId)`, `countOnline()`, `isOnline(Long userId)` |
 | `RedisAiToolCacheService` (feature/ai-planning 추가) | `getCachedResult(Long sessionId, String toolKey)`, `cacheResult(Long sessionId, String toolKey, String result)` — 키 `ai:tool:{sessionId}:{toolKey}`(TTL 30분), AI 상담 세션 내 DART/외부 시세 데이터/네이버 도구 실행 결과 캐시(같은 조건 재조회 시 재사용). 8-9 참고 |
 
@@ -587,7 +588,21 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 | 엔드포인트 (AccountController, OrderController, UserController 추가) | `GET /api/accounts/{accountId}/profit`, `GET /api/orders?accountId={accountId}`, `GET /api/orders/holdings?accountId={accountId}`, `GET /api/users/me`, `PATCH /api/users/me`, `POST /api/users/me/survey` |
 | Service | `AccountService.getProfit(Long userId, Long accountId)`, `AccountService.getOwnedAccount(Long userId, Long accountId)`(계좌 소유권 검증 공용 메서드) / `OrderService.getMyOrderHistory(Long userId, Long accountId)`, `OrderService.getMyHoldings(Long userId, Long accountId)` / `HoldingValuationService.getHoldingValuations(Long accountId)`(보유종목+시세 평가 공용 메서드, domain.order.service 소속) / `UserService` — `getMyInfo(Long userId)`, `updateMyInfo(Long userId, UpdateUserRequest request)`, `saveSurvey(Long userId, SurveyRequest request)` |
 | Response DTO | `ProfitResponse`(totalAsset, profitAmount, profitRate), `HoldingResponse`(accountId, stockCode, stockName, quantity, avgPrice, currentPrice, evaluationProfit), `UserInfoResponse`(userId, loginId, name, email, role, `status`), `InvestmentProfileResponse`(investmentTendency, fundTendency, investmentLevel) |
-| Request DTO | `UpdateUserRequest`(name, email — 둘 다 `@NotBlank` 필수), `SurveyRequest`(answers: `List<Integer>`, investmentTendency, fundTendency) |
+| Request DTO | `UpdateUserRequest`(name, email — 둘 다 `@NotBlank` 필수), `SurveyRequest`(answers: `List<Integer>`만 받음 — 투자성향·자금성향·투자레벨 전부 서버가 answers로 계산, 2026-09-21 갱신) |
+
+> **설문 채점 로직(2026-09-21 추가)**: `investment_profile.uq_user_profile` 저장 전, `domain.user.service`
+> 패키지에 package-private 최종 클래스 2개가 `SurveyRequest.answers()`만으로 투자성향·자금성향·
+> 투자레벨을 전부 계산한다(더 이상 프론트가 계산한 값을 믿지 않음).
+> - `SurveyLevelEvaluator.evaluate(List<Integer> answers)` → `InvestmentLevel`. answers의 문항
+>   개수·선택지 범위 검증도 이 메서드가 담당하므로 `UserService.saveSurvey()`는 반드시 이 메서드를
+>   먼저 호출한 뒤 아래 두 메서드를 호출한다.
+> - `SurveyTendencyEvaluator.evaluateInvestmentTendency(List<Integer> answers)` → `int`(1~5).
+>   2·3·4·5·6·7번 문항 가중합산(6번×3, 4·7번×2, 나머지×1) 후 10~44점을 폭 7점씩 5구간으로 매핑.
+> - `SurveyTendencyEvaluator.evaluateFundTendency(List<Integer> answers)` → `int`(1~3, 2026-09-28
+>   리뷰 반려 사유 3번 대응으로 4→3 축소). 1번 문항 답을 그대로 반환(선택지 순서가 등급
+>   순서와 1:1로 맞춰져 있다는 전제 — `FRONTEND_API_IMPLEMENTATION.md`가 문서화한 실제 프론트
+>   `surveyQuestions.ts` 1번 문항 순서 "자산증식→수익추구형/생활비→자유소비형/채무상환→목표달성형"
+>   기준).
 
 > **계좌 다중화 반영(원래 문서 초안은 계좌 1개 시절 기준이었음)**: `feature/mypage-account`부터
 > 유저 1명이 계좌를 최대 3개까지 가질 수 있게 됐고, 계좌 A/B/C는 서로 완전히 독립된 영역이라
@@ -1246,11 +1261,34 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 |---|---|
 | Controller | `AiNewsController` |
 | 엔드포인트 | `GET /api/ai/news/outlets`(선택 가능한 언론사 목록), `GET /api/ai/news/settings`(내 설정 조회), `PUT /api/ai/news/settings`(언론사 설정/변경), `GET /api/ai/news/briefings/today`(오늘의 브리핑 조회) |
-| Service | `AiNewsService` — `getSelectableOutlets()`, `getMySetting(Long userId)`, `updateMySetting(Long userId, String outletDomain)`, `getTodayBriefing(Long userId)`, `generateDailyBriefings()`(`@Scheduled(cron = "0 0 7 * * *", zone = "Asia/Seoul")`), `generateBriefingForUser(NewsBriefingSetting setting, LocalDate today)`(`@Transactional`, 사용자 1명분 생성 — `self` 프록시로만 호출), `generateVerifiedSummary(NaverNewsSearchResponse newsResponse, String outletName)`(요약+근거검증+재생성 오케스트레이션, 2026-08-24 추가), `buildArticlesText(...)`, `requestSummary(...)`, `isGrounded(String articles, String summary)`(근거검증 전용 Gemini 호출, 2026-08-24 추가) |
-| Request DTO | `NewsBriefingSettingRequest`(outletDomain) |
-| Response DTO | `NewsOutletResponse`(outletDomain, outletName), `NewsBriefingSettingResponse`(outletDomain, outletName), `NewsBriefingResponse`(outletDomain, outletName, briefingDate, content, `sources`: `NewsSourceLinkDto` 리스트, 2026-08-24 추가) |
+| Service | `AiNewsService` — `getSelectableOutlets()`, `getMySetting(Long userId)`, `updateMySetting(Long userId, String outletDomain, LocalTime briefingTime)`(schema.sql v14에서 int briefingHour로 추가, v15에서 LocalTime briefingTime으로 변경), `getTodayBriefing(Long userId)`, `generateDailyBriefings()`(`@Scheduled(cron = "* * * * * *", zone = "Asia/Seoul")` — v14 "매시 정각, briefingHour 일치"에서 v15 "매초, 현재 시:분:초와 briefingTime이 모두 일치하는 사용자만" 방식으로 변경), `generateBriefingForUser(NewsBriefingSetting setting, LocalDate today)`(`@Transactional`, 사용자 1명분 생성 — `self` 프록시로만 호출), `generateVerifiedSummary(NaverNewsSearchResponse newsResponse, String outletName)`(요약+근거검증+재생성 오케스트레이션, 2026-08-24 추가), `buildArticlesText(...)`, `requestSummary(...)`, `isGrounded(String articles, String summary)`(근거검증 전용 Gemini 호출, 2026-08-24 추가) |
+| Request DTO | `NewsBriefingSettingRequest`(outletDomain, briefingTime: LocalTime — schema.sql v14에서 briefingHour(int)로 추가, v15에서 briefingTime(LocalTime)으로 변경) |
+| Response DTO | `NewsOutletResponse`(outletDomain, outletName), `NewsBriefingSettingResponse`(outletDomain, outletName, briefingTime — schema.sql v14/v15 참고), `NewsBriefingResponse`(outletDomain, outletName, briefingDate, content, `sources`: `NewsSourceLinkDto` 리스트, 2026-08-24 추가) |
 | 내부 DTO | `NewsSourceLinkDto`(title, link, outlet) — `news_briefings.source_links` JSON 컬럼 미러링용(`ScenarioDataJson`과 동일 패턴), `domain.ai.dto` 소속 |
 | Entity/Repository | 1-1/1-2 참고 (`NewsBriefingSetting`/`NewsBriefingSettingRepository`, `NewsBriefing`/`NewsBriefingRepository`) |
+
+> **브리핑 시각 사용자 선택(schema.sql v14, 2026-09-21 추가)**: 처음엔 "브리핑 시각 사용자 선택 기능은
+> 별도 개발"로 미뤄뒀던 항목을 이번에 반영했다. 시간 단위(0~23시)로만 고를 수 있고 분 단위는
+> 지원하지 않는다(배치를 매시 정각마다 한 번만 돌리는 것으로 충분하다고 판단, 1분 단위였다면
+> 배치를 1분마다 돌려야 해 서버 부담이 커짐). 시각을 하나도 고르지 않은 기존 동작과 똑같이
+> 유지하기 위해 기본값을 기존 고정 시각이던 7시로 둔다.
+
+> **실패 시에도 화면에 안내 문구 남기기(2026-09-21 추가, 같은 날 안에 두 번 더 수정)**: 기존엔
+> 기사를 못 찾거나 근거 검증을 끝내 통과 못 하면 `generateBriefingForUser()`가 아무 행도
+> 저장하지 않아 `getTodayBriefing()`이 `NEWS_BRIEFING_NOT_FOUND`(404 성격)를 던졌다 —
+> 프론트가 "서버 오류"와 "그냥 오늘은 뉴스 없음"을 구분할 방법이 없었다. 최종적으로
+> **실패 사유 2가지를 서로 다른 문구로 구분**한다 — `AiNewsService.NO_ARTICLES_TEMPLATE`
+> (기사 자체가 없음) / `VERIFICATION_FAILED_TEMPLATE`(기사는 있지만 AI가 지어내서 못 믿음).
+> 중간에 한 번 두 문구를 하나로 합쳤다가("기사없음"과 "AI가 지어냄"은 원인이 다른 상황이라
+> 구분해야 한다는 사용자 지적으로) 다시 분리했다. 단, "검증실패" 쪽에 원문 기사 링크까지
+> 붙이는 것은 별개로 **최종 제거**했다("AI도 못 미더워한 기사를 왜 보여주냐"는 지적) —
+> 두 실패 케이스 모두 `sourceLinks`는 항상 빈 리스트이고, 원문 기사 링크는 AI 요약이 실제로
+> 완성된 날에만(= 그 요약의 출처로서) 첨부된다. Gemini가 실제로 요약을 완성한 경우에만 알림
+> (`NotificationService.notify`)을 보낸다 — 안내 문구만 저장된 날은 "브리핑 도착" 알림을
+> 보내지 않는다. `generateBriefingForUser()`의 반환값 의미도 "행을 저장했는가"가 아니라
+> "실제 AI 요약을 완성했는가"로 바뀌었으니 호출부에서 혼동하지 말 것. 재시도 상한
+> `MAX_SUMMARY_ATTEMPTS`도 이 논의 중 2→5로 늘렸다(완전 무제한은 검증 응답이 계속 애매하게
+> 나오는 경우 비용이 새는 걸 막기 위해 상한은 유지).
 
 > **최초 스펙과 달라진 점**: 처음 작업 지시 문서는 "Tavily 즉석 검색, DB 저장 없음"이라는
 > 4개 파일(Controller/Service/Request/Response)짜리 단순 검색 기능으로 적혀 있었다. 하지만
