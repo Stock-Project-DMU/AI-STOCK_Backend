@@ -8,8 +8,11 @@ import com.teamfp.aistock.domain.auth.dto.request.SignupRequest;
 import com.teamfp.aistock.domain.auth.dto.request.RecoveryEmailCodeRequest;
 import com.teamfp.aistock.domain.auth.dto.request.RecoveryEmailCodeRequest.RecoveryPurpose;
 import com.teamfp.aistock.domain.auth.dto.response.SignupResponse;
+import com.teamfp.aistock.domain.user.entity.InvestmentLevel;
+import com.teamfp.aistock.domain.user.entity.InvestmentProfile;
 import com.teamfp.aistock.domain.user.entity.Role;
 import com.teamfp.aistock.domain.user.entity.User;
+import com.teamfp.aistock.domain.user.repository.InvestmentProfileRepository;
 import com.teamfp.aistock.domain.user.repository.SocialAccountRepository;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.exception.CustomException;
@@ -69,6 +72,8 @@ class AuthServiceTest {
     private MailClient mailClient;
     @Mock
     private AccountService accountService;
+    @Mock
+    private InvestmentProfileRepository investmentProfileRepository;
 
     private AuthService authService;
 
@@ -182,6 +187,7 @@ class AuthServiceTest {
                 List.of(),
                 ADMIN_SIGNUP_CODE
         );
+        ReflectionTestUtils.setField(authService, "investmentProfileRepository", investmentProfileRepository);
     }
 
     private SignupRequest createSignupRequest(Role role, String adminCode) {
@@ -209,6 +215,21 @@ class AuthServiceTest {
     @Nested
     @DisplayName("signup()")
     class Signup {
+
+        @Test
+        void signupWithInvestmentLevelUsesThreeStageProfitDefault() {
+            SignupRequest request = createSignupRequest(Role.USER, null);
+            ReflectionTestUtils.setField(request, "investmentLevel", InvestmentLevel.BEGINNER);
+            given(redisAuthCodeService.consumeEmailVerified(request.getEmail())).willReturn(true);
+            given(passwordEncoder.encode(request.getPassword())).willReturn("encoded-password");
+            stubUserSaveWithGeneratedId(1L);
+
+            authService.signup(request);
+
+            ArgumentCaptor<InvestmentProfile> profile = ArgumentCaptor.forClass(InvestmentProfile.class);
+            verify(investmentProfileRepository).save(profile.capture());
+            assertThat(profile.getValue().getFundTendency()).isEqualTo(1);
+        }
 
         @Test
         @DisplayName("일반 유저로 정상 가입하면 계좌가 자동 생성되고 SignupResponse를 반환한다")
