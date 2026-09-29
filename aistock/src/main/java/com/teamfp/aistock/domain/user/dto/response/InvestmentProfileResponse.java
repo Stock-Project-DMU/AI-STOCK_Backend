@@ -6,14 +6,16 @@ import com.teamfp.aistock.domain.user.entity.InvestmentProfile;
 public record InvestmentProfileResponse(
         int investmentTendency,
         int fundTendency,
-        InvestmentLevel investmentLevel
+        InvestmentLevel investmentLevel,
+        boolean surveyCompleted
 ) {
 
     public static InvestmentProfileResponse from(InvestmentProfile profile) {
         return new InvestmentProfileResponse(
                 profile.getInvestmentTendency(),
                 profile.getFundTendency(),
-                profile.getInvestmentLevel()
+                profile.getInvestmentLevel(),
+                profile.hasCompletedSurvey()
         );
     }
 }

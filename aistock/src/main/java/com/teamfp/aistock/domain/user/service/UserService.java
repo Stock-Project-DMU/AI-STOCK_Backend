@@ -86,6 +86,16 @@ public class UserService {
         return investmentProfileRepository.findByUserId(userId).map(InvestmentProfileResponse::from).orElse(null);
     }
 
+    @Transactional(readOnly = true)
+    public void requireCompletedSurvey(Long userId) {
+        boolean completed = investmentProfileRepository.findByUserId(userId)
+                .map(InvestmentProfile::hasCompletedSurvey)
+                .orElse(false);
+        if (!completed) {
+            throw new CustomException(ErrorCode.SURVEY_REQUIRED);
+        }
+    }
+
     @Transactional
     public InvestmentProfileResponse updateInvestmentProfile(Long userId,
             com.teamfp.aistock.domain.user.dto.request.InvestmentProfileUpdateRequest request) {
