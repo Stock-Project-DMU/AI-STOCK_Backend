@@ -242,7 +242,8 @@ class OrderExecutionServiceTest {
             assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
             assertThat(account.getBalance()).isEqualTo(1_000_000L); // 잔고 변화 없음
             assertThat(holding.getQuantity()).isEqualTo(2); // 보유수량도 그대로
-            verify(notificationService, never()).notify(any(), any(), any(), any());
+            verify(notificationService).notify(USER_ID, NotificationType.ORDER, "주문 자동 취소",
+                    "삼성전자 매도 5주 주문이 보유 수량 부족으로 취소되었습니다.");
         }
     }
 

@@ -172,6 +172,9 @@ public class OrderExecutionService {
                 // 체결 시점에 보유수량이 부족해졌다(예: 같은 종목을 다른 주문으로 먼저 매도함).
                 // 재시도해도 상황이 나아지지 않으므로 체결 대신 주문을 취소 처리한다.
                 order.cancel();
+                notificationService.notify(pendingOrder.getUserId(), NotificationType.ORDER, "주문 자동 취소",
+                        String.format("%s 매도 %d주 주문이 보유 수량 부족으로 취소되었습니다.",
+                                order.getStockName(), order.getQuantity()));
                 log.warn("지정가 매도 체결 취소 - 보유수량 부족: orderId={}", order.getOrderId());
                 return;
             }

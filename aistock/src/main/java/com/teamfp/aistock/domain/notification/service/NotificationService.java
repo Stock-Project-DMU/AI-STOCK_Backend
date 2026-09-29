@@ -74,6 +74,9 @@ public class NotificationService {
      */
     @Transactional
     public void notify(Long userId, NotificationType type, String title, String content) {
+        if (content.length() > 500) {
+            content = content.substring(0, 497) + "...";
+        }
         User user = userRepository.getReferenceById(userId);
         Notification notification = Notification.builder()
                 .user(user)

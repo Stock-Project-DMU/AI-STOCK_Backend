@@ -22,6 +22,8 @@ import com.teamfp.aistock.domain.account.entity.AccountStatus;
 import com.teamfp.aistock.domain.account.entity.ChargeRequest;
 import com.teamfp.aistock.domain.account.entity.ChargeRequestStatus;
 import com.teamfp.aistock.domain.account.repository.ChargeRequestRepository;
+import com.teamfp.aistock.domain.notification.entity.NotificationType;
+import com.teamfp.aistock.domain.notification.service.NotificationService;
 import com.teamfp.aistock.domain.user.entity.Role;
 import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.global.exception.CustomException;
@@ -41,6 +43,8 @@ class ChargeRequestServiceTest {
 
     @Mock
     private AccountService accountService;
+    @Mock
+    private NotificationService notificationService;
 
     private ChargeRequestService chargeRequestService;
 
@@ -51,7 +55,7 @@ class ChargeRequestServiceTest {
 
     @BeforeEach
     void setUp() {
-        chargeRequestService = new ChargeRequestService(chargeRequestRepository, accountService);
+        chargeRequestService = new ChargeRequestService(chargeRequestRepository, accountService, notificationService);
 
         User user = User.builder().loginId("tester").name("테스터").role(Role.USER).isActive(true).build();
         ReflectionTestUtils.setField(user, "userId", USER_ID);
@@ -79,6 +83,8 @@ class ChargeRequestServiceTest {
         assertThat(result.amount()).isEqualTo(10_000_000L);
         assertThat(result.status()).isEqualTo(ChargeRequestStatus.PENDING);
         verify(chargeRequestRepository).save(org.mockito.ArgumentMatchers.any(ChargeRequest.class));
+        verify(notificationService).notify(USER_ID, NotificationType.ACCOUNT, "충전 요청 접수",
+                "10,000,000원 충전 요청이 접수되었습니다. 관리자의 결정을 기다려 주세요.");
     }
 
     @Test

@@ -17,6 +17,8 @@ import com.teamfp.aistock.domain.account.entity.ChargeRequestStatus;
 import com.teamfp.aistock.domain.account.repository.ChargeRequestRepository;
 import com.teamfp.aistock.domain.admin.dto.request.AdminChargeDecisionRequest;
 import com.teamfp.aistock.domain.admin.dto.response.AdminChargeRequestResponse;
+import com.teamfp.aistock.domain.notification.entity.NotificationType;
+import com.teamfp.aistock.domain.notification.service.NotificationService;
 import com.teamfp.aistock.domain.user.entity.Role;
 import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
@@ -26,6 +28,7 @@ import com.teamfp.aistock.global.exception.ErrorCode;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class AdminChargeRequestServiceTest {
@@ -41,6 +44,8 @@ class AdminChargeRequestServiceTest {
 
     @Mock
     private AuditLogService auditLogService;
+    @Mock
+    private NotificationService notificationService;
 
     private AdminChargeRequestService adminChargeRequestService;
 
@@ -52,7 +57,7 @@ class AdminChargeRequestServiceTest {
 
     @BeforeEach
     void setUp() {
-        adminChargeRequestService = new AdminChargeRequestService(chargeRequestRepository, userRepository, accountTransactionService, auditLogService);
+        adminChargeRequestService = new AdminChargeRequestService(chargeRequestRepository, userRepository, accountTransactionService, auditLogService, notificationService);
 
         User user = User.builder().loginId("tester").name("테스터").role(Role.USER).isActive(true).build();
         ReflectionTestUtils.setField(user, "userId", 1L);
@@ -91,6 +96,8 @@ class AdminChargeRequestServiceTest {
         assertThat(account.getBalance()).isEqualTo(11_000_000L);
         assertThat(account.getBaseBalance()).isEqualTo(11_000_000L);
         assertThat(chargeRequest.getDecidedBy()).isEqualTo(admin);
+        verify(notificationService).notify(1L, NotificationType.ACCOUNT, "충전 요청 승인",
+                "10,000,000원 충전 요청이 승인되어 계좌에 반영되었습니다. 사유: 승인합니다");
     }
 
     @Test
@@ -106,6 +113,8 @@ class AdminChargeRequestServiceTest {
 
         assertThat(result.status()).isEqualTo(ChargeRequestStatus.REJECTED);
         assertThat(account.getBalance()).isEqualTo(1_000_000L);
+        verify(notificationService).notify(1L, NotificationType.ACCOUNT, "충전 요청 거절",
+                "10,000,000원 충전 요청이 거절되었습니다. 사유: 한도 초과");
     }
 
     @Test

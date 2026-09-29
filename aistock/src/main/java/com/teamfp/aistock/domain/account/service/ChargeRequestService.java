@@ -12,6 +12,8 @@ import com.teamfp.aistock.domain.account.entity.AccountStatus;
 import com.teamfp.aistock.domain.account.entity.ChargeRequest;
 import com.teamfp.aistock.domain.account.entity.ChargeRequestStatus;
 import com.teamfp.aistock.domain.account.repository.ChargeRequestRepository;
+import com.teamfp.aistock.domain.notification.entity.NotificationType;
+import com.teamfp.aistock.domain.notification.service.NotificationService;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 
@@ -27,6 +29,7 @@ public class ChargeRequestService {
 
     private final ChargeRequestRepository chargeRequestRepository;
     private final AccountService accountService;
+    private final NotificationService notificationService;
 
     /**
      * 계좌별 미처리 요청 중복 생성 방지(handoff 4.2 — 정책 미확정 상태에서 "동시에 PENDING 1건만
@@ -58,6 +61,8 @@ public class ChargeRequestService {
                 .reason(request.reason())
                 .build();
         chargeRequestRepository.save(chargeRequest);
+        notificationService.notify(userId, NotificationType.ACCOUNT, "충전 요청 접수",
+                String.format("%,d원 충전 요청이 접수되었습니다. 관리자의 결정을 기다려 주세요.", request.amount()));
 
         return ChargeRequestResponse.from(chargeRequest);
     }

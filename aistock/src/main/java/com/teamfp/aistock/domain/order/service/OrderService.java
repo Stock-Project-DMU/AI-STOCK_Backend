@@ -280,6 +280,10 @@ public class OrderService {
         // 트랜잭션 전체가 롤백되더라도 Redis 호출은 롤백 대상이 아니라서 DB에는 없는 주문이
         // Redis pending:orders에만 유령처럼 남는 문제를 막기 위함이다.
         registerAfterCommit(() -> redisPendingOrderService.addPendingOrder(request.stockCode(), pendingOrderDto));
+        notificationService.notify(userId, NotificationType.ORDER, "지정가 주문 접수",
+                String.format("%s %s %d주를 %,d원에 주문했습니다. 체결을 기다리고 있습니다.",
+                        stockName, request.orderType() == OrderType.BUY ? "매수" : "매도",
+                        request.quantity(), request.orderPrice()));
 
         return CreateOrderResponse.from(order);
     }
@@ -333,6 +337,9 @@ public class OrderService {
         }
 
         order.cancel();
+        notificationService.notify(userId, NotificationType.ORDER, "주문 취소",
+                String.format("%s %s %d주 지정가 주문이 취소되었습니다.", order.getStockName(),
+                        order.getOrderType() == OrderType.BUY ? "매수" : "매도", order.getQuantity()));
         // createLimitOrder()와 같은 이유로, 이 트랜잭션이 실제로 커밋된 뒤에만 Redis에서 지운다.
         // 여기서 바로 지우면 이후 커밋이 실패(롤백)할 때 DB에는 여전히 PENDING인 주문이 Redis
         // pending:orders에서만 사라져 다시는 체결 대상이 되지 못하는 문제가 생긴다.
@@ -375,6 +382,9 @@ public class OrderService {
         }
 
         order.cancel();
+        notificationService.notify(account.getUser().getUserId(), NotificationType.ORDER, "관리자 주문 취소",
+                String.format("%s %s %d주 주문이 관리자에 의해 취소되었습니다. 사유: %s", order.getStockName(),
+                        order.getOrderType() == OrderType.BUY ? "매수" : "매도", order.getQuantity(), reason));
         registerAfterCommit(() -> redisPendingOrderService.removePendingOrder(order.getStockCode(), order.getOrderId()));
 
         eventPublisher.publishEvent(new AdminOrderCancelledEvent(adminUserId, orderId, reason));
@@ -405,6 +415,9 @@ public class OrderService {
                         order.getOrderId(), null, null, "계좌 정지로 인한 주문 일괄 취소(동결 해제)");
             }
             order.cancel();
+            notificationService.notify(account.getUser().getUserId(), NotificationType.ORDER, "계좌 정지로 주문 취소",
+                    String.format("%s %s %d주 주문이 계좌 정지로 취소되었습니다.", order.getStockName(),
+                            order.getOrderType() == OrderType.BUY ? "매수" : "매도", order.getQuantity()));
             registerAfterCommit(() -> redisPendingOrderService.removePendingOrder(order.getStockCode(), order.getOrderId()));
         }
     }
