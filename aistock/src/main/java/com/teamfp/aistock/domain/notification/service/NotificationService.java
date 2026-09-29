@@ -74,12 +74,25 @@ public class NotificationService {
      */
     @Transactional
     public void notify(Long userId, NotificationType type, String title, String content) {
+        saveAndSend(userId, type, title, content, null);
+    }
+
+    @Transactional
+    public void notifyOrder(Long userId, Long orderId, String title, String content) {
+        saveAndSend(userId, NotificationType.ORDER, title, content, orderId);
+    }
+
+    private void saveAndSend(Long userId, NotificationType type, String title, String content, Long relatedOrderId) {
+        if (content.length() > 500) {
+            content = content.substring(0, 497) + "...";
+        }
         User user = userRepository.getReferenceById(userId);
         Notification notification = Notification.builder()
                 .user(user)
                 .type(type)
                 .title(title)
                 .content(content)
+                .relatedOrderId(relatedOrderId)
                 .build();
         notificationRepository.save(notification);
 

@@ -70,7 +70,8 @@ class OrderExecutionIntegrationTest {
     @Test
     void 지정가_매수_주문이_tick_수신으로_실제_체결된다() throws InterruptedException {
         long uniqueSuffix = System.currentTimeMillis();
-        String stockCode = "005930";
+        // 공유 Redis의 실제 종목 대기 주문에 테스트 tick이 체결되지 않도록 매번 별도 코드를 쓴다.
+        String stockCode = "T" + Long.toString(uniqueSuffix, 36).toUpperCase();
 
         // 1) 실제 MySQL에 사용자 + 계좌를 만든다 (잔고 100만원)
         User user = userRepository.save(User.builder()
@@ -93,7 +94,7 @@ class OrderExecutionIntegrationTest {
         //    (createLimitOrder는 미보유 종목이면 stock:price 캐시에서 종목명을 가져온다)
         redisStockCacheService.saveStockPrice(stockCode, StockPriceDto.builder()
                 .stockCode(stockCode)
-                .stockName("삼성전자")
+                .stockName("통합테스트종목")
                 .currentPrice(70_000L)
                 .build());
 
@@ -119,7 +120,7 @@ class OrderExecutionIntegrationTest {
         //    지정가(70,000) 이하인 65,000원 체결 tick → 매수 조건(현재가 <= 지정가) 충족.
         TickData tickData = TickData.builder()
                 .stockCode(stockCode)
-                .stockName("삼성전자")
+                .stockName("통합테스트종목")
                 .currentPrice(65_000L)
                 .changeRate(-1.0)
                 .changeAmount(1000)

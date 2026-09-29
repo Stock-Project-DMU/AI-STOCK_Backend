@@ -13,6 +13,8 @@ import com.teamfp.aistock.domain.account.repository.ChargeRequestRepository;
 import com.teamfp.aistock.domain.account.service.AccountTransactionService;
 import com.teamfp.aistock.domain.admin.dto.request.AdminChargeDecisionRequest;
 import com.teamfp.aistock.domain.admin.dto.response.AdminChargeRequestResponse;
+import com.teamfp.aistock.domain.notification.entity.NotificationType;
+import com.teamfp.aistock.domain.notification.service.NotificationService;
 import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.exception.CustomException;
@@ -33,6 +35,7 @@ public class AdminChargeRequestService {
     private final UserRepository userRepository;
     private final AccountTransactionService accountTransactionService;
     private final AuditLogService auditLogService;
+    private final NotificationService notificationService;
 
     @Transactional(readOnly = true)
     public Page<AdminChargeRequestResponse> getRequests(String query, ChargeRequestStatus status, Pageable pageable) {
@@ -86,6 +89,12 @@ public class AdminChargeRequestService {
         auditLogService.record(adminUserId, AuditLogService.ACTION_CHARGE_REQUEST_DECISION,
                 AuditLogService.TARGET_CHARGE_REQUEST, requestId, ChargeRequestStatus.PENDING.name(),
                 request.decision().name(), request.reason());
+
+        String title = request.decision() == ChargeRequestStatus.APPROVED ? "충전 요청 승인" : "충전 요청 거절";
+        String result = request.decision() == ChargeRequestStatus.APPROVED
+                ? "승인되어 계좌에 반영되었습니다." : "거절되었습니다.";
+        notificationService.notify(chargeRequest.getAccount().getUser().getUserId(), NotificationType.ACCOUNT, title,
+                String.format("%,d원 충전 요청이 %s 사유: %s", chargeRequest.getAmount(), result, request.reason()));
 
         return chargeRequestRepository.findWithAccountAndUserById(requestId)
                 .map(AdminChargeRequestResponse::from)

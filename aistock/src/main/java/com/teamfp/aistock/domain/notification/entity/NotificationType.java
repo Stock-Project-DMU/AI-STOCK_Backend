@@ -5,5 +5,6 @@ public enum NotificationType {
     ORDER,
     AI,
     SIMULATION,
-    NEWS
+    NEWS,
+    ACCOUNT
 }

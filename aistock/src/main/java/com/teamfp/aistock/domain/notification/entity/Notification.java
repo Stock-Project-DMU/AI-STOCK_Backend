@@ -53,6 +53,9 @@ public class Notification {
     @Column(name = "content", length = 500, nullable = false)
     private String content;
 
+    @Column(name = "related_order_id")
+    private Long relatedOrderId;
+
     @Column(name = "is_read", nullable = false)
     private boolean isRead;
 
@@ -61,11 +64,12 @@ public class Notification {
     private LocalDateTime createdAt;
 
     @Builder
-    private Notification(User user, NotificationType type, String title, String content) {
+    private Notification(User user, NotificationType type, String title, String content, Long relatedOrderId) {
         this.user = user;
         this.type = type;
         this.title = title;
         this.content = content;
+        this.relatedOrderId = relatedOrderId;
         this.isRead = false;
     }
 

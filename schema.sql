@@ -555,9 +555,10 @@ CREATE TABLE recent_viewed (
 CREATE TABLE notifications (
     noti_id     BIGINT          NOT NULL AUTO_INCREMENT,
     user_id     BIGINT          NOT NULL,
-    type        ENUM('SYSTEM','ORDER','AI','SIMULATION','NEWS') NOT NULL,  -- v12: NEWS 추가 (feature/ai-news)
+    type        ENUM('SYSTEM','ORDER','AI','SIMULATION','NEWS','ACCOUNT') NOT NULL,
     title       VARCHAR(100)    NOT NULL,
     content     VARCHAR(500)    NOT NULL,
+    related_order_id BIGINT      NULL,
     is_read     TINYINT(1)      NOT NULL DEFAULT 0,
     created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (noti_id),

@@ -17,7 +17,6 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import com.teamfp.aistock.domain.account.entity.Account;
 import com.teamfp.aistock.domain.account.service.AccountService;
-import com.teamfp.aistock.domain.notification.entity.NotificationType;
 import com.teamfp.aistock.domain.notification.service.NotificationService;
 import com.teamfp.aistock.domain.order.dto.HoldingValuationDto;
 import com.teamfp.aistock.domain.order.dto.request.CreateOrderRequest;
@@ -185,7 +184,7 @@ class OrderServiceTest {
             orderService.createMarketOrder(USER_ID, requestOf(OrderType.BUY, 10));
 
             String expectedMessage = String.format("%s %s %d주가 %,d원에 체결되었습니다.", "삼성전자", "매수", 10, 70_000L);
-            verify(notificationService).notify(eq(USER_ID), eq(NotificationType.ORDER), eq("주문 체결"), eq(expectedMessage));
+            verify(notificationService).notifyOrder(eq(USER_ID), org.mockito.ArgumentMatchers.isNull(), eq("주문 체결"), eq(expectedMessage));
         }
 
         @Test
@@ -221,7 +220,7 @@ class OrderServiceTest {
 
             assertThat(account.getBalance()).isEqualTo(1_000_000L); // 잔고 그대로
             verify(orderRepository, never()).save(any());
-            verify(notificationService, never()).notify(any(), any(), any(), any());
+            verify(notificationService, never()).notifyOrder(any(), any(), any(), any());
         }
 
         @Test
@@ -285,7 +284,7 @@ class OrderServiceTest {
             orderService.createMarketOrder(USER_ID, requestOf(OrderType.SELL, 4));
 
             String expectedMessage = String.format("%s %s %d주가 %,d원에 체결되었습니다.", "삼성전자", "매도", 4, 60_000L);
-            verify(notificationService).notify(eq(USER_ID), eq(NotificationType.ORDER), eq("주문 체결"), eq(expectedMessage));
+            verify(notificationService).notifyOrder(eq(USER_ID), org.mockito.ArgumentMatchers.isNull(), eq("주문 체결"), eq(expectedMessage));
         }
 
         @Test
