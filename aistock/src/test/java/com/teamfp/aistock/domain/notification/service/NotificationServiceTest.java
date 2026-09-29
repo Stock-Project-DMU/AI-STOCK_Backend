@@ -6,12 +6,15 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionSynchronizationUtils;
 
 import com.teamfp.aistock.domain.notification.entity.NotificationType;
+import com.teamfp.aistock.domain.notification.entity.Notification;
+import com.teamfp.aistock.domain.notification.dto.response.NotificationResponse;
 import com.teamfp.aistock.domain.notification.repository.NotificationRepository;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 
@@ -20,6 +23,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * PR 코드리뷰 반영 — notify()가 호출한 쪽(OrderService.createMarketOrder() 등)의 트랜잭션
@@ -88,5 +92,19 @@ class NotificationServiceTest {
 
         verify(messagingTemplate, times(1))
                 .convertAndSendToUser(eq(String.valueOf(USER_ID)), eq("/queue"), any());
+    }
+
+    @Test
+    @DisplayName("주문 알림은 주문 번호를 저장하고 응답에도 포함한다")
+    void notifyOrder_includesRelatedOrderId() {
+        notificationService.notifyOrder(USER_ID, 42L, "주문 체결", "삼성전자 매수 1주 체결");
+
+        ArgumentCaptor<Notification> saved = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).save(saved.capture());
+        assertThat(saved.getValue().getRelatedOrderId()).isEqualTo(42L);
+
+        ArgumentCaptor<Object> sent = ArgumentCaptor.forClass(Object.class);
+        verify(messagingTemplate).convertAndSendToUser(eq("1"), eq("/queue"), sent.capture());
+        assertThat(((NotificationResponse) sent.getValue()).relatedOrderId()).isEqualTo(42L);
     }
 }

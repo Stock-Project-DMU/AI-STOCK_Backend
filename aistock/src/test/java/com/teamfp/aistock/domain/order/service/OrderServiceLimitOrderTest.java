@@ -18,7 +18,6 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import com.teamfp.aistock.domain.account.entity.Account;
 import com.teamfp.aistock.domain.account.service.AccountService;
-import com.teamfp.aistock.domain.notification.entity.NotificationType;
 import com.teamfp.aistock.domain.notification.service.NotificationService;
 import com.teamfp.aistock.domain.order.dto.PendingOrderDto;
 import com.teamfp.aistock.domain.order.dto.request.CreateOrderRequest;
@@ -194,7 +193,7 @@ class OrderServiceLimitOrderTest {
             assertThat(captor.getValue().getLimitPrice()).isEqualTo(70_000L);
             assertThat(captor.getValue().getOrderType()).isEqualTo("BUY");
             assertThat(captor.getValue().getStockName()).isEqualTo("삼성전자");
-            verify(notificationService).notify(USER_ID, NotificationType.ORDER, "지정가 주문 접수",
+            verify(notificationService).notifyOrder(USER_ID, null, "지정가 주문 접수",
                     "삼성전자 매수 10주를 70,000원에 주문했습니다. 체결을 기다리고 있습니다.");
         }
 
@@ -370,7 +369,7 @@ class OrderServiceLimitOrderTest {
             assertThat(account.getFrozenBalance()).isZero();
             assertThat(account.getBalance()).isEqualTo(1_000_000L);
             verify(redisPendingOrderService).removePendingOrder(STOCK_CODE, order.getOrderId());
-            verify(notificationService).notify(USER_ID, NotificationType.ORDER, "주문 취소",
+            verify(notificationService).notifyOrder(USER_ID, order.getOrderId(), "주문 취소",
                     "삼성전자 매수 10주 지정가 주문이 취소되었습니다.");
         }
 

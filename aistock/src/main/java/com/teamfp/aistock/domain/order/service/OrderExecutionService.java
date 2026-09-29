@@ -13,7 +13,6 @@ import org.springframework.transaction.annotation.Transactional;
 import com.teamfp.aistock.domain.account.entity.Account;
 import com.teamfp.aistock.domain.account.entity.AccountTransactionType;
 import com.teamfp.aistock.domain.account.service.AccountTransactionService;
-import com.teamfp.aistock.domain.notification.entity.NotificationType;
 import com.teamfp.aistock.domain.notification.service.NotificationService;
 import com.teamfp.aistock.domain.order.dto.PendingOrderDto;
 import com.teamfp.aistock.domain.order.entity.Holding;
@@ -172,7 +171,7 @@ public class OrderExecutionService {
                 // 체결 시점에 보유수량이 부족해졌다(예: 같은 종목을 다른 주문으로 먼저 매도함).
                 // 재시도해도 상황이 나아지지 않으므로 체결 대신 주문을 취소 처리한다.
                 order.cancel();
-                notificationService.notify(pendingOrder.getUserId(), NotificationType.ORDER, "주문 자동 취소",
+                notificationService.notifyOrder(pendingOrder.getUserId(), order.getOrderId(), "주문 자동 취소",
                         String.format("%s 매도 %d주 주문이 보유 수량 부족으로 취소되었습니다.",
                                 order.getStockName(), order.getQuantity()));
                 log.warn("지정가 매도 체결 취소 - 보유수량 부족: orderId={}", order.getOrderId());
@@ -184,7 +183,7 @@ public class OrderExecutionService {
 
         // pendingOrder.getUserId()를 쓴다 — order.getAccount().getUser()는 LAZY라 굳이
         // User를 추가로 로딩할 필요 없이 Redis 캐시(PendingOrderDto)에 이미 있는 userId를 그대로 쓴다.
-        notificationService.notify(pendingOrder.getUserId(), NotificationType.ORDER, "주문 체결", buildExecutionMessage(order));
+        notificationService.notifyOrder(pendingOrder.getUserId(), order.getOrderId(), "주문 체결", buildExecutionMessage(order));
     }
 
     private String buildExecutionMessage(Order order) {
