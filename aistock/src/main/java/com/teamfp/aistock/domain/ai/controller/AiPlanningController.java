@@ -5,6 +5,8 @@ import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -12,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.teamfp.aistock.domain.ai.dto.request.AiChatRequest;
+import com.teamfp.aistock.domain.ai.dto.request.AiPlanningSessionTitleRequest;
 import com.teamfp.aistock.domain.ai.dto.response.AiChatResponse;
 import com.teamfp.aistock.domain.ai.dto.response.AiPlanningSessionResponse;
 import com.teamfp.aistock.domain.ai.service.AiPlanningService;
@@ -41,6 +44,22 @@ public class AiPlanningController {
     public ApiResponse<List<AiPlanningSessionResponse>> getMySessions() {
         Long userId = SecurityUtil.getCurrentUserId();
         return ApiResponse.success(aiPlanningService.getMySessions(userId));
+    }
+
+    @PatchMapping("/sessions/{sessionId}")
+    public ApiResponse<AiPlanningSessionResponse> renameSession(
+            @PathVariable Long sessionId,
+            @Valid @RequestBody AiPlanningSessionTitleRequest request
+    ) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        return ApiResponse.success(aiPlanningService.renameSession(userId, sessionId, request.title()));
+    }
+
+    @DeleteMapping("/sessions/{sessionId}")
+    public ApiResponse<Void> deleteSession(@PathVariable Long sessionId) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        aiPlanningService.deleteSession(userId, sessionId);
+        return ApiResponse.success("상담 기록을 삭제했습니다.", null);
     }
 
     @GetMapping("/sessions/{sessionId}/messages")

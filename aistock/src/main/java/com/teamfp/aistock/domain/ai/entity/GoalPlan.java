@@ -32,4 +32,11 @@ public class GoalPlan {
         return plan;
     }
     public void savePlan() { saved = true; }
+    public void updateSettings(GoalPlanRequest request) {
+        goal = request.goal();
+        monthlyPayment = request.monthlyPayment();
+        years = request.years();
+        annualReturn = request.annualReturn();
+        aggressive = request.aggressive();
+    }
 }

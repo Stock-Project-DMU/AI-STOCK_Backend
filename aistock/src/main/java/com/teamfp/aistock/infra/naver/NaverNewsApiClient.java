@@ -153,6 +153,51 @@ public class NaverNewsApiClient {
         return toSearchResponse(response, request.companyName(), hasTopic ? request.topic() : null, cutoff);
     }
 
+    /** 선택한 언론사의 기사를 최신순으로 검색하고, 언론사 필터를 결과 제한보다 먼저 적용한다. */
+    public NaverNewsSearchResponse searchByOutlet(NaverNewsSearchRequest request, String outletDomain) {
+        String topic = request.topic() == null || request.topic().isBlank() ? null : request.topic();
+        ZonedDateTime cutoff = ZonedDateTime.now().minusDays(NewsRelevanceMatcher.resolvePeriodDays(request.periodDays()));
+        List<NaverNewsResult> collected = new ArrayList<>();
+        Set<String> seenLinks = new HashSet<>();
+
+        for (int page = 0; page < MAX_OUTLET_PAGES && collected.size() < MAX_RESULTS; page++) {
+            int start = 1 + page * RAW_FETCH_COUNT;
+            NaverApiResponse response = ExternalApiInvoker.call(() -> restClient.get()
+                            .uri(uriBuilder -> uriBuilder
+                                    .scheme("https")
+                                    .host(hostOf(apiUrl))
+                                    .path(pathOf(apiUrl))
+                                    .queryParam("query", request.companyName())
+                                    .queryParam("display", RAW_FETCH_COUNT)
+                                    .queryParam("start", start)
+                                    .queryParam("sort", SORT_DATE)
+                                    .queryParam("format", FORMAT_JSON)
+                                    .build())
+                            .header("X-NCP-APIGW-API-KEY-ID", clientId)
+                            .header("X-NCP-APIGW-API-KEY", clientSecret)
+                            .retrieve()
+                            .body(NaverApiResponse.class),
+                    "네이버 뉴스 검색 API 호출 실패(선택 언론사) - outletDomain: {}, query: {}, start: {}",
+                    outletDomain, request.companyName(), start);
+            if (response == null || response.items() == null || response.items().isEmpty()) {
+                break;
+            }
+            response.items().stream()
+                    .filter(item -> matchesOutlet(item, outletDomain))
+                    .filter(item -> isWithinPeriod(item, cutoff))
+                    .map(this::stripHtmlFields)
+                    .filter(item -> isRelevant(item, request.companyName(), topic))
+                    .map(item -> new NaverNewsResult(item.title(), item.description(), item.link(), item.pubDate(), resolveOutletName(item)))
+                    .filter(item -> seenLinks.add(item.link()))
+                    .limit(MAX_RESULTS - collected.size())
+                    .forEach(collected::add);
+            if (response.items().size() < RAW_FETCH_COUNT) {
+                break;
+            }
+        }
+        return new NaverNewsSearchResponse(collected);
+    }
+
     // feature/ai-news(맞춤형 뉴스 브리핑) 전용 — search()와 달리 회사명이 없으므로 제목 매칭
     // 관련성 필터(isRelevant())를 아예 적용하지 않는다. 대신 처음부터 "이 언론사인지"만으로
     // 좁혀서 거른다 — search()처럼 신뢰 도메인 29곳 전체에서 먼저 5건으로 잘라낸 뒤 그중

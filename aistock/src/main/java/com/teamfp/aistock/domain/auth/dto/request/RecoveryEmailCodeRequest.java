@@ -2,15 +2,20 @@ package com.teamfp.aistock.domain.auth.dto.request;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
-import com.teamfp.aistock.global.util.MaxByteSize;
+
 import java.time.LocalDate;
 
-public record AccountRecoveryRequest(
+public record RecoveryEmailCodeRequest(
+        @NotNull RecoveryPurpose purpose,
         @Size(max = 50) String loginId,
         @NotBlank @Size(max = 100) String name,
         @NotBlank @Email String email,
-        LocalDate birthdate,
-        @Pattern(regexp = "^(?=.*[A-Za-z])(?=.*\\d).{8,}$") @MaxByteSize(max = 72) String newPassword
-) {}
+        LocalDate birthdate
+) {
+    public enum RecoveryPurpose {
+        FIND_ID,
+        RESET_PASSWORD
+    }
+}

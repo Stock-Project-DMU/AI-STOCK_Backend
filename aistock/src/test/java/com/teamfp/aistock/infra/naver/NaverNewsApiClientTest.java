@@ -70,6 +70,27 @@ class NaverNewsApiClientTest {
     }
 
     @Test
+    @DisplayName("선택한 언론사의 최신 기사는 다른 언론사 기사 뒤에 있어도 검색된다")
+    void searchByOutlet_filtersBeforeLimitingResults() {
+        StringBuilder items = new StringBuilder();
+        for (int index = 0; index < 6; index++) {
+            if (index > 0) items.append(',');
+            items.append(item("삼성전자 일반 기사 " + index, "https://www.mk.co.kr/article/" + index, "일반 기사", 0));
+        }
+        items.append(',').append(item("삼성전자 오늘 새 소식", TRUSTED_LINK, "새 소식", 0));
+        mockServer.expect(requestTo(startsWith(API_URL)))
+                .andExpect(queryParam("sort", "date"))
+                .andRespond(withSuccess("{\"total\":7,\"items\":[" + items + "]}", MediaType.APPLICATION_JSON));
+
+        var response = naverNewsApiClient.searchByOutlet(new NaverNewsSearchRequest("삼성전자", null, 1), "hankyung.com");
+
+        assertThat(response.results()).hasSize(1);
+        assertThat(response.results().get(0).title()).contains("오늘 새 소식");
+        assertThat(response.results().get(0).outlet()).isEqualTo("한국경제");
+        mockServer.verify();
+    }
+
+    @Test
     @DisplayName("제목에 회사명이 없는 무관한 결과는 걸러내고, 관련 있는 결과만 남긴다")
     void search_filtersOutResultsWhoseTitleDoesNotContainCompanyName() {
         mockServer.expect(requestTo(startsWith(API_URL)))

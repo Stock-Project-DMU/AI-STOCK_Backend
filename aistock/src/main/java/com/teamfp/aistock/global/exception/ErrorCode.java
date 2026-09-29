@@ -13,6 +13,8 @@ public enum ErrorCode {
     EMAIL_CODE_MISMATCH(HttpStatus.BAD_REQUEST, "EMAIL_CODE_MISMATCH", "이메일 인증 코드가 일치하지 않습니다."),
     EMAIL_CODE_EXPIRED(HttpStatus.BAD_REQUEST, "EMAIL_CODE_EXPIRED", "이메일 인증 코드가 만료되었습니다."),
     EMAIL_NOT_VERIFIED(HttpStatus.BAD_REQUEST, "EMAIL_NOT_VERIFIED", "이메일 인증이 필요합니다."),
+    EMAIL_SEND_COOLDOWN(HttpStatus.TOO_MANY_REQUESTS, "EMAIL_SEND_COOLDOWN", "인증번호를 다시 요청하기 전에 잠시 기다려 주세요."),
+    RECOVERY_INFO_MISMATCH(HttpStatus.BAD_REQUEST, "RECOVERY_INFO_MISMATCH", "입력한 회원 정보가 일치하지 않습니다."),
     INSUFFICIENT_BALANCE(HttpStatus.BAD_REQUEST, "INSUFFICIENT_BALANCE", "계좌 잔액이 부족합니다."),
     INSUFFICIENT_HOLDING(HttpStatus.BAD_REQUEST, "INSUFFICIENT_HOLDING", "보유 주식이 부족합니다."),
     ACCOUNT_SUSPENDED(HttpStatus.BAD_REQUEST, "ACCOUNT_SUSPENDED", "정지된 계좌는 주문할 수 없습니다."),
@@ -70,11 +72,11 @@ public enum ErrorCode {
 
     // 502 Bad Gateway
     EXTERNAL_API_ERROR(HttpStatus.BAD_GATEWAY, "EXTERNAL_API_ERROR", "외부 API 연동 중 에러가 발생했습니다."),
+    OAUTH_PROVIDER_RESPONSE_INVALID(HttpStatus.BAD_GATEWAY, "OAUTH_PROVIDER_RESPONSE_INVALID", "소셜 로그인 제공자의 응답이 올바르지 않습니다."),
 
     // 503 Service Unavailable
     MARKET_NOT_CONFIGURED(HttpStatus.SERVICE_UNAVAILABLE, "MARKET_NOT_CONFIGURED", "시장 데이터 제공자 설정이 아직 완료되지 않았습니다."),
     OAUTH_NOT_CONFIGURED(HttpStatus.SERVICE_UNAVAILABLE, "OAUTH_NOT_CONFIGURED", "소셜 로그인 제공자 설정이 아직 완료되지 않았습니다."),
-    OAUTH_EMAIL_REQUIRED(HttpStatus.BAD_REQUEST, "OAUTH_EMAIL_REQUIRED", "소셜 로그인에는 인증된 이메일 제공 동의가 필요합니다."),
     // 외부 시세 데이터 제공사 REST 호출(토큰 발급 포함) 자체가 실패한 경우 — "조회는 성공했지만 데이터가
     // 없음"(빈 목록)과 구분하기 위해 EXTERNAL_API_ERROR와 별도로 둔다(외부 장애와 빈 목록 구분 처리, #05).
     MARKET_DATA_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "MARKET_DATA_UNAVAILABLE", "시세 데이터 제공사와 일시적으로 연결할 수 없습니다. 잠시 후 다시 시도해 주세요."),

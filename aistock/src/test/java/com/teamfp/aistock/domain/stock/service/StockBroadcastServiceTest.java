@@ -18,6 +18,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 
+import com.teamfp.aistock.domain.order.service.OrderExecutionService;
 import com.teamfp.aistock.domain.stock.dto.HogaDto;
 import com.teamfp.aistock.domain.stock.dto.StockPriceDto;
 import com.teamfp.aistock.domain.stock.dto.response.HogaResponse;
@@ -28,6 +29,7 @@ import com.teamfp.aistock.infra.marketdata.dto.TickData;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -49,11 +51,15 @@ class StockBroadcastServiceTest {
     @Mock
     private SimpMessagingTemplate messagingTemplate;
 
+    @Mock
+    private OrderExecutionService orderExecutionService;
+
     private StockBroadcastService stockBroadcastService;
 
     @BeforeEach
     void setUp() {
-        stockBroadcastService = new StockBroadcastService(redisStockCacheService, stockNameResolver, messagingTemplate);
+        stockBroadcastService = new StockBroadcastService(
+                redisStockCacheService, stockNameResolver, messagingTemplate, orderExecutionService);
     }
 
     @Test
@@ -78,6 +84,7 @@ class StockBroadcastServiceTest {
         assertThat(dtoCaptor.getValue().getChangeAmount()).isEqualTo(500);
 
         verify(messagingTemplate).convertAndSend(eq("/topic/stock/005930"), any(StockPriceResponse.class));
+        verify(orderExecutionService).checkAndExecute("005930", 75000L);
     }
 
     @Test
@@ -120,6 +127,9 @@ class StockBroadcastServiceTest {
 
         verify(redisStockCacheService, times(1)).saveStockPrice(eq("005930"), any());
         verify(messagingTemplate, times(1)).convertAndSend(eq("/topic/stock/005930"), any(StockPriceResponse.class));
+        // Throttle되어 무시된 두 번째 tick은 지정가 체결 판단도 함께 건너뛴다 — 다음 tick(200ms
+        // 이후)에서 다시 시도되므로 안전하다(OrderExecutionService.checkAndExecute()는 멱등).
+        verify(orderExecutionService, times(1)).checkAndExecute(eq("005930"), anyLong());
     }
 
     @Test

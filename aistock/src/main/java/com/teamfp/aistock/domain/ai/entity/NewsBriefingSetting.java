@@ -1,12 +1,16 @@
 package com.teamfp.aistock.domain.ai.entity;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import com.teamfp.aistock.domain.user.entity.User;
+
+import org.hibernate.annotations.ColumnDefault;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -52,6 +56,21 @@ public class NewsBriefingSetting {
     @Column(name = "outlet_domain", length = 50, nullable = false)
     private String outletDomain;
 
+    // 브리핑 생성 희망 시각(시:분:초, KST — schema.sql v15부터 분·초 단위까지 지원).
+    // 기존 고정 새벽 7시와 동일한 기본값을 둬서 별도로 시각을 고르지 않은 사용자의
+    // 체감 동작을 바꾸지 않는다.
+    public static final LocalTime DEFAULT_BRIEFING_TIME = LocalTime.of(7, 0, 0);
+
+    @Column(name = "briefing_time", nullable = false)
+    @ColumnDefault("'07:00:00'")
+    private LocalTime briefingTime;
+
+    @Column(name = "last_attempt_date")
+    private LocalDate lastAttemptDate;
+
+    @Column(name = "last_attempt_at")
+    private LocalDateTime lastAttemptAt;
+
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -61,13 +80,16 @@ public class NewsBriefingSetting {
     private LocalDateTime updatedAt;
 
     @Builder
-    private NewsBriefingSetting(User user, String outletDomain) {
+    private NewsBriefingSetting(User user, String outletDomain, LocalTime briefingTime) {
         this.user = user;
         this.outletDomain = outletDomain;
+        this.briefingTime = briefingTime != null ? briefingTime : DEFAULT_BRIEFING_TIME;
     }
 
-    // 언론사 변경(예: 한국경제 → 매일경제) — 상태 변경은 Setter 대신 의미 있는 메서드로.
-    public void changeOutlet(String outletDomain) {
+    public void changeSchedule(String outletDomain, LocalTime briefingTime) {
         this.outletDomain = outletDomain;
+        this.briefingTime = briefingTime;
+        this.lastAttemptDate = null;
+        this.lastAttemptAt = null;
     }
 }
