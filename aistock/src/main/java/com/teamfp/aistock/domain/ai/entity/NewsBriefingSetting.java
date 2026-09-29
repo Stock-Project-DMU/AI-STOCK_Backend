@@ -1,5 +1,6 @@
 package com.teamfp.aistock.domain.ai.entity;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 
@@ -64,6 +65,12 @@ public class NewsBriefingSetting {
     @ColumnDefault("'07:00:00'")
     private LocalTime briefingTime;
 
+    @Column(name = "last_attempt_date")
+    private LocalDate lastAttemptDate;
+
+    @Column(name = "last_attempt_at")
+    private LocalDateTime lastAttemptAt;
+
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -79,13 +86,10 @@ public class NewsBriefingSetting {
         this.briefingTime = briefingTime != null ? briefingTime : DEFAULT_BRIEFING_TIME;
     }
 
-    // 언론사 변경(예: 한국경제 → 매일경제) — 상태 변경은 Setter 대신 의미 있는 메서드로.
-    public void changeOutlet(String outletDomain) {
+    public void changeSchedule(String outletDomain, LocalTime briefingTime) {
         this.outletDomain = outletDomain;
-    }
-
-    // 브리핑 생성 시각 변경(예: 07:00:00 → 22:15:30).
-    public void changeBriefingTime(LocalTime briefingTime) {
         this.briefingTime = briefingTime;
+        this.lastAttemptDate = null;
+        this.lastAttemptAt = null;
     }
 }

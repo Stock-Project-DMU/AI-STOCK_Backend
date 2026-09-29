@@ -1,6 +1,8 @@
 package com.teamfp.aistock.domain.ai.service;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.Comparator;
 import java.util.List;
@@ -170,13 +172,13 @@ public class AiNewsService {
      * generateDailyBriefings()가 매분 실행될 때 이 값이 현재 시각을 이미 지났는지(<=)
      * 판단하는 데 쓰인다(2026-09-29 재반려로 정확히-일치 비교에서 범위 비교로 변경).
      *
-     * briefingTime은 아직 이 값을 보내지 않는 구버전 프론트와의 호환을 위해 null을 허용한다.
+     * 전달된 시각이 null인 구버전 클라이언트와의 호환을 위해 null을 허용한다.
      * 신규 설정(null이면 NewsBriefingSetting 생성자가 DEFAULT_BRIEFING_TIME=07:00:00을 적용)과
      * 기존 설정 변경(null이면 기존 값을 그대로 둠 — 언론사만 바꾸는 요청이 시각을 07:00으로
      * 되돌려버리면 안 되므로)을 다르게 처리한다.
      */
     @Transactional
-    public NewsBriefingSettingResponse updateMySetting(Long userId, String outletDomain, java.time.LocalTime briefingTime) {
+    public NewsBriefingSettingResponse updateMySetting(Long userId, String outletDomain, LocalTime deliveryTime) {
         validateOutlet(outletDomain);
 
         NewsBriefingSetting setting = newsBriefingSettingRepository.findByUserId(userId).orElse(null);
@@ -185,13 +187,11 @@ public class AiNewsService {
             setting = NewsBriefingSetting.builder()
                     .user(user)
                     .outletDomain(outletDomain)
-                    .briefingTime(briefingTime)
+                    .briefingTime(deliveryTime)
                     .build();
         } else {
-            setting.changeOutlet(outletDomain);
-            if (briefingTime != null) {
-                setting.changeBriefingTime(briefingTime);
-            }
+            setting.changeSchedule(outletDomain,
+                    deliveryTime != null ? deliveryTime : setting.getBriefingTime());
         }
         NewsBriefingSetting saved = newsBriefingSettingRepository.save(setting);
         return NewsBriefingSettingResponse.from(saved);
@@ -241,7 +241,7 @@ public class AiNewsService {
      * 대상자가 없는 대부분의 분에는 이 메서드가 목록 조회 한 번만 하고 끝난다(가벼운 폴링).
      * 같은 분에 여러 명이 몰리면 아래 for문이 한 명씩 순차 처리(Gemini 호출 포함)하므로
      * 뒤 사용자는 앞 사용자 처리가 끝날 때까지 기다리지만, 이번 분을 넘겨도 다음 분 폴링에서
-     * "아직 오늘자 브리핑 없음" 조건으로 다시 잡히므로 완전히 놓치지는 않는다.
+     * "아직 오늘자 브리핑 없음" 조건으로 다시 잡힌다. 실제 생성 시도는 사용자당 하루 한 번으로 제한한다.
      *
      * 재무설계사의 Gemini 호출과 달리 사용자가 직접 요청한 게 아니라 서버가 스스로 도는
      * 배치 작업이라, 대화용으로 설계된 RedisRateLimiterService(분당3/일일10)는 여기 적용하지
@@ -250,7 +250,10 @@ public class AiNewsService {
      */
     @Scheduled(cron = "0 * * * * *", zone = "Asia/Seoul")
     public void generateDailyBriefings() {
-        java.time.LocalDateTime now = java.time.LocalDateTime.now(KST);
+        generateDueBriefings(LocalDateTime.now(KST));
+    }
+
+    void generateDueBriefings(LocalDateTime now) {
         LocalDate today = now.toLocalDate();
         List<NewsBriefingSetting> settings = newsBriefingSettingRepository
                 .findDueSettings(now.toLocalTime(), today);
@@ -262,6 +265,9 @@ public class AiNewsService {
         int successCount = 0;
         for (NewsBriefingSetting setting : settings) {
             try {
+                if (newsBriefingSettingRepository.claimBriefingAttempt(setting.getSettingId(), today, now) == 0) {
+                    continue;
+                }
                 if (self.generateBriefingForUser(setting, today)) {
                     successCount++;
                 }

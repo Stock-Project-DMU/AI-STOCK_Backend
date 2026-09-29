@@ -121,8 +121,10 @@ class AiNewsServiceTest {
         void processesOnlySettingsReturnedByRepository() {
             NewsBriefingSetting due = NewsBriefingSetting.builder()
                     .user(user).outletDomain("hankyung.com").briefingTime(LocalTime.of(9, 0, 0)).build();
+            ReflectionTestUtils.setField(due, "settingId", 7L);
             when(newsBriefingSettingRepository.findDueSettings(any(), any()))
                     .thenReturn(List.of(due));
+            when(newsBriefingSettingRepository.claimBriefingAttempt(eq(7L), any(), any())).thenReturn(1);
 
             // generateDailyBriefings()는 self 프록시(@Lazy)를 통해 generateBriefingForUser()를
             // 호출하므로, 실제 프록시 대신 스파이를 주입해 어떤 setting으로 호출됐는지만 검증한다

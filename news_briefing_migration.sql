@@ -30,6 +30,9 @@ CREATE TABLE IF NOT EXISTS news_briefing_settings (
     setting_id     BIGINT          NOT NULL AUTO_INCREMENT,
     user_id        BIGINT          NOT NULL,
     outlet_domain  VARCHAR(50)     NOT NULL,
+    briefing_time  TIME            NOT NULL DEFAULT '07:00:00',
+    last_attempt_date DATE         NULL,
+    last_attempt_at DATETIME       NULL,
     created_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP
                                              ON UPDATE CURRENT_TIMESTAMP,
@@ -72,11 +75,8 @@ ALTER TABLE notifications
 -- '00:00:00'으로 채워져 사용자가 설정해둔 적 없는 시각처럼 보일 수 있다.
 --
 -- 적용 대상: news_briefing_settings 테이블이 이미 생성돼 있는 모든 환경(로컬/개발/운영
--- 공통). 완전히 새 환경(테이블을 이제 막 만드는 경우)은 위 CREATE TABLE 문 자체엔
--- briefing_time/briefing_hour 컬럼이 없지만, application-dev.yml처럼 ddl-auto=update로
--- Hibernate가 Entity(NewsBriefingSetting, 이미 briefing_time 필드로 정의됨) 기준으로
--- 테이블을 직접 만드는 환경이라면 Hibernate가 알아서 briefing_time을 만들어주므로 이
--- 스크립트가 필요 없다 — 정보_스키마로 존재 여부를 직접 확인 후 필요한 구문만 실행하므로
+-- 공통). 완전히 새 환경에는 위 CREATE TABLE 문이 briefing_time을 포함한다.
+-- 기존 테이블에는 아래 구문이 정보_스키마로 존재 여부를 확인해 필요한 변경만 실행하므로
 -- 정상적으로 끝까지 완료된 뒤에는 몇 번을 다시 실행해도 안전하다(idempotent). 다만 2번
 -- 단계(UPDATE)는 "이번 실행에서 방금 briefing_time을 새로 추가했을 때만" 돌게 해뒀다 —
 -- 그렇지 않고 3번 단계(DROP COLUMN)만 실패해 briefing_hour가 남아있는 상태로 재실행되면,

@@ -32,8 +32,8 @@ public class AiNewsController {
     @org.springframework.web.bind.annotation.PostMapping("/chat")
     public ApiResponse<com.teamfp.aistock.domain.ai.dto.response.NewsChatResponse> chat(
             @Valid @RequestBody com.teamfp.aistock.domain.ai.dto.request.NewsChatRequest request) {
-        SecurityUtil.getCurrentUserId();
-        return ApiResponse.success(newsChatService.chat(request));
+        Long userId = SecurityUtil.getCurrentUserId();
+        return ApiResponse.success(newsChatService.chat(userId, request));
     }
 
     @GetMapping("/briefings")
@@ -62,8 +62,7 @@ public class AiNewsController {
     @PutMapping("/settings")
     public ApiResponse<NewsBriefingSettingResponse> updateMySetting(@Valid @RequestBody NewsBriefingSettingRequest request) {
         Long userId = SecurityUtil.getCurrentUserId();
-        return ApiResponse.success("언론사 설정이 저장되었습니다.",
-                aiNewsService.updateMySetting(userId, request.outletDomain(), request.briefingTime()));
+        return ApiResponse.success("브리핑 설정이 저장되었습니다.", aiNewsService.updateMySetting(userId, request.outletDomain(), request.deliveryTime()));
     }
 
     @GetMapping("/briefings/today")

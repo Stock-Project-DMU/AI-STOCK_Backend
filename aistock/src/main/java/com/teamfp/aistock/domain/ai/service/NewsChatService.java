@@ -7,6 +7,8 @@ import java.util.Map;
 import org.springframework.stereotype.Service;
 import com.teamfp.aistock.domain.ai.dto.request.NewsChatRequest;
 import com.teamfp.aistock.domain.ai.dto.response.NewsChatResponse;
+import com.teamfp.aistock.domain.ai.repository.NewsBriefingSettingRepository;
+import com.teamfp.aistock.global.util.NewsRelevanceMatcher;
 import com.teamfp.aistock.infra.gemini.GeminiApiClient;
 import com.teamfp.aistock.infra.gemini.dto.GeminiRequest;
 import com.teamfp.aistock.infra.gemini.dto.GeminiResponse;
@@ -20,6 +22,7 @@ import lombok.RequiredArgsConstructor;
 public class NewsChatService {
     private final GeminiApiClient gemini;
     private final NaverNewsApiClient news;
+    private final NewsBriefingSettingRepository settingRepository;
     private static final String INSTRUCTION = "당신은 한국어 뉴스 검색 비서입니다. 뉴스 요청은 반드시 search_news를 호출하세요. "
             + "이전 대화로 후속 질문의 대상과 기간을 파악하세요. 일반 시황 요청은 코스피를 검색하세요. "
             + "대상을 알 수 없으면 짧게 되물으세요. 검색 전 사건이나 뉴스를 지어내지 마세요. "
@@ -31,12 +34,17 @@ public class NewsChatService {
                     "periodDays", new GeminiRequest.ParameterSpec("integer", "검색 기간 1~30일. 오늘은 1, 이번 주는 7, 미지정은 7")),
             List.of("companyName", "periodDays"));
 
-    public NewsChatResponse chat(NewsChatRequest request) {
+    public NewsChatResponse chat(Long userId, NewsChatRequest request) {
         String now = ZonedDateTime.now(ZoneId.of("Asia/Seoul")).toString();
+        var setting = settingRepository.findByUserId(userId);
+        String outletDomain = setting.map(s -> s.getOutletDomain()).orElse(null);
+        String outletName = outletDomain == null ? null : NewsRelevanceMatcher.OUTLET_NAMES.getOrDefault(outletDomain, "선택한 언론사");
         var history = request.history().stream().map(t -> new GeminiRequest.HistoryTurn(
                 t.role().equals("USER") ? "user" : "model", t.content())).toList();
         GeminiResponse decision = gemini.generate(new GeminiRequest(INSTRUCTION,
-                "현재 시각: " + now + "\n요청: " + request.content(), history, List.of(SEARCH), List.of(), GeminiRequest.GeminiModel.JUDGE));
+                "현재 시각: " + now + (outletName == null ? "" : "\n선택한 언론사: " + outletName
+                        + " (이 언론사의 새 소식을 묻고 대상이 없으면 코스피를 검색하고 기간은 1일로 지정하세요.)")
+                        + "\n요청: " + request.content(), history, List.of(SEARCH), List.of(), GeminiRequest.GeminiModel.JUDGE));
         if (decision == null || !decision.isFunctionCall()) {
             return new NewsChatResponse("어떤 종목이나 분야의 뉴스를 찾아드릴까요? 예: 삼성전자 이번 주 실적 뉴스", List.of(), now);
         }
@@ -49,10 +57,12 @@ public class NewsChatService {
         int days = 7;
         try { days = Math.max(1, Math.min(30, Integer.parseInt(String.valueOf(call.args().getOrDefault("periodDays", 7))))); }
         catch (NumberFormatException ignored) { }
-        var result = news.search(new NaverNewsSearchRequest(keyword, topic, days));
+        var searchRequest = new NaverNewsSearchRequest(keyword, topic, days);
+        var result = outletDomain == null ? news.search(searchRequest) : news.searchByOutlet(searchRequest, outletDomain);
         var sources = result.results().stream().filter(s -> s.link() != null && s.link().matches("https?://[^\\s]+"))
                 .limit(5).toList();
-        if (sources.isEmpty()) return new NewsChatResponse("최근 " + days + "일 동안 요청과 일치하는 기사를 찾지 못했습니다. 검색 주제나 기간을 바꿔 주세요.", sources, now);
+        if (sources.isEmpty()) return new NewsChatResponse("최근 " + days + "일 동안 " + (outletName == null ? "" : outletName + "에서 ")
+                + "요청과 일치하는 기사를 찾지 못했습니다. 검색 주제나 기간을 바꿔 주세요.", sources, now);
         String articles = sources.stream().map(s -> s.title() + " | " + s.description() + " | " + s.pubDate() + " | " + s.outlet())
                 .collect(java.util.stream.Collectors.joining("\n"));
         String fallback = "관련 기사 " + sources.size() + "건을 찾았습니다. AI 요약을 제공하지 못해 아래 기사 제목과 원문 링크를 표시합니다.";

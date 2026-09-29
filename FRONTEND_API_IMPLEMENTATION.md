@@ -89,6 +89,7 @@
 | --- | --- | --- |
 | POST | /api/goal-plans | 목표 계산 및 실행 이력 저장 |
 | GET | /api/goal-plans | 본인 최근 100개 이력 조회 |
+| PUT | /api/goal-plans/{planId} | 본인 목표 시뮬레이션 설정 수정 |
 | PATCH | /api/goal-plans/{planId}/saved | 본인 목표 북마크 |
 | DELETE | /api/goal-plans/{planId} | 본인 목표 삭제 |
 | GET | /api/ai/planning/preferences | 북마크·연결 자료 선택 조회 |

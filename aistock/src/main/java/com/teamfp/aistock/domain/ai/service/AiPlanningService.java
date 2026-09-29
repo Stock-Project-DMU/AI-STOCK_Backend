@@ -1134,6 +1134,21 @@ public class AiPlanningService {
                 .toList();
     }
 
+    @Transactional
+    public AiPlanningSessionResponse renameSession(Long userId, Long sessionId, String title) {
+        AiPlanningSession session = findMySession(userId, sessionId);
+        session.updateTitle(title.strip());
+        session.recordActivity();
+        return AiPlanningSessionResponse.from(session);
+    }
+
+    @Transactional
+    public void deleteSession(Long userId, Long sessionId) {
+        AiPlanningSession session = findMySession(userId, sessionId);
+        messageRepository.deleteBySessionId(session.getSessionId());
+        sessionRepository.delete(session);
+    }
+
     @Transactional(readOnly = true)
     public List<AiChatResponse> getMessages(Long userId, Long sessionId) {
         AiPlanningSession session = findMySession(userId, sessionId);
