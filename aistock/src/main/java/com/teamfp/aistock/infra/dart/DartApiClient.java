@@ -99,7 +99,7 @@ public class DartApiClient {
 
     // 회사명 → KRX 종목코드(stock_code) 캐시. corp_code와 같은 DART 고유번호 목록(zip) 안에
     // 함께 들어있는 값이라, 별도로 다운로드하지 않고 corpCodeByName과 한 번의 파싱으로 같이
-    // 채운다 — AI 상담의 get_current_price 도구가 LS증권 실시간 시세 캐시(Redis
+    // 채운다 — AI 상담의 get_current_price 도구가 외부 시세 데이터 제공사 실시간 시세 캐시(Redis
     // stock:price:{stockCode})를 조회할 stockCode를 여기서 얻는다.
     private volatile Map<String, String> stockCodeByName;
 
@@ -626,7 +626,7 @@ public class DartApiClient {
 
     /**
      * 회사명(예: "삼성전자")으로 KRX 종목코드(stock_code)를 찾는다. AI 재무설계 상담의
-     * get_current_price 도구가 LS증권 실시간 시세 캐시(Redis stock:price:{stockCode})를
+     * get_current_price 도구가 외부 시세 데이터 제공사 실시간 시세 캐시(Redis stock:price:{stockCode})를
      * 조회할 stockCode를 얻기 위해 사용한다. corp_code와 같은 DART 고유번호 목록에서 함께
      * 파싱되므로 별도 다운로드 없이 resolveCorpCodeByName()과 캐시를 공유한다. 비상장 회사는
      * stock_code 자체가 없어 빈 값을 반환한다.

@@ -6,6 +6,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
@@ -37,7 +38,6 @@ import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.redis.RedisAiToolCacheService;
-import com.teamfp.aistock.global.redis.RedisRateLimiterService;
 import com.teamfp.aistock.global.util.DateUtil;
 import com.teamfp.aistock.infra.dart.DartApiClient;
 import com.teamfp.aistock.infra.dart.dto.DartFinancialRequest;
@@ -46,43 +46,43 @@ import com.teamfp.aistock.infra.gemini.GeminiApiClient;
 import com.teamfp.aistock.infra.gemini.dto.GeminiRequest;
 import com.teamfp.aistock.infra.gemini.dto.GeminiRequest.HistoryTurn;
 import com.teamfp.aistock.infra.gemini.dto.GeminiResponse;
-import com.teamfp.aistock.infra.ls.LsEtcApiClient;
-import com.teamfp.aistock.infra.ls.LsEtfApiClient;
-import com.teamfp.aistock.infra.ls.LsHighItemApiClient;
-import com.teamfp.aistock.infra.ls.LsIndustryApiClient;
-import com.teamfp.aistock.infra.ls.LsInvestInfoApiClient;
-import com.teamfp.aistock.infra.ls.LsInvestorApiClient;
-import com.teamfp.aistock.infra.ls.LsInvestorTrendApiClient;
-import com.teamfp.aistock.infra.ls.LsMarketDataApiClient;
-import com.teamfp.aistock.infra.ls.LsProgramApiClient;
-import com.teamfp.aistock.infra.ls.LsSectorApiClient;
-import com.teamfp.aistock.infra.ls.dto.LsCallAuctionPriceDto;
-import com.teamfp.aistock.infra.ls.dto.LsCurrentPriceDetailDto;
-import com.teamfp.aistock.infra.ls.dto.LsEtfConstituentDto;
-import com.teamfp.aistock.infra.ls.dto.LsExpectedIndexDto;
-import com.teamfp.aistock.infra.ls.dto.LsFinancialRankingDto;
-import com.teamfp.aistock.infra.ls.dto.LsForeignInstitutionalTrendDto;
-import com.teamfp.aistock.infra.ls.dto.LsHistoricalPriceDto;
-import com.teamfp.aistock.infra.ls.dto.LsIndustryPriceDto;
-import com.teamfp.aistock.infra.ls.dto.LsIndustryTrendDto;
-import com.teamfp.aistock.infra.ls.dto.LsInvestmentOpinionDto;
-import com.teamfp.aistock.infra.ls.dto.LsInvestorTypeSummaryDto;
-import com.teamfp.aistock.infra.ls.dto.LsMarketInvestorComparisonDto;
-import com.teamfp.aistock.infra.ls.dto.LsMarketLiquidityDto;
-import com.teamfp.aistock.infra.ls.dto.LsMultiStockPriceDto;
-import com.teamfp.aistock.infra.ls.dto.LsNewListingDto;
-import com.teamfp.aistock.infra.ls.dto.LsOverseasIndexDto;
-import com.teamfp.aistock.infra.ls.dto.LsPivotLevelDto;
-import com.teamfp.aistock.infra.ls.dto.LsProgramTradingRankDto;
-import com.teamfp.aistock.infra.ls.dto.LsProgramTradingSnapshotDto;
-import com.teamfp.aistock.infra.ls.dto.LsRankingItemDto;
-import com.teamfp.aistock.infra.ls.dto.LsShareholderMeetingDto;
-import com.teamfp.aistock.infra.ls.dto.LsShortSellingTrendDto;
-import com.teamfp.aistock.infra.ls.dto.LsStockCreditInfoDto;
-import com.teamfp.aistock.infra.ls.dto.LsStockMasterInfoDto;
-import com.teamfp.aistock.infra.ls.dto.LsStockRiskFlagDto;
-import com.teamfp.aistock.infra.ls.dto.LsThemeConstituentDto;
-import com.teamfp.aistock.infra.ls.dto.LsThemeDto;
+import com.teamfp.aistock.infra.marketdata.EtcApiClient;
+import com.teamfp.aistock.infra.marketdata.EtfApiClient;
+import com.teamfp.aistock.infra.marketdata.HighItemApiClient;
+import com.teamfp.aistock.infra.marketdata.IndustryApiClient;
+import com.teamfp.aistock.infra.marketdata.InvestInfoApiClient;
+import com.teamfp.aistock.infra.marketdata.InvestorApiClient;
+import com.teamfp.aistock.infra.marketdata.InvestorTrendApiClient;
+import com.teamfp.aistock.infra.marketdata.MarketDataApiClient;
+import com.teamfp.aistock.infra.marketdata.ProgramApiClient;
+import com.teamfp.aistock.infra.marketdata.SectorApiClient;
+import com.teamfp.aistock.infra.marketdata.dto.CallAuctionPriceDto;
+import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
+import com.teamfp.aistock.infra.marketdata.dto.EtfConstituentDto;
+import com.teamfp.aistock.infra.marketdata.dto.ExpectedIndexDto;
+import com.teamfp.aistock.infra.marketdata.dto.FinancialRankingDto;
+import com.teamfp.aistock.infra.marketdata.dto.ForeignInstitutionalTrendDto;
+import com.teamfp.aistock.infra.marketdata.dto.HistoricalPriceDto;
+import com.teamfp.aistock.infra.marketdata.dto.IndustryPriceDto;
+import com.teamfp.aistock.infra.marketdata.dto.IndustryTrendDto;
+import com.teamfp.aistock.infra.marketdata.dto.InvestmentOpinionDto;
+import com.teamfp.aistock.infra.marketdata.dto.InvestorTypeSummaryDto;
+import com.teamfp.aistock.infra.marketdata.dto.MarketInvestorComparisonDto;
+import com.teamfp.aistock.infra.marketdata.dto.MarketLiquidityDto;
+import com.teamfp.aistock.infra.marketdata.dto.MultiStockPriceDto;
+import com.teamfp.aistock.infra.marketdata.dto.NewListingDto;
+import com.teamfp.aistock.infra.marketdata.dto.OverseasIndexDto;
+import com.teamfp.aistock.infra.marketdata.dto.PivotLevelDto;
+import com.teamfp.aistock.infra.marketdata.dto.ProgramTradingRankDto;
+import com.teamfp.aistock.infra.marketdata.dto.ProgramTradingSnapshotDto;
+import com.teamfp.aistock.infra.marketdata.dto.RankingItemDto;
+import com.teamfp.aistock.infra.marketdata.dto.ShareholderMeetingDto;
+import com.teamfp.aistock.infra.marketdata.dto.ShortSellingTrendDto;
+import com.teamfp.aistock.infra.marketdata.dto.StockCreditInfoDto;
+import com.teamfp.aistock.infra.marketdata.dto.StockMasterInfoDto;
+import com.teamfp.aistock.infra.marketdata.dto.StockRiskFlagDto;
+import com.teamfp.aistock.infra.marketdata.dto.ThemeConstituentDto;
+import com.teamfp.aistock.infra.marketdata.dto.ThemeDto;
 import com.teamfp.aistock.infra.naver.NaverNewsApiClient;
 import com.teamfp.aistock.infra.naver.dto.NaverNewsSearchRequest;
 import com.teamfp.aistock.infra.naver.dto.NaverNewsSearchResponse;
@@ -135,7 +135,7 @@ public class AiPlanningService {
     private static final String FOREIGN_INSTITUTIONAL_TREND_TOOL_NAME = "get_foreign_institutional_trend";
     private static final String INVESTMENT_OPINION_TOOL_NAME = "get_investment_opinion";
     private static final String SHAREHOLDER_MEETING_TOOL_NAME = "get_shareholder_meeting_schedule";
-    // 2026-08-11 추가 — LS API 213개 전수조사·2차 필터링 결과 확정된 도구들. 원본 TR은
+    // 2026-08-11 추가 — 외부 시세 데이터 API 213개 전수조사·2차 필터링 결과 확정된 도구들. 원본 TR은
     // 45개였지만, 도구 하나당 TR 하나씩 그대로 노출하면 Gemini에게 매 판단마다 건네는 도구
     // 목록이 50개를 훌쩍 넘어(기존 9개+45개=54개) 판단 정확도·프롬프트 비용 모두 나빠진다.
     // DISCLOSURE_TOOL/CAPITAL_CHANGE_TOOL이 이미 쓰던 "여러 TR을 종류 파라미터 하나로 묶는"
@@ -159,6 +159,22 @@ public class AiPlanningService {
     private static final String STOCK_MASTER_INFO_TOOL_NAME = "get_stock_master_info";
     private static final String INDUSTRY_INFO_TOOL_NAME = "get_industry_info";
 
+    // 외부 시세 데이터 도구(22개) 전체가 ai:tool 세션 캐시(RedisAiToolCacheService) 대상에서 제외된다(2026-08-31,
+    // feature/ls-local-data A-6) — DART/네이버와 달리 외부 시세 데이터 시세·순위·동향류 데이터는 30분 세션
+    // 캐시에 태우기엔 갱신 주기가 짧아, 낡은 값이 캐시 유효시간(30분) 동안 재사용되는 문제가
+    // 생긴다. 이 중 이름만으로 항상 외부 시세 데이터인 21개(시세류 3개 + 이번에 추가된 18개)는 이 Set으로
+    // 판정하고, get_etf_info(같은 도구 안에서 infoType이 PRICE면 외부 시세 데이터 실시간 조회·CONSTITUENTS면
+    // 자주 안 바뀌는 구성종목 비중이라 캐시 유지 대상)만은 이름이 아니라 인자값으로 갈라야 해서
+    // 이 Set에 넣지 않고 executeTool()에서 별도 조건으로 처리한다.
+    private static final Set<String> MARKET_DATA_CACHE_BYPASS_TOOL_NAMES = Set.of(
+            CURRENT_PRICE_TOOL_NAME, MULTI_STOCK_PRICE_TOOL_NAME, CALL_AUCTION_PRICE_TOOL_NAME,
+            FOREIGN_INSTITUTIONAL_TREND_TOOL_NAME, INVESTMENT_OPINION_TOOL_NAME, SHAREHOLDER_MEETING_TOOL_NAME,
+            MARKET_RANKING_TOOL_NAME, THEME_INFO_TOOL_NAME, FINANCIAL_RANKING_TOOL_NAME,
+            OVERSEAS_INDEX_TOOL_NAME, MARKET_LIQUIDITY_TOOL_NAME, TECHNICAL_SIGNAL_TOOL_NAME,
+            HISTORICAL_PRICE_TOOL_NAME, RISK_FLAG_TOOL_NAME, STOCK_CREDIT_INFO_TOOL_NAME,
+            PROGRAM_TRADING_SUMMARY_TOOL_NAME, INVESTOR_TREND_SUMMARY_TOOL_NAME, NEW_LISTING_STOCKS_TOOL_NAME,
+            SHORT_SELLING_TREND_TOOL_NAME, STOCK_MASTER_INFO_TOOL_NAME, INDUSTRY_INFO_TOOL_NAME);
+
     // 실제 API로 검증한 결과(2026-08-03), Gemini는 도구 실행 결과가 마음에 안 들면 검색어를
     // 바꿔 도구를 다시 요청하는 등 한 턴에 도구 호출을 여러 번 반복할 수 있었다 — "판단 1번 +
     // 도구실행 1번"으로 끝난다고 가정할 수 없다. 무한 루프를 막기 위해 도구 호출을 최대 이
@@ -176,6 +192,19 @@ public class AiPlanningService {
     // "도구 1라운드(도구 몇 개든 동시에) + 강제 마지막 응답" 2번으로 끝난다 — 유료 등급으로
     // 전환하기 전까지의 임시 조치다.
     private static final int MAX_TOOL_CALL_ROUNDS = 1;
+
+    // 2026-09-24 추가 — 라이브 테스트에서, SYSTEM_PREAMBLE의 [도구 호출과 함께 보내는 텍스트]
+    // 절대 규칙("도구가 필요하면 반드시 실제 functionCall로 요청하고, 흉내만 내는 텍스트로
+    // 끝내지 마라")이 있는데도 가끔 어기는 사례가 확인됐다 — 실제 functionCall 없이
+    // "(도구 호출: get_market_ranking(...), get_industry_info(...))"처럼 내부 처리 과정을
+    // 텍스트로 그대로 노출하고 끝내버렸다. 프롬프트 지시만으로는 모델이 100% 따르지 않는
+    // 확률적 이탈이라(호칭을 "사용자님"으로 고정하라는 지시도 종종 어겨지는 것과 같은
+    // 종류의 문제), 이런 패턴이 보이면 그 응답을 사용자에게 그대로 보내지 않고 같은
+    // 라운드를 다시 요청해서 걸러낸다. 실제 함수 호출 문법(예: get_xxx(param='value'))은
+    // 자연스러운 한국어 대화 문장에 나올 리 없는 패턴이라 오탐 위험이 낮다.
+    private static final java.util.regex.Pattern FAKE_TOOL_CALL_NARRATION_PATTERN =
+            java.util.regex.Pattern.compile("[a-zA-Z_][a-zA-Z0-9_]*\\([a-zA-Z_][a-zA-Z0-9_]*\\s*=");
+    private static final int MAX_FAKE_TOOL_CALL_RETRIES = 2;
 
     /**
      * "판단 로직"의 핵심 — 사용자 문장을 원문 그대로 검색어로 쓰지 않고, Gemini 스스로 이
@@ -394,9 +423,9 @@ public class AiPlanningService {
             List.of("companyName", "disclosureType"));
 
     /**
-     * LS증권 Open API로 종목 현재가를 그때그때 REST 조회하는 도구(LsMarketDataApiClient 참고,
+     * 외부 시세 데이터 제공사 Open API로 종목 현재가를 그때그때 REST 조회하는 도구(MarketDataApiClient 참고,
      * 2026-08-07 추가, 2026-08-10 PER/PBR/52주 최고·최저/상장주식수/외국인 소진율 추가). 장중이면
-     * 실시간 체결가, 장 마감 후라면 LS가 돌려주는 마지막 체결가를 받는다. DART/네이버와 달리
+     * 실시간 체결가, 장 마감 후라면 외부 시세 데이터가 돌려주는 마지막 체결가를 받는다. DART/네이버와 달리
      * 시점에 따라 값이 계속 바뀌는 조회라 executeTool()의 세션 캐시(30분 TTL) 대상에서 제외한다
      * — CURRENT_PRICE_TOOL_NAME 분기 참고.
      */
@@ -413,7 +442,7 @@ public class AiPlanningService {
             List.of("companyName"));
 
     /**
-     * LS증권 Open API 외인기관종목별동향(t1716) 조회 도구(LsInvestorTrendApiClient 참고,
+     * 외부 시세 데이터 제공사 Open API 외인기관종목별동향(t1716) 조회 도구(InvestorTrendApiClient 참고,
      * 2026-08-10 추가). DART의 get_ownership_info(대량보유상황보고 — 특정 투자자가 5% 이상
      * 보유하게 됐을 때만 나오는 개별 신고)와 명확히 다른 주제라는 걸 설명에 명시해, "외국인이
      * 얼마나 갖고 있어?" 같은 질문에서 두 도구가 겹쳐 보이지 않게 한다.
@@ -434,7 +463,7 @@ public class AiPlanningService {
             List.of("companyName"));
 
     /**
-     * LS증권 Open API 투자의견(t3401) 조회 도구(LsInvestInfoApiClient 참고, 2026-08-10 추가).
+     * 외부 시세 데이터 제공사 Open API 투자의견(t3401) 조회 도구(InvestInfoApiClient 참고, 2026-08-10 추가).
      * 뉴스(search_securities_news)가 "목표주가 상향" 같은 소식을 정성적 기사로 다룰 수 있지만,
      * 실제 수치(옛/새 투자의견, 옛/새 목표주가, 증권사명)가 필요한 질문은 이 도구로만 정확히
      * 답할 수 있다는 걸 설명에 명시해 역할을 분리한다.
@@ -453,8 +482,8 @@ public class AiPlanningService {
             List.of("companyName"));
 
     /**
-     * LS증권 Open API 종목별증시일정(t3202) 중 주주총회만 필터링해 제공하는 도구
-     * (LsInvestInfoApiClient.getShareholderMeetingSchedule() 참고, 2026-08-10 추가). t3202는
+     * 외부 시세 데이터 제공사 Open API 종목별증시일정(t3202) 중 주주총회만 필터링해 제공하는 도구
+     * (InvestInfoApiClient.getShareholderMeetingSchedule() 참고, 2026-08-10 추가). t3202는
      * 배당·유상증자·감자·합병분할 등 14종 일정을 다 주지만, 그 항목들은 이미 DART 도구
      * (get_disclosure_info의 "배당사항", get_capital_change_info, "감자결정", "회사분할결정" 등)가
      * 담당하므로 이 도구는 DART가 구조화된 형태로 다루지 않는 "주주총회 날짜"만 노출한다 —
@@ -474,9 +503,9 @@ public class AiPlanningService {
             List.of("companyName"));
 
     /**
-     * 시장 전체를 한 조건으로 훑어 상위 N개 종목을 뽑는 7가지 랭킹(LsHighItemApiClient 참고)을
+     * 시장 전체를 한 조건으로 훑어 상위 N개 종목을 뽑는 7가지 랭킹(HighItemApiClient 참고)을
      * rankingType 하나로 묶은 도구(2026-08-11 추가). 시간외등락률/시간외거래량은 시간외 거래
-     * 시간대(15:30~18:00)에만 실제 데이터가 의미 있어, 그 시간대가 아니면 LS를 호출하지 않고
+     * 시간대(15:30~18:00)에만 실제 데이터가 의미 있어, 그 시간대가 아니면 외부 시세 데이터를 호출하지 않고
      * "지금은 확인할 수 있는 시간이 아니다"로 안내한다(executeMarketRankingLookup() 참고).
      */
     private static final GeminiRequest.ToolDeclaration MARKET_RANKING_TOOL = new GeminiRequest.ToolDeclaration(
@@ -499,7 +528,7 @@ public class AiPlanningService {
 
     /**
      * 테마 관련 3가지 질문(테마명으로 구성종목 찾기/특정 종목이 속한 테마/오늘 핫테마)을 mode
-     * 하나로 묶은 도구(LsSectorApiClient 참고, 2026-08-11 추가).
+     * 하나로 묶은 도구(SectorApiClient 참고, 2026-08-11 추가).
      */
     private static final GeminiRequest.ToolDeclaration THEME_INFO_TOOL = new GeminiRequest.ToolDeclaration(
             THEME_INFO_TOOL_NAME,
@@ -519,7 +548,7 @@ public class AiPlanningService {
 
     /**
      * 재무지표(ROE/PER/PBR 등) 기준 전체 종목 랭킹(t3341, 2026-08-11 추가). 앞서 "시장 전체
-     * 랭킹은 LS에 없다"고 판단했던 게, 재무지표 한정으로는 실제로 존재함이 확인된 도구다.
+     * 랭킹은 외부 시세 데이터에 없다"고 판단했던 게, 재무지표 한정으로는 실제로 존재함이 확인된 도구다.
      */
     private static final GeminiRequest.ToolDeclaration FINANCIAL_RANKING_TOOL = new GeminiRequest.ToolDeclaration(
             FINANCIAL_RANKING_TOOL_NAME,
@@ -676,7 +705,7 @@ public class AiPlanningService {
     /**
      * 업종 시세 통합 도구(2026-08-11 추가) — 업종현재가/최근 추이/예상지수(게이트) 3개 TR을
      * mode로 묶는다. marketName은 2026-08-11 기준 코스피/코스닥만 지원한다
-     * (LsIndustryApiClient.INDUSTRY_CODE_BY_NAME 참고).
+     * (IndustryApiClient.INDUSTRY_CODE_BY_NAME 참고).
      */
     private static final GeminiRequest.ToolDeclaration INDUSTRY_INFO_TOOL = new GeminiRequest.ToolDeclaration(
             INDUSTRY_INFO_TOOL_NAME,
@@ -729,7 +758,7 @@ public class AiPlanningService {
             하나로 모든 경우를 커버한다. 이전에는 "이 도구는 이럴 때 써라"만 나열해서, 뉴스
             도구와 공시 도구가 겹치는 주제(예: 배당·소송)를 어느 쪽으로 판단해야 하는지, 애초에
             스물일곱 도구 중 아무것도 필요 없는 질문(잡담, 서비스 사용법 등)을 어떻게 걸러내는지에
-            대한 기준이 빠져 있었다. 2026-08-10에 추가된 3개 도구는 LS(외국인/기관 동향·투자의견·
+            대한 기준이 빠져 있었다. 2026-08-10에 추가된 3개 도구는 외부 시세 데이터(외국인/기관 동향·투자의견·
             주주총회일정)와 DART(대량보유상황보고·뉴스·배당사항 등) 도구가 표면적으로 비슷한
             주제를 다루는 것처럼 보여 혼동될 위험이 있어, 아래 2단계에 "겹치는 주제 구분" 절을
             별도로 추가했다.)
@@ -796,7 +825,7 @@ public class AiPlanningService {
               먼저 물어봐서 대화를 좁혀가라. 이 경우도 [애매한 질문에 되물을 때의 태도]를
               지켜서, "특정할 수 없다"는 식으로 반박하지 말고 부드럽게 안내해라.
             - "지금 가격 얼마야?", "지금 얼마에 거래되고 있어?"처럼 현재가를 물으면
-              get_current_price를 써라(2026-08-07 추가 — LS증권에 그때그때 직접 조회하며,
+              get_current_price를 써라(2026-08-07 추가 — 외부 시세 데이터 제공사에 그때그때 직접 조회하며,
               장중이면 실시간가, 장 마감 후면 마지막 체결가를 받는다). 다만 "지금 호가가
               어떻게 돼?"처럼 매수·매도 호가창 자체를 묻는 건 이 도구로도 다루지 않으니,
               아래처럼 없는 기능을 흉내내지 말고 솔직히 안내해라.
@@ -805,7 +834,7 @@ public class AiPlanningService {
               받고도 "집계 방식 차이로 정확한 수치를 안내하기 어렵다"며 얼버무리는 사례가
               확인됨). 결과에 누적 거래량이 와 있으면 그 숫자를 그대로 인용해서 답하고,
               실시간성이나 증권사별 집계 차이를 이유로 회피하지 마라 — 그 값 자체가 이미
-              LS증권에서 그때그때 직접 받아온 실측치다.
+              외부 시세 데이터 제공사에서 그때그때 직접 받아온 실측치다.
             - 투자와 관련은 있지만 스물일곱 도구 중 어떤 것도 다루지 않는 요청(예: 실시간 호가창,
               또는 일반적인 증권 용어·개념 설명)이면, 없는 도구를 억지로 끼워 맞추거나
               조회하는 척 흉내내지 마라(2026-08-07 추가 — 이 경우에 [도구 호출과 함께 보내는
@@ -832,7 +861,7 @@ public class AiPlanningService {
               증권사 투자의견·목표주가 수치 → get_investment_opinion. 주주총회 날짜 →
               get_shareholder_meeting_schedule. 목록에 없는 주제면 이 도구도 쓰지 말고 확인할
               수 없는 정보라고 답해라.
-            - 겹치는 주제 구분(2026-08-10 추가 — LS 도구 3개와 DART 도구가 표면적으로 비슷해
+            - 겹치는 주제 구분(2026-08-10 추가 — 외부 시세 데이터 도구 3개와 DART 도구가 표면적으로 비슷해
               보이는 주제를 다룰 때 반드시 이 기준으로 갈라라):
               (1) "외국인이 이 종목 사고 있어?"(그룹 전체의 최근 매매 동향) →
               get_foreign_institutional_trend. "최대주주가 누구야?"/"5% 이상 보유한 사람 바뀌었어?"
@@ -894,9 +923,9 @@ public class AiPlanningService {
               이미 정해졌고 도구 파라미터 하나만 안 정해진 경우는 이 원칙대로 스스로 정해서 바로
               실행해라.
 
-            [확인해줄 수 없는 요청을 안내하는 방식] (2026-08-11 추가 — LS API 213개 전수조사
+            [확인해줄 수 없는 요청을 안내하는 방식] (2026-08-11 추가 — 외부 시세 데이터 API 213개 전수조사
             과정에서 "질문은 자연스러운데 신뢰할 만한 도구가 없는" 경우가 실제로 있음을 확인
-            (예: 이동평균선 — LS가 제공하는 값이 조건 조합에 따라 자주 비어 신뢰도가 낮음).
+            (예: 이동평균선 — 외부 시세 데이터가 제공하는 값이 조건 조합에 따라 자주 비어 신뢰도가 낮음).
             이런 요청은 아래 3단계 틀로 항상 같은 방식으로 안내해라.
             1) 인정: "그 부분은 제가 정확히 알려드리기 어려워요"처럼 먼저 솔직히 인정해라.
             2) 이유: 왜 안 되는지 구체적으로 설명해라 — 데이터 신뢰도가 낮아서, 차트처럼 눈으로
@@ -926,6 +955,13 @@ public class AiPlanningService {
               친구 같은 재무설계사다. "핵심 요약 / 근거 / 실행 조언" 같은 제목이 달린 항목별
               리포트 형식으로 딱딱하게 끊어 쓰지 말고, 사람이 옆에서 말로 설명해주듯 자연스러운
               대화체 문단으로 풀어서 답해라.
+            - 마크다운 문법을 쓰지 말고 순수한 평문으로만 답해라(2026-09-25 추가 — 라이브
+              테스트에서 답변에 "**종목명**"(굵게), "* 항목"(글머리 기호) 같은 마크다운 문법이
+              섞여 나오는 게 반복 확인됨. 이 채팅 화면은 마크다운을 해석해서 굵게·목록으로
+              그려주지 않고 별표 기호를 문자 그대로 노출하므로, 강조하고 싶은 단어가 있어도
+              별표로 감싸지 말고 그냥 문장 안에서 자연스럽게 강조해라(예: "특히 삼성전자가
+              주목받고 있어요"). 여러 항목을 나열할 때도 글머리 기호나 번호 목록 대신, 쉼표나
+              "그리고", 줄바꿈으로 자연스럽게 풀어써라.
             - 한 번의 답변에 모든 걸 욱여넣지 마라. 실제 재무설계사도 손님을 만나자마자 결론부터
               쏟아붓지 않고, 대화를 주고받으며 조금씩 이해시킨다. 새 주제가 나오면 먼저 핵심
               정보 한두 가지만 짧게 짚어주고, 사용자의 반응·후속 질문을 따라가며 대화를
@@ -951,6 +987,11 @@ public class AiPlanningService {
             - 확정적인 수익을 보장하는 듯한 표현은 쓰지 말고, 참고용 정보임을 자연스럽게
               언급해라 — 매번 정형화된 면책 문구를 따로 떼어 붙이지 말고 설명 흐름 안에 녹여라.
             - 사용자의 투자성향에 맞춰 설명 난이도와 톤을 조절해라.
+            - 사용자를 부를 때는 투자 레벨과 무관하게 항상 "사용자님"으로 통일해라(2026-09-21
+              추가 — 라이브 테스트에서 투자 레벨을 "전문가님"처럼 등급별 호칭으로 바꿔 부르는
+              현상이 확인됨). "전문가님", "고수님"처럼 레벨을 반영한 호칭을 만들어 부르지 마라
+              — 투자 레벨은 설명 난이도·톤 조절에만 참고하고, 호칭 자체는 항상 "사용자님"으로
+              고정한다.
             - 톤은 친근하되 차분해야 한다(2026-08-11 추가 — 라이브 테스트에서 "영업 톤 같다",
               "너무 촐싹댄다"는 피드백을 받음). "걱정 마세요!", "아주 쉽게!"처럼 느낌표와
               과장된 감탄사를 남발하지 마라. 매 답변 끝마다 습관적으로 "~해볼까요?"를 붙이는
@@ -979,6 +1020,14 @@ public class AiPlanningService {
               명시적 조회 질문에는 이 원칙을 강요하지 마라. 그런 질문은 물어본 값만 정확히
               답하고 끝내도 충분하다 — 매 답변 끝에 습관적으로 다음 종목·다음 화제를
               끼워 넣지 말고, 자연스럽게 이어질 만한 맥락이 있을 때만 짧게 얹어라.
+            - "추천해줘", "골라줘", "찝어줘"처럼 사용자가 구체적인 답을 직접 요청하면(2026-09-24
+              추가 — 라이브 테스트에서 사용자가 "추천해줄래?"라고 명확히 물었는데도 "어떤
+              업종이 궁금하세요?"처럼 되묻기만 하고 실제 종목명을 하나도 안 주는 회피 패턴이
+              확인됨), 조건을 더 물어 대답을 미루지 마라. 지금까지 나눈 대화 맥락(투자성향,
+              앞서 언급된 업종·종목)만으로 지금 답할 수 있으면, 실제 종목명을 최소 1~3개
+              짚어서 제시하고 각각 왜 골랐는지 한 줄 이유를 붙여라. 더 물어볼 조건이 있더라도
+              질문부터 던지지 말고 "이 중에서는 A, B가 있는데, 혹시 배당을 더 중요하게
+              보시나요?"처럼 답을 먼저 주고 나서 덧붙여라.
             - search_securities_news, get_disclosure_info 결과에는 각 항목마다 "(링크: ...)"
               형태로 원문 URL이 함께 온다. 사용자가 따로 요청하지 않아도, 뉴스나 공시 내용을
               인용해서 답할 때는 그 링크를 답변 끝에 자연스럽게 붙여줘라(예: "자세한 내용은
@@ -1023,36 +1072,35 @@ public class AiPlanningService {
     // Holding/RedisStockCacheService를 직접 참조하지 않고 order 도메인이 이미 공용으로 쓰는
     // 평가 로직을 그대로 재사용한다(AccountService와 동일한 방식 — 도메인 경계 준수).
     private final HoldingValuationService holdingValuationService;
-    private final RedisRateLimiterService rateLimiterService;
     private final RedisAiToolCacheService aiToolCacheService;
     private final GeminiApiClient geminiApiClient;
     private final DartApiClient dartApiClient;
     private final NaverNewsApiClient naverNewsApiClient;
     // get_current_price 도구 전용 — 회사명→stockCode(DartApiClient) 변환 후 이 클라이언트로
-    // LS증권 현재가를 그때그때 REST 조회한다(LsMarketDataApiClient 클래스 주석 참고).
-    private final LsMarketDataApiClient lsMarketDataApiClient;
+    // 외부 시세 데이터 제공사 현재가를 그때그때 REST 조회한다(MarketDataApiClient 클래스 주석 참고).
+    private final MarketDataApiClient marketDataApiClient;
     // get_foreign_institutional_trend 도구 전용(2026-08-10 추가) — 외국인/기관 순매수 동향.
-    private final LsInvestorTrendApiClient lsInvestorTrendApiClient;
+    private final InvestorTrendApiClient investorTrendApiClient;
     // get_investment_opinion/get_shareholder_meeting_schedule/get_financial_ranking/
     // get_overseas_index/get_market_liquidity_trend 도구 전용(2026-08-10 3개 추가,
-    // 2026-08-11 3개 추가) — 전부 같은 LS "투자정보" 카테고리(/stock/investinfo)를 공유해
+    // 2026-08-11 3개 추가) — 전부 같은 외부 시세 데이터 "투자정보" 카테고리(/stock/investinfo)를 공유해
     // 클라이언트 하나로 묶었다.
-    private final LsInvestInfoApiClient lsInvestInfoApiClient;
+    private final InvestInfoApiClient investInfoApiClient;
     // get_market_ranking 도구 전용(2026-08-11 추가) — /stock/high-item 카테고리 7개 TR.
-    private final LsHighItemApiClient lsHighItemApiClient;
+    private final HighItemApiClient highItemApiClient;
     // get_theme_info 도구 전용(2026-08-11 추가) — /stock/sector 카테고리.
-    private final LsSectorApiClient lsSectorApiClient;
+    private final SectorApiClient sectorApiClient;
     // get_etf_info 도구 전용(2026-08-11 추가) — /stock/etf 카테고리.
-    private final LsEtfApiClient lsEtfApiClient;
+    private final EtfApiClient etfApiClient;
     // get_program_trading_summary 도구 전용(2026-08-11 추가) — /stock/program 카테고리.
-    private final LsProgramApiClient lsProgramApiClient;
+    private final ProgramApiClient programApiClient;
     // get_investor_trend_summary 도구 전용(2026-08-11 추가) — /stock/investor 카테고리.
-    private final LsInvestorApiClient lsInvestorApiClient;
+    private final InvestorApiClient investorApiClient;
     // get_stock_credit_info/get_new_listing_stocks/get_short_selling_trend/get_stock_master_info
     // 도구 전용(2026-08-11 추가) — /stock/etc 카테고리.
-    private final LsEtcApiClient lsEtcApiClient;
+    private final EtcApiClient etcApiClient;
     // get_industry_info 도구 전용(2026-08-11 추가) — /indtp/market-data 카테고리.
-    private final LsIndustryApiClient lsIndustryApiClient;
+    private final IndustryApiClient industryApiClient;
     // Gemini가 한 라운드에서 여러 도구를 동시에 요청하면(parallel function calling) 이 풀로
     // 실제로 동시에 실행한다 — AsyncConfig.aiToolTaskExecutor() 참고.
     @Qualifier("aiToolTaskExecutor")
@@ -1118,20 +1166,11 @@ public class AiPlanningService {
      * "성공 이후"에 저장하는 이유는 saveTurn()의 주석 참고 — 실패 시 AI 응답 없는 메시지가 남는
      * 것을 막기 위함이다.
      *
-     * 한 턴 안에서 converseWithTools()가 Gemini를 1번(도구 불필요) 또는 2번(도구 사용) 부를 수
-     * 있지만, rate limit 카운터는 "사용자 턴" 기준으로 여기서 1번만 increment한다 — 분당3/
-     * 일일10 한도는 원래 "사용자가 몇 번 물어봤는지" 기준으로 잡힌 정책이라, 내부적으로 몇 번
-     * Gemini를 호출했는지는 사용자 체감 한도와 무관하게 숨긴다.
+     * 분당3/일일10 자체 호출 제한(RedisRateLimiterService)은 2026-09-21 사용자 요청으로
+     * 제거했다 — "몇 번 대화하다 짤리면 안 된다"는 이유로, 이제는 Gemini API 자체 한도에만
+     * 걸린다.
      */
     public AiChatResponse sendMessage(Long userId, Long sessionId, AiChatRequest request) {
-        if (!rateLimiterService.isAllowed(userId)) {
-            throw new CustomException(ErrorCode.GEMINI_RATE_LIMIT_EXCEEDED);
-        }
-        // RedisRateLimiterService 계약: isAllowed() 통과 "직후"에 increment한다(javadoc 참고).
-        // 뒤이은 DART/Tavily/Gemini 호출까지 기다렸다가 increment하면, 한도 직전에 몰린 동시
-        // 요청이 서로 increment 전에 isAllowed()를 통과해버려 한도를 우회할 수 있다.
-        rateLimiterService.increment(userId);
-
         List<HistoryTurn> history = self.loadHistory(userId, sessionId);
 
         GeminiResponse geminiResponse = converseWithTools(userId, sessionId, request.content(), history);
@@ -1193,8 +1232,20 @@ public class AiPlanningService {
             // 쓴다. 판단 라운드에서 도구 없이 바로 텍스트로 답하는 경우(잡담·되묻기 등)는 그
             // 자체가 "단순 작업"이라 JUDGE 모델의 답을 최종 답변으로 그대로 쓴다.
             GeminiRequest.GeminiModel model = isFinalRound ? GeminiRequest.GeminiModel.ANSWER : GeminiRequest.GeminiModel.JUDGE;
-            GeminiResponse response = geminiApiClient.generate(
-                    new GeminiRequest(SYSTEM_PREAMBLE, prompt, history, toolsForThisRound, exchangeRounds, model));
+            GeminiRequest request = new GeminiRequest(SYSTEM_PREAMBLE, prompt, history, toolsForThisRound, exchangeRounds, model);
+            GeminiResponse response = geminiApiClient.generate(request);
+
+            int fakeCallRetries = 0;
+            while (isFakeToolCallNarration(response) && fakeCallRetries < MAX_FAKE_TOOL_CALL_RETRIES) {
+                log.warn("가짜 도구 호출 서술 감지, 재시도 {}/{}회 - userId: {}, content: {}",
+                        fakeCallRetries + 1, MAX_FAKE_TOOL_CALL_RETRIES, userId, response.content());
+                response = geminiApiClient.generate(request);
+                fakeCallRetries++;
+            }
+            if (isFakeToolCallNarration(response)) {
+                log.error("가짜 도구 호출 서술이 재시도 후에도 반복됨 - userId: {}, content: {}", userId, response.content());
+                return new GeminiResponse("죄송합니다, 지금은 답변을 완성하지 못했습니다 — 잠시 후 다시 한 번 질문해 주시겠어요?", null);
+            }
 
             if (!response.isFunctionCall()) {
                 if (confirmedCurrentPrices.isEmpty()) {
@@ -1221,11 +1272,10 @@ public class AiPlanningService {
             // 그대로 유지된다.
             //
             // aiToolTaskExecutor(코어10/최대20/큐200)가 포화되면 supplyAsync()가
-            // RejectedExecutionException을 즉시 던진다(코드리뷰 반영) — 이 시점엔 이미
-            // sendMessage()에서 rateLimiterService.increment()로 이번 턴 할당량이 소모된
-            // 뒤라, 여기서 예외가 그대로 위로 새어나가면 사용자는 500만 받고 대화 기록도 안
-            // 남는다(위 "tools 없이 보낸 마지막 라운드" 방어와 같은 원칙). 잡아서 다른
-            // 도구 실패와 동일하게 안내 문구로 이번 턴을 끝낸다.
+            // RejectedExecutionException을 즉시 던진다(코드리뷰 반영) — 여기서 예외가 그대로
+            // 위로 새어나가면 사용자는 500만 받고 대화 기록도 안 남는다(위 "tools 없이 보낸
+            // 마지막 라운드" 방어와 같은 원칙). 잡아서 다른 도구 실패와 동일하게 안내 문구로
+            // 이번 턴을 끝낸다.
             List<CompletableFuture<GeminiRequest.FunctionExchange>> exchangeFutures;
             try {
                 exchangeFutures = response.functionCalls().stream()
@@ -1249,11 +1299,20 @@ public class AiPlanningService {
 
         // tools 없이 보낸 마지막 라운드는 API 규격상 functionCall을 낼 수 없어 이 지점에 도달하지
         // 않아야 하지만, 혹시 Gemini가 규격을 어기고 functionCall만 반환하면 CustomException을
-        // 던지는 대신 안전한 안내 문구로 답을 완성한다 — 이미 rateLimiterService.increment()로
-        // 이번 턴의 Gemini 호출 할당량이 소모된 뒤이므로, 여기서 예외를 던지면 사용자는 응답도
-        // 대화 기록도 없이 할당량만 잃는다.
+        // 던지는 대신 안전한 안내 문구로 답을 완성한다 — 여기서 예외를 던지면 사용자는 응답도
+        // 대화 기록도 없이 이번 턴을 잃는다.
         log.error("Gemini가 도구 없이도 최종 텍스트 응답을 내지 않음 - userId: {}", userId);
         return new GeminiResponse("죄송합니다, 지금은 답변을 완성하지 못했습니다 — 잠시 후 다시 한 번 질문해 주시겠어요?", null);
+    }
+
+    // functionCall이 아닌 텍스트 응답인데, 그 내용이 "get_xxx(param='value')"처럼 실제 함수
+    // 호출 문법을 그대로 흉내 낸 경우를 걸러낸다. 이미 진짜 functionCall로 온 응답은 대상이
+    // 아니다(도구 실행 결과 문자열 자체에 비슷한 패턴이 있어도 사용자에게 그대로 노출되지 않으므로
+    // 걸러낼 필요가 없다).
+    private boolean isFakeToolCallNarration(GeminiResponse response) {
+        return !response.isFunctionCall()
+                && response.content() != null
+                && FAKE_TOOL_CALL_NARRATION_PATTERN.matcher(response.content()).find();
     }
 
     /**
@@ -1273,27 +1332,43 @@ public class AiPlanningService {
     private Map<String, Object> executeTool(
             Long sessionId, GeminiResponse.FunctionCall functionCall,
             List<ConfirmedPrice> confirmedCurrentPrices) {
-        // 실시간 시세는 5초마다 바뀌는 값이라, 나머지 도구(재무제표/공시/뉴스 등 세션 내내
-        // 크게 안 바뀌는 데이터)와 같은 30분짜리 세션 캐시에 태우면 낡은 가격을 계속 재사용하게
-        // 된다 — 그래서 공용 캐시 경로를 타지 않고 매번 새로 조회한다. get_current_price/
-        // get_multi_stock_price(ConfirmedPrice 확정 패턴 적용 대상)뿐 아니라 get_call_auction_price
-        // (동시호가 예상체결가 — 그 순간에만 유효)와 get_etf_info의 PRICE 모드(ETF 현재가. 반면
-        // CONSTITUENTS 모드는 구성종목 비중이라 자주 안 바뀌므로 캐시 대상으로 남겨둔다)도 같은
-        // 이유로 캐시를 우회해야 한다 — 이 중 하나라도 여기서 빠진 채 공용 캐시 경로만 타면, 캐시
+        // 외부 시세 데이터 22개 도구는 전부 ai:tool 세션 캐시(30분)를 우회한다(2026-08-31, A-6) — 실시간
+        // 시세는 5초마다 바뀌고, 순위/동향/공시류도 장중 계속 갱신되는 데이터라 나머지 도구
+        // (DART 재무제표·공시, 네이버 뉴스처럼 세션 내내 크게 안 바뀌는 데이터)와 같은 30분짜리
+        // 세션 캐시에 태우면 낡은 값을 계속 재사용하게 된다 — 그래서 공용 캐시 경로를 타지 않고
+        // 매번 새로 조회한다. get_etf_info만 예외적으로 인자(infoType)에 따라 갈린다 — PRICE
+        // 모드(ETF 현재가)는 캐시 우회, CONSTITUENTS 모드(구성종목 비중)는 자주 안 바뀌므로
+        // 캐시 대상으로 남겨둔다. 이 중 하나라도 여기서 빠진 채 공용 캐시 경로만 타면, 캐시
         // 히트 시 해당 도구의 실제 조회가 아예 호출되지 않아 낡은 값이 캐시 유효시간(30분) 동안
         // 조용히 재사용된다(get_multi_stock_price에서 실제로 있었던 버그, 코드리뷰로 발견돼
         // get_etf_info/get_call_auction_price에도 같은 유형이 남아있는 걸 함께 확인해 반영).
-        boolean isLivePriceTool = CURRENT_PRICE_TOOL_NAME.equals(functionCall.name())
-                || MULTI_STOCK_PRICE_TOOL_NAME.equals(functionCall.name())
-                || CALL_AUCTION_PRICE_TOOL_NAME.equals(functionCall.name())
+        boolean isMarketDataTool = MARKET_DATA_CACHE_BYPASS_TOOL_NAMES.contains(functionCall.name())
                 || (ETF_INFO_TOOL_NAME.equals(functionCall.name())
                         && !"CONSTITUENTS".equals(stringArg(functionCall.args(), "infoType")));
-        if (isLivePriceTool) {
+        if (isMarketDataTool) {
             try {
                 return switch (functionCall.name()) {
                     case CURRENT_PRICE_TOOL_NAME -> executeCurrentPriceLookup(functionCall, confirmedCurrentPrices);
                     case MULTI_STOCK_PRICE_TOOL_NAME -> executeMultiStockPriceLookup(functionCall, confirmedCurrentPrices);
                     case CALL_AUCTION_PRICE_TOOL_NAME -> executeCallAuctionPriceLookup(functionCall);
+                    case FOREIGN_INSTITUTIONAL_TREND_TOOL_NAME -> executeForeignInstitutionalTrendLookup(functionCall);
+                    case INVESTMENT_OPINION_TOOL_NAME -> executeInvestmentOpinionLookup(functionCall);
+                    case SHAREHOLDER_MEETING_TOOL_NAME -> executeShareholderMeetingLookup(functionCall);
+                    case MARKET_RANKING_TOOL_NAME -> executeMarketRankingLookup(functionCall);
+                    case THEME_INFO_TOOL_NAME -> executeThemeInfoLookup(functionCall);
+                    case FINANCIAL_RANKING_TOOL_NAME -> executeFinancialRankingLookup(functionCall);
+                    case OVERSEAS_INDEX_TOOL_NAME -> executeOverseasIndexLookup(functionCall);
+                    case MARKET_LIQUIDITY_TOOL_NAME -> executeMarketLiquidityLookup(functionCall);
+                    case TECHNICAL_SIGNAL_TOOL_NAME -> executeTechnicalSignalLookup(functionCall);
+                    case HISTORICAL_PRICE_TOOL_NAME -> executeHistoricalPriceLookup(functionCall);
+                    case RISK_FLAG_TOOL_NAME -> executeRiskFlagLookup(functionCall);
+                    case STOCK_CREDIT_INFO_TOOL_NAME -> executeStockCreditInfoLookup(functionCall);
+                    case PROGRAM_TRADING_SUMMARY_TOOL_NAME -> executeProgramTradingSummaryLookup(functionCall);
+                    case INVESTOR_TREND_SUMMARY_TOOL_NAME -> executeInvestorTrendSummaryLookup(functionCall);
+                    case NEW_LISTING_STOCKS_TOOL_NAME -> executeNewListingStocksLookup(functionCall);
+                    case SHORT_SELLING_TREND_TOOL_NAME -> executeShortSellingTrendLookup(functionCall);
+                    case STOCK_MASTER_INFO_TOOL_NAME -> executeStockMasterInfoLookup(functionCall);
+                    case INDUSTRY_INFO_TOOL_NAME -> executeIndustryInfoLookup(functionCall);
                     default -> executeEtfInfoLookup(functionCall);
                 };
             } catch (RuntimeException e) {
@@ -1320,24 +1395,6 @@ public class AiPlanningService {
                 case CAPITAL_CHANGE_TOOL_NAME -> executeCapitalChangeLookup(functionCall);
                 case OWNERSHIP_TOOL_NAME -> executeOwnershipLookup(functionCall);
                 case DISCLOSURE_TOOL_NAME -> executeDisclosureLookup(functionCall);
-                case FOREIGN_INSTITUTIONAL_TREND_TOOL_NAME -> executeForeignInstitutionalTrendLookup(functionCall);
-                case INVESTMENT_OPINION_TOOL_NAME -> executeInvestmentOpinionLookup(functionCall);
-                case SHAREHOLDER_MEETING_TOOL_NAME -> executeShareholderMeetingLookup(functionCall);
-                case MARKET_RANKING_TOOL_NAME -> executeMarketRankingLookup(functionCall);
-                case THEME_INFO_TOOL_NAME -> executeThemeInfoLookup(functionCall);
-                case FINANCIAL_RANKING_TOOL_NAME -> executeFinancialRankingLookup(functionCall);
-                case OVERSEAS_INDEX_TOOL_NAME -> executeOverseasIndexLookup(functionCall);
-                case MARKET_LIQUIDITY_TOOL_NAME -> executeMarketLiquidityLookup(functionCall);
-                case TECHNICAL_SIGNAL_TOOL_NAME -> executeTechnicalSignalLookup(functionCall);
-                case HISTORICAL_PRICE_TOOL_NAME -> executeHistoricalPriceLookup(functionCall);
-                case RISK_FLAG_TOOL_NAME -> executeRiskFlagLookup(functionCall);
-                case STOCK_CREDIT_INFO_TOOL_NAME -> executeStockCreditInfoLookup(functionCall);
-                case PROGRAM_TRADING_SUMMARY_TOOL_NAME -> executeProgramTradingSummaryLookup(functionCall);
-                case INVESTOR_TREND_SUMMARY_TOOL_NAME -> executeInvestorTrendSummaryLookup(functionCall);
-                case NEW_LISTING_STOCKS_TOOL_NAME -> executeNewListingStocksLookup(functionCall);
-                case SHORT_SELLING_TREND_TOOL_NAME -> executeShortSellingTrendLookup(functionCall);
-                case STOCK_MASTER_INFO_TOOL_NAME -> executeStockMasterInfoLookup(functionCall);
-                case INDUSTRY_INFO_TOOL_NAME -> executeIndustryInfoLookup(functionCall);
                 default -> {
                     log.warn("알 수 없는 도구 호출 요청 - name: {}", functionCall.name());
                     yield Map.of("result", "요청한 도구를 찾을 수 없습니다.");
@@ -1657,12 +1714,12 @@ public class AiPlanningService {
         return fields;
     }
 
-    // 회사명 → stockCode(DartApiClient) → LS증권 REST 현재가(LsMarketDataApiClient) 순으로
-    // 조회한다. LS WebSocket 실시간 캐시(stock:price:{stockCode})는 subscribe()한 종목만
+    // 회사명 → stockCode(DartApiClient) → 외부 시세 데이터 제공사 REST 현재가(MarketDataApiClient) 순으로
+    // 조회한다. 외부 시세 데이터 WebSocket 실시간 캐시(stock:price:{stockCode})는 subscribe()한 종목만
     // 채워지는 구조라 AI가 임의의 회사를 물어보는 상황에는 맞지 않아(2026-08-07 확인 —
     // subscribe() 호출부가 아직 어디에도 연결돼 있지 않음), 그 대신 매번 REST로 직접
-    // 조회한다(LsMarketDataApiClient 참고). corp_code 캐시와 달리 비상장 회사는 stockCode
-    // 자체가 없어 애초에 조회 불가능하고, 상장사라도 LS 쪽 응답이 비거나 실패하면 빈 값이
+    // 조회한다(MarketDataApiClient 참고). corp_code 캐시와 달리 비상장 회사는 stockCode
+    // 자체가 없어 애초에 조회 불가능하고, 상장사라도 외부 시세 데이터 쪽 응답이 비거나 실패하면 빈 값이
     // 돌아올 수 있다 — 두 경우 모두 예외 없이 그 사실을 답변 문구로 그대로 돌려준다(다른
     // 도구들과 동일한 원칙).
     // 2026-08-11 추가 — confirmedCurrentPrices: 라이브 테스트에서 가격/거래량처럼 절대 틀리면
@@ -1672,7 +1729,7 @@ public class AiPlanningService {
     // 직접 확정 문구로 덧붙인다"는 방식으로 전환한다 — 이 리스트에 성공한 조회만 모아두면
     // converseWithTools()가 최종 답변 뒤에 그대로 붙인다(부정확한 사용자 안내를 원천 차단).
     // get_current_price/get_multi_stock_price 둘 다 여기로 결과를 모은다 — 두 도구가 서로
-    // 다른 DTO(LsCurrentPriceDetailDto/LsMultiStockPriceDto)를 쓰므로, 최종 답변 뒤에 붙일
+    // 다른 DTO(CurrentPriceDetailDto/MultiStockPriceDto)를 쓰므로, 최종 답변 뒤에 붙일
     // 확정 문구는 이 공통 타입 하나만 알면 되게 통일한다.
     private record ConfirmedPrice(String stockName, String stockCode, long price, long volume) {
     }
@@ -1686,12 +1743,12 @@ public class AiPlanningService {
                     .formatted(companyName));
         }
 
-        Optional<LsCurrentPriceDetailDto> priceLookup = lsMarketDataApiClient.getCurrentPrice(stockCode.get());
+        Optional<CurrentPriceDetailDto> priceLookup = marketDataApiClient.getCurrentPrice(stockCode.get());
         if (priceLookup.isEmpty()) {
-            return Map.of("result", "'%s'는 지금 현재가를 확인할 수 없습니다 — LS증권 시세 조회가 실패했거나 해당 종목 정보가 없을 수 있습니다."
+            return Map.of("result", "'%s'는 지금 현재가를 확인할 수 없습니다 — 외부 시세 데이터 제공사 시세 조회가 실패했거나 해당 종목 정보가 없을 수 있습니다."
                     .formatted(companyName));
         }
-        LsCurrentPriceDetailDto price = priceLookup.get();
+        CurrentPriceDetailDto price = priceLookup.get();
         confirmedCurrentPrices.add(new ConfirmedPrice(price.getStockName(), price.getStockCode(),
                 price.getCurrentPrice(), price.getVolume()));
         return Map.of("result", describeCurrentPrice(price));
@@ -1708,7 +1765,7 @@ public class AiPlanningService {
                 .collect(java.util.stream.Collectors.joining(" · "));
     }
 
-    // per/pbr/exhratio는 LS 응답 자체에 값이 없을 수 있어(우선주 등) null이면 "정보없음"으로
+    // per/pbr/exhratio는 외부 시세 데이터 응답 자체에 값이 없을 수 있어(우선주 등) null이면 "정보없음"으로
     // 자연스럽게 안내한다 — nullableAmount()와 같은 원칙.
     // 2026-08-11 수정 — 가격/등락액/거래량처럼 자릿수가 큰 값을 %d(콤마 없음)로 그대로 넘기면
     // Gemini가 답변 문장을 쓰는 과정에서 자릿수를 잘못 세어 숫자를 틀리는 사례(라이브 테스트로
@@ -1719,7 +1776,7 @@ public class AiPlanningService {
     // 지어냄, 자릿수 오기재가 아니라 아예 다른 숫자를 창작한 경우). 다른 지표들과 한 문장에
     // 섞여 있으면 모델이 값을 베끼지 않고 재구성하는 것으로 보여, 거래량만 "반드시 이 숫자
     // 그대로" 표시를 붙여 별도로 강조한다.
-    private String describeCurrentPrice(LsCurrentPriceDetailDto price) {
+    private String describeCurrentPrice(CurrentPriceDetailDto price) {
         return ("%s(%s) 현재가 %,d원, 전일 대비 %+,d원(%.2f%%), 누적 거래량(반드시 이 숫자를 "
                 + "그대로 인용할 것, 다른 값으로 바꾸지 말 것) %,d주, PER %s, PBR %s, "
                 + "52주 최고 %s원(%s), 52주 최저 %s원(%s), 상장주식수 %s천주, 외국인 보유한도 소진율 %s%%, 기준시각 %s")
@@ -1742,12 +1799,12 @@ public class AiPlanningService {
 
     // executeCurrentPriceLookup/executeForeignInstitutionalTrendLookup/executeInvestmentOpinionLookup/
     // executeShareholderMeetingLookup 4곳이 공유하는 골격 — DART 조회 4곳이 공유하는
-    // withResolvedCorpCode()와 동일한 이유로 통합했다. LS 조회는 corp_code가 아니라 KRX
+    // withResolvedCorpCode()와 동일한 이유로 통합했다. 외부 시세 데이터 조회는 corp_code가 아니라 KRX
     // stockCode로 조회하므로 DartApiClient.resolveStockCodeByName()을 쓴다는 점만 다르다.
     private Map<String, Object> withResolvedStockCode(
             String companyName, Function<String, Map<String, Object>> lookup, String notFoundMessage) {
         if (companyName == null || companyName.isBlank()) {
-            log.warn("LS 조회 도구 호출에 companyName이 비어 있음");
+            log.warn("외부 시세 데이터 조회 도구 호출에 companyName이 비어 있음");
             return Map.of("result", "어떤 종목의 정보를 찾을지 확인할 수 없습니다.");
         }
         Optional<String> stockCode = dartApiClient.resolveStockCodeByName(companyName);
@@ -1755,28 +1812,28 @@ public class AiPlanningService {
             return Map.of("result", "'%s'의 종목코드를 찾지 못해 %s 국내(코스피/코스닥) 상장 종목이 아니거나(해외 상장 종목 등) 회사명이 정확하지 않을 수 있습니다."
                     .formatted(companyName, notFoundMessage));
         }
-        // withResolvedCorpCode()와 동일한 이유로 lookup 실행을 try로 감싼다 — LS 조회 자체는
-        // 실패해도 예외 없이 빈 결과를 주는 경우가 많지만, 모든 LS 호출이 거치는
-        // LsAccessTokenProvider는 인증 실패 시 CustomException을 던진다(코드리뷰 반영). 감싸지
+        // withResolvedCorpCode()와 동일한 이유로 lookup 실행을 try로 감싼다 — 외부 시세 데이터 조회 자체는
+        // 실패해도 예외 없이 빈 결과를 주는 경우가 많지만, 모든 외부 시세 데이터 호출이 거치는
+        // MarketDataAccessTokenProvider는 인증 실패 시 CustomException을 던진다(코드리뷰 반영). 감싸지
         // 않으면 이 예외가 executeTool()의 최상위 catch까지 그대로 올라가 도구별 안내 문구
         // 대신 뭉뚱그린 "요청을 처리하는 중 오류가 발생했습니다"만 반환된다.
         try {
             return lookup.apply(stockCode.get());
         } catch (CustomException e) {
-            log.warn("LS 조회 실패 - companyName: {}, 사유: {}", companyName, e.getMessage());
+            log.warn("외부 시세 데이터 조회 실패 - companyName: {}, 사유: {}", companyName, e.getMessage());
             return errorResult(notFoundMessage);
         }
     }
 
-    // 최근 10일간 외국인/기관 순매수 동향(t1716)을 조회한다. LsInvestorTrendApiClient는 실패해도
+    // 최근 10일간 외국인/기관 순매수 동향(t1716)을 조회한다. InvestorTrendApiClient는 실패해도
     // 예외를 던지지 않고 빈 리스트를 주므로 별도 try/catch 없이 결과가 비었는지만 확인한다.
     private Map<String, Object> executeForeignInstitutionalTrendLookup(GeminiResponse.FunctionCall functionCall) {
         String companyName = stringArg(functionCall.args(), "companyName");
         Integer periodMonths = integerArg(functionCall.args(), "periodMonths");
         return withResolvedStockCode(companyName, stockCode -> {
-            List<LsForeignInstitutionalTrendDto> items = lsInvestorTrendApiClient.getTrend(stockCode, periodMonths);
+            List<ForeignInstitutionalTrendDto> items = investorTrendApiClient.getTrend(stockCode, periodMonths);
             if (items.isEmpty()) {
-                return Map.of("result", "'%s'의 외국인/기관 매매동향을 확인할 수 없습니다 — LS증권 조회가 실패했거나 관련 데이터가 없을 수 있습니다."
+                return Map.of("result", "'%s'의 외국인/기관 매매동향을 확인할 수 없습니다 — 외부 시세 데이터 제공사 조회가 실패했거나 관련 데이터가 없을 수 있습니다."
                         .formatted(companyName));
             }
             String description = periodMonths != null && periodMonths > 0
@@ -1786,7 +1843,7 @@ public class AiPlanningService {
         }, "외국인/기관 매매동향을 확인할 수 없습니다.");
     }
 
-    private String describeForeignInstitutionalTrend(List<LsForeignInstitutionalTrendDto> items) {
+    private String describeForeignInstitutionalTrend(List<ForeignInstitutionalTrendDto> items) {
         return items.stream()
                 .map(item -> ("%s 종가 %,d원: 외국인 순매수 %+,d주, 기관 순매수 %+,d주, 개인 순매수 %+,d주, "
                         + "프로그램매매 거래량 %,d주, 외국인 보유한도 소진율 %s%%, 공매도 수량 %,d주")
@@ -1801,14 +1858,14 @@ public class AiPlanningService {
     // 길어져서(최대 500거래일), 실제 조회된 데이터를 근거로 합계·최고/최저일만 코드가 직접
     // 계산해서 요약해준다. get_historical_price의 [확인해줄 수 없는 요청] 교훈과 같은 원칙 —
     // 실제로 조회하지 못하는 범위를 모델이 지어내지 않도록, 조회된 범위 안에서만 사실을 준다.
-    private String describeForeignInstitutionalTrendSummary(List<LsForeignInstitutionalTrendDto> items, int periodMonths) {
-        long foreignTotal = items.stream().mapToLong(LsForeignInstitutionalTrendDto::getForeignNetBuyKrx).sum();
-        long institutionTotal = items.stream().mapToLong(LsForeignInstitutionalTrendDto::getInstitutionNetBuyKrx).sum();
-        long individualTotal = items.stream().mapToLong(LsForeignInstitutionalTrendDto::getIndividualNetBuyKrx).sum();
-        LsForeignInstitutionalTrendDto maxForeignDay = items.stream()
-                .max(Comparator.comparingLong(LsForeignInstitutionalTrendDto::getForeignNetBuyKrx)).orElseThrow();
-        LsForeignInstitutionalTrendDto minForeignDay = items.stream()
-                .min(Comparator.comparingLong(LsForeignInstitutionalTrendDto::getForeignNetBuyKrx)).orElseThrow();
+    private String describeForeignInstitutionalTrendSummary(List<ForeignInstitutionalTrendDto> items, int periodMonths) {
+        long foreignTotal = items.stream().mapToLong(ForeignInstitutionalTrendDto::getForeignNetBuyKrx).sum();
+        long institutionTotal = items.stream().mapToLong(ForeignInstitutionalTrendDto::getInstitutionNetBuyKrx).sum();
+        long individualTotal = items.stream().mapToLong(ForeignInstitutionalTrendDto::getIndividualNetBuyKrx).sum();
+        ForeignInstitutionalTrendDto maxForeignDay = items.stream()
+                .max(Comparator.comparingLong(ForeignInstitutionalTrendDto::getForeignNetBuyKrx)).orElseThrow();
+        ForeignInstitutionalTrendDto minForeignDay = items.stream()
+                .min(Comparator.comparingLong(ForeignInstitutionalTrendDto::getForeignNetBuyKrx)).orElseThrow();
         return ("최근 %d개월(실제 조회된 %d거래일 기준) 누적 순매수: 외국인 %+,d주, 기관 %+,d주, "
                 + "개인 %+,d주. 이 기간 중 외국인이 하루에 가장 많이 산 날은 %s(%+,d주), 가장 많이 판 날은 "
                 + "%s(%+,d주)입니다.")
@@ -1821,7 +1878,7 @@ public class AiPlanningService {
     private Map<String, Object> executeInvestmentOpinionLookup(GeminiResponse.FunctionCall functionCall) {
         String companyName = stringArg(functionCall.args(), "companyName");
         return withResolvedStockCode(companyName, stockCode -> {
-            List<LsInvestmentOpinionDto> items = lsInvestInfoApiClient.getInvestmentOpinions(stockCode);
+            List<InvestmentOpinionDto> items = investInfoApiClient.getInvestmentOpinions(stockCode);
             if (items.isEmpty()) {
                 return Map.of("result", "'%s'의 증권사 투자의견을 찾지 못했습니다.".formatted(companyName));
             }
@@ -1829,7 +1886,7 @@ public class AiPlanningService {
         }, "투자의견을 확인할 수 없습니다.");
     }
 
-    private String describeInvestmentOpinions(List<LsInvestmentOpinionDto> items) {
+    private String describeInvestmentOpinions(List<InvestmentOpinionDto> items) {
         return items.stream()
                 .map(item -> "%s %s: %s → %s로 의견 변경, 목표주가 %s원 → %s원(발표일 종가 %s원)"
                         .formatted(item.getDate(), item.getSecuritiesFirm(),
@@ -1843,7 +1900,7 @@ public class AiPlanningService {
     private Map<String, Object> executeShareholderMeetingLookup(GeminiResponse.FunctionCall functionCall) {
         String companyName = stringArg(functionCall.args(), "companyName");
         return withResolvedStockCode(companyName, stockCode -> {
-            List<LsShareholderMeetingDto> items = lsInvestInfoApiClient.getShareholderMeetingSchedule(stockCode);
+            List<ShareholderMeetingDto> items = investInfoApiClient.getShareholderMeetingSchedule(stockCode);
             if (items.isEmpty()) {
                 return Map.of("result", "'%s'의 주주총회 일정을 찾지 못했습니다.".formatted(companyName));
             }
@@ -1851,14 +1908,14 @@ public class AiPlanningService {
         }, "주주총회 일정을 확인할 수 없습니다.");
     }
 
-    private String describeShareholderMeetings(List<LsShareholderMeetingDto> items) {
+    private String describeShareholderMeetings(List<ShareholderMeetingDto> items) {
         return items.stream()
                 .map(item -> "%s: %s".formatted(item.getDate(), item.getEventName()))
                 .collect(java.util.stream.Collectors.joining("\n"));
     }
 
-    // rankingType → (LsHighItemApiClient 호출, 시간외 게이트 필요 여부). AFTER_HOURS 두 종류는
-    // 시간외 거래시간(15:30~18:00)이 아니면 아예 LS를 호출하지 않고 미지원 매뉴얼 문구로
+    // rankingType → (HighItemApiClient 호출, 시간외 게이트 필요 여부). AFTER_HOURS 두 종류는
+    // 시간외 거래시간(15:30~18:00)이 아니면 아예 외부 시세 데이터를 호출하지 않고 미지원 매뉴얼 문구로
     // 대신한다(2026-08-11 합의 — "특정 시간대에만 유효"를 탈락 사유가 아니라 게이트 조건으로
     // 처리하기로 한 결정 반영).
     private Map<String, Object> executeMarketRankingLookup(GeminiResponse.FunctionCall functionCall) {
@@ -1872,15 +1929,15 @@ public class AiPlanningService {
             return Map.of("result", "시간외 거래 순위는 시간외 거래시간(15:30~18:00)에만 확인할 수 있어요 — 지금은 그 시간대가 아니라 확인할 수 없습니다.");
         }
 
-        List<LsRankingItemDto> items = switch (rankingType) {
-            case "PRICE_CHANGE_RATE" -> lsHighItemApiClient.getTopPriceChangeRate();
-            case "MARKET_CAP" -> lsHighItemApiClient.getTopMarketCap();
-            case "VOLUME" -> lsHighItemApiClient.getTopVolume();
-            case "TRADING_VALUE" -> lsHighItemApiClient.getTopTradingValue();
-            case "VOLUME_SURGE" -> lsHighItemApiClient.getSurgingVolumeVsYesterday();
-            case "AFTER_HOURS_PRICE_CHANGE_RATE" -> lsHighItemApiClient.getTopAfterHoursPriceChangeRate();
-            case "AFTER_HOURS_VOLUME" -> lsHighItemApiClient.getTopAfterHoursVolume();
-            default -> List.<LsRankingItemDto>of();
+        List<RankingItemDto> items = switch (rankingType) {
+            case "PRICE_CHANGE_RATE" -> highItemApiClient.getTopPriceChangeRate();
+            case "MARKET_CAP" -> highItemApiClient.getTopMarketCap();
+            case "VOLUME" -> highItemApiClient.getTopVolume();
+            case "TRADING_VALUE" -> highItemApiClient.getTopTradingValue();
+            case "VOLUME_SURGE" -> highItemApiClient.getSurgingVolumeVsYesterday();
+            case "AFTER_HOURS_PRICE_CHANGE_RATE" -> highItemApiClient.getTopAfterHoursPriceChangeRate();
+            case "AFTER_HOURS_VOLUME" -> highItemApiClient.getTopAfterHoursVolume();
+            default -> List.<RankingItemDto>of();
         };
         if (items.isEmpty()) {
             return Map.of("result", "해당 기준의 순위를 지금은 확인할 수 없습니다.");
@@ -1888,7 +1945,7 @@ public class AiPlanningService {
         return Map.of("result", describeRankingItems(items));
     }
 
-    private String describeRankingItems(List<LsRankingItemDto> items) {
+    private String describeRankingItems(List<RankingItemDto> items) {
         return items.stream()
                 .map(item -> ("%d위 %s(%s) %,d원, 전일 대비 %+,d원(%.2f%%), 거래량 %s주%s")
                         .formatted(item.getRank(), item.getStockName(), item.getStockCode(),
@@ -1905,7 +1962,7 @@ public class AiPlanningService {
             if (themeName == null || themeName.isBlank()) {
                 return Map.of("result", "어떤 테마인지 확인할 수 없습니다.");
             }
-            List<LsThemeConstituentDto> constituents = lsSectorApiClient.getThemeConstituentsByName(themeName);
+            List<ThemeConstituentDto> constituents = sectorApiClient.getThemeConstituentsByName(themeName);
             if (constituents.isEmpty()) {
                 return Map.of("result", "'%s' 테마를 찾지 못했습니다.".formatted(themeName));
             }
@@ -1914,16 +1971,16 @@ public class AiPlanningService {
         if ("STOCK_TO_THEMES".equals(mode)) {
             String companyName = stringArg(functionCall.args(), "companyName");
             return withResolvedStockCode(companyName, stockCode -> {
-                List<LsThemeDto> themes = lsSectorApiClient.getThemesForStock(stockCode);
+                List<ThemeDto> themes = sectorApiClient.getThemesForStock(stockCode);
                 if (themes.isEmpty()) {
                     return Map.of("result", "'%s'가 속한 테마를 찾지 못했습니다.".formatted(companyName));
                 }
-                return Map.of("result", themes.stream().map(LsThemeDto::getThemeName)
+                return Map.of("result", themes.stream().map(ThemeDto::getThemeName)
                         .collect(java.util.stream.Collectors.joining(", ")));
             }, "테마 정보를 확인할 수 없습니다.");
         }
         if ("HOT_THEMES".equals(mode)) {
-            List<LsThemeDto> hotThemes = lsSectorApiClient.getHotThemes();
+            List<ThemeDto> hotThemes = sectorApiClient.getHotThemes();
             if (hotThemes.isEmpty()) {
                 return Map.of("result", "오늘의 핫테마 정보를 확인할 수 없습니다.");
             }
@@ -1935,7 +1992,7 @@ public class AiPlanningService {
         return Map.of("result", "요청을 이해하지 못했습니다.");
     }
 
-    private String describeThemeConstituents(List<LsThemeConstituentDto> constituents) {
+    private String describeThemeConstituents(List<ThemeConstituentDto> constituents) {
         return constituents.stream()
                 .map(item -> "%s(%s) %,d원, 전일 대비 %+,d원(%.2f%%), 거래량 %s주".formatted(
                         item.getStockName(), item.getStockCode(), item.getPrice(),
@@ -1943,7 +2000,7 @@ public class AiPlanningService {
                 .collect(java.util.stream.Collectors.joining("\n"));
     }
 
-    // criteria(사용자가 보기 쉬운 이름) → LS gubun1 코드. LsInvestInfoApiClient.getFinancialRanking()
+    // criteria(사용자가 보기 쉬운 이름) → 외부 시세 데이터 gubun1 코드. InvestInfoApiClient.getFinancialRanking()
     // 참고.
     private static final Map<String, String> FINANCIAL_RANKING_CRITERIA_CODES = Map.ofEntries(
             Map.entry("SALES_GROWTH", "1"), Map.entry("OPERATING_INCOME_GROWTH", "2"),
@@ -1953,7 +2010,7 @@ public class AiPlanningService {
     private Map<String, Object> executeFinancialRankingLookup(GeminiResponse.FunctionCall functionCall) {
         String criteria = stringArg(functionCall.args(), "criteria");
         String criteriaCode = FINANCIAL_RANKING_CRITERIA_CODES.getOrDefault(criteria, "8");
-        List<LsFinancialRankingDto> items = lsInvestInfoApiClient.getFinancialRanking(criteriaCode);
+        List<FinancialRankingDto> items = investInfoApiClient.getFinancialRanking(criteriaCode);
         if (items.isEmpty()) {
             return Map.of("result", "재무순위 정보를 지금은 확인할 수 없습니다.");
         }
@@ -1964,7 +2021,7 @@ public class AiPlanningService {
                 .collect(java.util.stream.Collectors.joining("\n")));
     }
 
-    // indexName(사용자가 보기 쉬운 이름) → (kind, symbol). LsInvestInfoApiClient.getOverseasIndex() 참고.
+    // indexName(사용자가 보기 쉬운 이름) → (kind, symbol). InvestInfoApiClient.getOverseasIndex() 참고.
     private static final Map<String, String[]> OVERSEAS_INDEX_SYMBOLS = Map.of(
             "다우지수", new String[]{"S", "DJI@DJI"},
             "나스닥", new String[]{"S", "NAS@IXIC"},
@@ -1978,11 +2035,11 @@ public class AiPlanningService {
             return Map.of("result", "'%s'는 확인할 수 없는 지수입니다 — 다우지수, 나스닥, 원달러환율, 국제유가만 확인 가능합니다."
                     .formatted(indexName));
         }
-        Optional<LsOverseasIndexDto> index = lsInvestInfoApiClient.getOverseasIndex(symbolSpec[0], symbolSpec[1]);
+        Optional<OverseasIndexDto> index = investInfoApiClient.getOverseasIndex(symbolSpec[0], symbolSpec[1]);
         if (index.isEmpty()) {
             return Map.of("result", "'%s' 조회에 실패했습니다.".formatted(indexName));
         }
-        LsOverseasIndexDto value = index.get();
+        OverseasIndexDto value = index.get();
         return Map.of("result", "%s(%s 기준) %.2f, 전일 대비 %+.2f(%.2f%%)".formatted(
                 value.getName(), value.getDate(), value.getPrice(), value.getChangeAmount(), value.getChangeRate()));
     }
@@ -1990,7 +2047,7 @@ public class AiPlanningService {
     private Map<String, Object> executeMarketLiquidityLookup(GeminiResponse.FunctionCall functionCall) {
         Integer periodMonths = integerArg(functionCall.args(), "periodMonths");
         boolean longPeriod = periodMonths != null && periodMonths > 0;
-        List<LsMarketLiquidityDto> items = lsInvestInfoApiClient.getMarketLiquidityTrend(periodMonths);
+        List<MarketLiquidityDto> items = investInfoApiClient.getMarketLiquidityTrend(periodMonths);
         if (items.isEmpty()) {
             return Map.of("result", "증시주변자금 정보를 지금은 확인할 수 없습니다.");
         }
@@ -2003,13 +2060,13 @@ public class AiPlanningService {
         }
         // 2026-08-13 추가 — 장기간 조회는 일별 나열 대신 코드가 계산한 요약(최고/최저일, 최근값
         // 대비 증감)만 준다 — 500거래일치를 그대로 나열하면 토큰 낭비가 크다.
-        LsMarketLiquidityDto latest = items.get(0);
-        LsMarketLiquidityDto maxDeposit = items.stream()
+        MarketLiquidityDto latest = items.get(0);
+        MarketLiquidityDto maxDeposit = items.stream()
                 .filter(item -> item.getCustomerDepositAmount() != null)
-                .max(Comparator.comparingLong(LsMarketLiquidityDto::getCustomerDepositAmount)).orElse(latest);
-        LsMarketLiquidityDto minDeposit = items.stream()
+                .max(Comparator.comparingLong(MarketLiquidityDto::getCustomerDepositAmount)).orElse(latest);
+        MarketLiquidityDto minDeposit = items.stream()
                 .filter(item -> item.getCustomerDepositAmount() != null)
-                .min(Comparator.comparingLong(LsMarketLiquidityDto::getCustomerDepositAmount)).orElse(latest);
+                .min(Comparator.comparingLong(MarketLiquidityDto::getCustomerDepositAmount)).orElse(latest);
         return Map.of("result",
                 ("최근 %d개월(실제 조회된 %d거래일 기준) 증시 대기자금 — 가장 최근(%s) 고객예탁금 %s백만원, "
                         + "신용융자잔고 %s백만원. 이 기간 중 고객예탁금이 가장 많았던 날은 %s(%s백만원), "
@@ -2023,11 +2080,11 @@ public class AiPlanningService {
     private Map<String, Object> executeTechnicalSignalLookup(GeminiResponse.FunctionCall functionCall) {
         String companyName = stringArg(functionCall.args(), "companyName");
         return withResolvedStockCode(companyName, stockCode -> {
-            Optional<LsPivotLevelDto> pivot = lsMarketDataApiClient.getPivotLevels(stockCode);
+            Optional<PivotLevelDto> pivot = marketDataApiClient.getPivotLevels(stockCode);
             if (pivot.isEmpty()) {
                 return Map.of("result", "'%s'의 지지선/저항선 정보를 찾지 못했습니다.".formatted(companyName));
             }
-            LsPivotLevelDto p = pivot.get();
+            PivotLevelDto p = pivot.get();
             return Map.of("result", "피봇(기준값) %s원, 1차저항 %s원, 1차지지 %s원, 2차저항 %s원, 2차지지 %s원".formatted(
                     nullableAmount(p.getPivot()), nullableAmount(p.getResistance1()), nullableAmount(p.getSupport1()),
                     nullableAmount(p.getResistance2()), nullableAmount(p.getSupport2())));
@@ -2039,7 +2096,7 @@ public class AiPlanningService {
         Integer periodMonths = integerArg(functionCall.args(), "periodMonths");
         boolean longPeriod = periodMonths != null && periodMonths > 0;
         return withResolvedStockCode(companyName, stockCode -> {
-            List<LsHistoricalPriceDto> items = lsMarketDataApiClient.getHistoricalPrices(stockCode, periodMonths);
+            List<HistoricalPriceDto> items = marketDataApiClient.getHistoricalPrices(stockCode, periodMonths);
             if (items.isEmpty()) {
                 return Map.of("result", "'%s'의 시세 흐름을 확인할 수 없습니다.".formatted(companyName));
             }
@@ -2054,12 +2111,12 @@ public class AiPlanningService {
             // ConfirmedPrice 패턴과 같은 원칙 — 절대 틀리면 안 되는 숫자는 모델이 다시 계산하게
             // 두지 않는다.
             if (longPeriod) {
-                LsHistoricalPriceDto highest = items.stream()
+                HistoricalPriceDto highest = items.stream()
                         .filter(item -> item.getHigh() != null)
-                        .max(Comparator.comparingLong(LsHistoricalPriceDto::getHigh)).orElse(null);
-                LsHistoricalPriceDto lowest = items.stream()
+                        .max(Comparator.comparingLong(HistoricalPriceDto::getHigh)).orElse(null);
+                HistoricalPriceDto lowest = items.stream()
                         .filter(item -> item.getLow() != null)
-                        .min(Comparator.comparingLong(LsHistoricalPriceDto::getLow)).orElse(null);
+                        .min(Comparator.comparingLong(HistoricalPriceDto::getLow)).orElse(null);
                 String summary = highest != null && lowest != null
                         ? "\n\n[기간 내 실측 최고/최저] 최근 %d개월(실제 조회된 %d개 구간, 월봉 기준) 중 최고가 %,d원(%s), 최저가 %,d원(%s)."
                                 .formatted(periodMonths, items.size(), highest.getHigh(), highest.getDate(),
@@ -2092,11 +2149,11 @@ public class AiPlanningService {
         if (stockCodes.isEmpty()) {
             return Map.of("result", "요청하신 종목들의 종목코드를 찾지 못했습니다 — 국내(코스피/코스닥) 상장 종목이 아니거나(해외 상장 종목 등) 회사명이 정확하지 않을 수 있습니다.");
         }
-        List<LsMultiStockPriceDto> items = lsMarketDataApiClient.getMultiStockPrices(stockCodes);
+        List<MultiStockPriceDto> items = marketDataApiClient.getMultiStockPrices(stockCodes);
         if (items.isEmpty()) {
             return Map.of("result", "현재가를 확인할 수 없습니다.");
         }
-        for (LsMultiStockPriceDto item : items) {
+        for (MultiStockPriceDto item : items) {
             if (item.getPrice() != null && item.getVolume() != null) {
                 confirmedCurrentPrices.add(new ConfirmedPrice(
                         item.getStockName(), item.getStockCode(), item.getPrice(), item.getVolume()));
@@ -2113,7 +2170,7 @@ public class AiPlanningService {
     private Map<String, Object> executeRiskFlagLookup(GeminiResponse.FunctionCall functionCall) {
         String companyName = stringArg(functionCall.args(), "companyName");
         return withResolvedStockCode(companyName, stockCode -> {
-            List<LsStockRiskFlagDto> flags = lsMarketDataApiClient.getRiskFlags(stockCode);
+            List<StockRiskFlagDto> flags = marketDataApiClient.getRiskFlags(stockCode);
             if (flags.isEmpty()) {
                 return Map.of("result", "'%s'는 관리종목/투자경고/매매정지 등 위험 신호가 없습니다.".formatted(companyName));
             }
@@ -2129,7 +2186,7 @@ public class AiPlanningService {
         }
         String companyName = stringArg(functionCall.args(), "companyName");
         return withResolvedStockCode(companyName, stockCode -> {
-            List<LsCallAuctionPriceDto> items = lsMarketDataApiClient.getRecentCallAuctionPrices(stockCode);
+            List<CallAuctionPriceDto> items = marketDataApiClient.getRecentCallAuctionPrices(stockCode);
             if (items.isEmpty()) {
                 return Map.of("result", "'%s'의 동시호가 예상체결가를 확인할 수 없습니다.".formatted(companyName));
             }
@@ -2146,14 +2203,14 @@ public class AiPlanningService {
         String infoType = stringArg(functionCall.args(), "infoType");
         Integer periodMonths = integerArg(functionCall.args(), "periodMonths");
         return withResolvedStockCode(companyName, stockCode -> {
-            Optional<LsStockCreditInfoDto> info = switch (infoType != null ? infoType : "") {
-                case "COLLATERAL_LOAN" -> lsEtcApiClient.getCollateralLoanEligibility(stockCode);
-                case "MARGIN_REQUIREMENT" -> lsEtcApiClient.getMarginRequirement(stockCode);
-                // MARGIN_TRADING(t1921)은 LS API 자체에 기간 지정 파라미터가 없어(연속조회
+            Optional<StockCreditInfoDto> info = switch (infoType != null ? infoType : "") {
+                case "COLLATERAL_LOAN" -> etcApiClient.getCollateralLoanEligibility(stockCode);
+                case "MARGIN_REQUIREMENT" -> etcApiClient.getMarginRequirement(stockCode);
+                // MARGIN_TRADING(t1921)은 외부 시세 데이터 API 자체에 기간 지정 파라미터가 없어(연속조회
                 // 커서만 지원) periodMonths를 못 받는다 — 2026-08-13 전수조사로 확인.
-                case "MARGIN_TRADING" -> lsEtcApiClient.getMarginTradingTrend(stockCode);
-                case "SECURITIES_LENDING" -> lsEtcApiClient.getSecuritiesLendingTrend(stockCode, periodMonths);
-                default -> Optional.<LsStockCreditInfoDto>empty();
+                case "MARGIN_TRADING" -> etcApiClient.getMarginTradingTrend(stockCode);
+                case "SECURITIES_LENDING" -> etcApiClient.getSecuritiesLendingTrend(stockCode, periodMonths);
+                default -> Optional.<StockCreditInfoDto>empty();
             };
             if (info.isEmpty()) {
                 return Map.of("result", "'%s'의 해당 정보를 확인할 수 없습니다.".formatted(companyName));
@@ -2167,7 +2224,7 @@ public class AiPlanningService {
         String infoType = stringArg(functionCall.args(), "infoType");
         return withResolvedStockCode(companyName, stockCode -> {
             if ("CONSTITUENTS".equals(infoType)) {
-                List<LsEtfConstituentDto> constituents = lsEtfApiClient.getConstituents(stockCode);
+                List<EtfConstituentDto> constituents = etfApiClient.getConstituents(stockCode);
                 if (constituents.isEmpty()) {
                     return Map.of("result", "'%s'의 구성종목 정보를 찾지 못했습니다.".formatted(companyName));
                 }
@@ -2175,7 +2232,7 @@ public class AiPlanningService {
                         .map(item -> "%s(%s) 비중 %.2f%%".formatted(item.getStockName(), item.getStockCode(), item.getWeight()))
                         .collect(java.util.stream.Collectors.joining("\n")));
             }
-            Optional<LsCurrentPriceDetailDto> price = lsEtfApiClient.getCurrentPrice(stockCode);
+            Optional<CurrentPriceDetailDto> price = etfApiClient.getCurrentPrice(stockCode);
             if (price.isEmpty()) {
                 return Map.of("result", "'%s'의 현재가를 확인할 수 없습니다.".formatted(companyName));
             }
@@ -2186,7 +2243,7 @@ public class AiPlanningService {
     private Map<String, Object> executeProgramTradingSummaryLookup(GeminiResponse.FunctionCall functionCall) {
         String mode = stringArg(functionCall.args(), "mode");
         if ("TOP_STOCKS".equals(mode)) {
-            List<LsProgramTradingRankDto> items = lsProgramApiClient.getTopProgramTradingStocks();
+            List<ProgramTradingRankDto> items = programApiClient.getTopProgramTradingStocks();
             if (items.isEmpty()) {
                 return Map.of("result", "프로그램매매 상위 종목 정보를 확인할 수 없습니다.");
             }
@@ -2195,11 +2252,11 @@ public class AiPlanningService {
                             item.getRank(), item.getStockName(), item.getStockCode(), nullableAmount(item.getNetBuyValue())))
                     .collect(java.util.stream.Collectors.joining("\n")));
         }
-        Optional<LsProgramTradingSnapshotDto> snapshot = lsProgramApiClient.getMarketSnapshot();
+        Optional<ProgramTradingSnapshotDto> snapshot = programApiClient.getMarketSnapshot();
         if (snapshot.isEmpty()) {
             return Map.of("result", "시장 전체 프로그램매매 정보를 확인할 수 없습니다.");
         }
-        LsProgramTradingSnapshotDto s = snapshot.get();
+        ProgramTradingSnapshotDto s = snapshot.get();
         return Map.of("result", "매도대금 %s백만원, 매수대금 %s백만원, 순매수대금 %s백만원".formatted(
                 nullableAmount(s.getOfferValue()), nullableAmount(s.getBidValue()), nullableAmount(s.getNetValue())));
     }
@@ -2207,7 +2264,7 @@ public class AiPlanningService {
     private Map<String, Object> executeInvestorTrendSummaryLookup(GeminiResponse.FunctionCall functionCall) {
         String mode = stringArg(functionCall.args(), "mode");
         if ("BY_MARKET".equals(mode)) {
-            List<LsMarketInvestorComparisonDto> items = lsInvestorApiClient.getMarketComparison();
+            List<MarketInvestorComparisonDto> items = investorApiClient.getMarketComparison();
             if (items.isEmpty()) {
                 return Map.of("result", "시장별 투자자 동향을 확인할 수 없습니다.");
             }
@@ -2219,18 +2276,18 @@ public class AiPlanningService {
                             item.getInstitutionNetBuy() != null ? item.getInstitutionNetBuy() : 0L))
                     .collect(java.util.stream.Collectors.joining("\n")));
         }
-        Optional<LsInvestorTypeSummaryDto> summary = lsInvestorApiClient.getInvestorTypeSummary();
+        Optional<InvestorTypeSummaryDto> summary = investorApiClient.getInvestorTypeSummary();
         if (summary.isEmpty()) {
             return Map.of("result", "투자자유형별 동향을 확인할 수 없습니다.");
         }
-        LsInvestorTypeSummaryDto s = summary.get();
+        InvestorTypeSummaryDto s = summary.get();
         return Map.of("result", "개인 순매수 %s주, 외국인 순매수 %s주, 기관 순매수 %s주".formatted(
                 nullableAmount(s.getIndividualNetBuy()), nullableAmount(s.getForeignNetBuy()), nullableAmount(s.getInstitutionNetBuy())));
     }
 
     private Map<String, Object> executeNewListingStocksLookup(GeminiResponse.FunctionCall functionCall) {
         Integer periodMonths = integerArg(functionCall.args(), "periodMonths");
-        List<LsNewListingDto> items = lsEtcApiClient.getNewListings(periodMonths);
+        List<NewListingDto> items = etcApiClient.getNewListings(periodMonths);
         if (items.isEmpty()) {
             return Map.of("result", "신규상장 종목 정보를 확인할 수 없습니다.");
         }
@@ -2244,7 +2301,7 @@ public class AiPlanningService {
         Integer periodMonths = integerArg(functionCall.args(), "periodMonths");
         boolean longPeriod = periodMonths != null && periodMonths > 0;
         return withResolvedStockCode(companyName, stockCode -> {
-            List<LsShortSellingTrendDto> items = lsEtcApiClient.getShortSellingTrend(stockCode, periodMonths);
+            List<ShortSellingTrendDto> items = etcApiClient.getShortSellingTrend(stockCode, periodMonths);
             if (items.isEmpty()) {
                 return Map.of("result", "'%s'의 공매도 정보를 확인할 수 없습니다.".formatted(companyName));
             }
@@ -2257,10 +2314,10 @@ public class AiPlanningService {
             // 2026-08-13 추가 — 장기간 조회는 일별 나열 대신 합계·최고일만 코드가 계산해서 준다.
             long totalVolume = items.stream()
                     .filter(item -> item.getShortSellingVolume() != null)
-                    .mapToLong(LsShortSellingTrendDto::getShortSellingVolume).sum();
-            LsShortSellingTrendDto peakDay = items.stream()
+                    .mapToLong(ShortSellingTrendDto::getShortSellingVolume).sum();
+            ShortSellingTrendDto peakDay = items.stream()
                     .filter(item -> item.getShortSellingVolume() != null)
-                    .max(Comparator.comparingLong(LsShortSellingTrendDto::getShortSellingVolume)).orElse(items.get(0));
+                    .max(Comparator.comparingLong(ShortSellingTrendDto::getShortSellingVolume)).orElse(items.get(0));
             return Map.of("result",
                     ("'%s'의 최근 %d개월(실제 조회된 %d거래일 기준) 누적 공매도 거래량은 %,d주입니다. "
                             + "공매도가 가장 많았던 날은 %s(%s주, 비중 %.2f%%)입니다.")
@@ -2272,11 +2329,11 @@ public class AiPlanningService {
     private Map<String, Object> executeStockMasterInfoLookup(GeminiResponse.FunctionCall functionCall) {
         String companyName = stringArg(functionCall.args(), "companyName");
         return withResolvedStockCode(companyName, stockCode -> {
-            Optional<LsStockMasterInfoDto> info = lsEtcApiClient.getStockMasterInfo(stockCode);
+            Optional<StockMasterInfoDto> info = etcApiClient.getStockMasterInfo(stockCode);
             if (info.isEmpty()) {
                 return Map.of("result", "'%s'의 종목 기본정보를 확인할 수 없습니다.".formatted(companyName));
             }
-            LsStockMasterInfoDto m = info.get();
+            StockMasterInfoDto m = info.get();
             return Map.of("result", "상한가 %s원, 하한가 %s원, 스팩 여부: %s".formatted(
                     nullableAmount(m.getUpperLimitPrice()), nullableAmount(m.getLowerLimitPrice()),
                     m.isSpac() ? "예" : "아니오"));
@@ -2291,7 +2348,7 @@ public class AiPlanningService {
         if ("TREND".equals(mode)) {
             Integer periodMonths = integerArg(functionCall.args(), "periodMonths");
             boolean longPeriod = periodMonths != null && periodMonths > 0;
-            List<LsIndustryTrendDto> items = lsIndustryApiClient.getTrend(resolvedMarket, periodMonths);
+            List<IndustryTrendDto> items = industryApiClient.getTrend(resolvedMarket, periodMonths);
             if (items.isEmpty()) {
                 return Map.of("result", "%s 지수 흐름을 확인할 수 없습니다.".formatted(resolvedMarket));
             }
@@ -2301,10 +2358,10 @@ public class AiPlanningService {
             // 2026-08-13 추가 — 장기간(월봉) 조회 시 실제 조회된 월별 종가 기준 최고/최저를
             // 코드가 직접 계산해 덧붙인다(get_historical_price와 동일한 원칙).
             if (longPeriod) {
-                LsIndustryTrendDto highest = items.stream()
-                        .max(Comparator.comparingDouble(LsIndustryTrendDto::getIndexValue)).orElse(null);
-                LsIndustryTrendDto lowest = items.stream()
-                        .min(Comparator.comparingDouble(LsIndustryTrendDto::getIndexValue)).orElse(null);
+                IndustryTrendDto highest = items.stream()
+                        .max(Comparator.comparingDouble(IndustryTrendDto::getIndexValue)).orElse(null);
+                IndustryTrendDto lowest = items.stream()
+                        .min(Comparator.comparingDouble(IndustryTrendDto::getIndexValue)).orElse(null);
                 if (highest != null && lowest != null) {
                     detail += "\n\n[기간 내 실측 최고/최저] 최근 %d개월(실제 조회된 %d개 구간, 월봉 기준) 중 최고 %.2f(%s), 최저 %.2f(%s)."
                             .formatted(periodMonths, items.size(), highest.getIndexValue(), highest.getDate(),
@@ -2318,19 +2375,19 @@ public class AiPlanningService {
                 return Map.of("result", "예상지수는 동시호가 시간대(08:30~09:00 또는 15:20~15:30)에만 확인할 수 있어요 — 지금은 그 시간대가 아니라 확인할 수 없습니다.");
             }
             String session = stringArg(functionCall.args(), "callAuctionSession");
-            Optional<LsExpectedIndexDto> expected = lsIndustryApiClient.getExpectedIndex(resolvedMarket, session);
+            Optional<ExpectedIndexDto> expected = industryApiClient.getExpectedIndex(resolvedMarket, session);
             if (expected.isEmpty()) {
                 return Map.of("result", "%s 예상지수를 확인할 수 없습니다.".formatted(resolvedMarket));
             }
-            LsExpectedIndexDto e = expected.get();
+            ExpectedIndexDto e = expected.get();
             return Map.of("result", "예상지수 %.2f(%.2f%%), 상한가 %d종목, 하한가 %d종목".formatted(
                     e.getExpectedIndexValue(), e.getChangeRate(), e.getUpperLimitStockCount(), e.getLowerLimitStockCount()));
         }
-        Optional<LsIndustryPriceDto> current = lsIndustryApiClient.getCurrentPrice(resolvedMarket);
+        Optional<IndustryPriceDto> current = industryApiClient.getCurrentPrice(resolvedMarket);
         if (current.isEmpty()) {
             return Map.of("result", "%s 지수를 확인할 수 없습니다.".formatted(resolvedMarket));
         }
-        LsIndustryPriceDto c = current.get();
+        IndustryPriceDto c = current.get();
         return Map.of("result", "%s 지수 %.2f(%.2f%%)".formatted(c.getIndustryName(), c.getIndexValue(), c.getChangeRate()));
     }
 

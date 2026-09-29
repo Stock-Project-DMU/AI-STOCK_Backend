@@ -93,7 +93,7 @@ class OrderServiceIntegrationTest {
                 + ", accountId=" + account.getAccountId()
                 + ", balance=" + account.getBalance() + "원");
 
-        // 2) 실제 Redis에 현재가 캐시를 채운다 (LS증권 WebSocket 대신 수동 시딩)
+        // 2) 실제 Redis에 현재가 캐시를 채운다 (외부 시세 데이터 제공사 WebSocket 대신 수동 시딩)
         redisStockCacheService.saveStockPrice("005930", StockPriceDto.builder()
                 .stockCode("005930")
                 .stockName("삼성전자")

@@ -1,6 +1,6 @@
 spring:
   datasource:
-    url: jdbc:mysql://localhost:3306/aistock?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/aistock?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
     username: ${DB_USERNAME:aistock}
     password: ${DB_PASSWORD:aistock}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -44,9 +44,16 @@ logging:
     com.teamfp.aistock: debug
 
 # 로컬 개발은 모의투자 서버로 접속한다 (실서버 포트 9443, 모의투자 포트 29443).
-# mode 기본값은 mock — CI/테스트 및 LS 연동이 필요 없는 로컬 개발에서는 LsWebSocketClient 빈
-# 자체가 생성되지 않아 LS_APP_KEY/LS_APP_SECRET 없이도 컨텍스트 로딩이 통과한다. 실제 LS 연동이
-# 필요한 로컬 개발자는 .env나 개인 프로필에서 LS_MODE=real로 오버라이드하면 된다.
-ls:
-  mode: ${LS_MODE:mock}
-  websocket-url: ${LS_WEBSOCKET_URL:wss://openapi.ls-sec.co.kr:29443/websocket}
+# mode 기본값은 mock — CI/테스트 및 외부 시세 데이터 연동이 필요 없는 로컬 개발에서는 MarketDataWebSocketClient 빈
+# 자체가 생성되지 않아 MARKET_DATA_APP_KEY/MARKET_DATA_APP_SECRET 없이도 컨텍스트 로딩이 통과한다. 실제 외부 시세 데이터 연동이
+# 필요한 로컬 개발자는 .env나 개인 프로필에서 MARKET_DATA_MODE=real로 오버라이드하면 된다.
+market-data:
+  mode: ${MARKET_DATA_MODE:mock}
+  websocket-url: ${MARKET_DATA_WEBSOCKET_URL:wss://openapi.ls-sec.co.kr:29443/websocket}
+  # market-data.mode=mock 전용 — 로컬 파일로 시세를 공급할 때 사용할 데이터 디렉토리 경로(프로젝트
+  # 상대경로, feature/ls-local-data). 여기서 "프로젝트 상대경로"는 백엔드 프로세스 실행
+  # 디렉토리(aistock/) 기준이 아니라, local-market-data-generator(별도 Python 프로젝트)의
+  # output/ 폴더를 절대경로로 직접 가리킨다 — 두 프로젝트가 서로 다른 폴더에서 실행되므로
+  # generator 쪽 .env(OUTPUT_DIR)도 반드시 이 경로와 같은 절대경로를 가리켜야 한다.
+  # LocalMarketDataReader가 이 경로의 market_data.json 단일 파일을 읽는다.
+  local-path: ${MARKET_DATA_PATH:C:\AI-STOCK\local-market-data-generator\output}

@@ -31,9 +31,12 @@ class AiNewsServiceScheduleTest {
     void generatesOnlyAfterSavedTimeAndClaimsOncePerDay() {
         ReflectionTestUtils.setField(service, "self", generator);
         var setting = NewsBriefingSetting.builder().outletDomain("hankyung.com")
-                .deliveryTime(LocalTime.of(9, 30)).build();
+                .briefingTime(LocalTime.of(9, 30)).build();
         ReflectionTestUtils.setField(setting, "settingId", 7L);
-        when(settings.findAllWithUser()).thenReturn(List.of(setting));
+        when(settings.findDueSettings(any(), any())).thenAnswer(invocation -> {
+            LocalTime now = invocation.getArgument(0);
+            return now.isBefore(setting.getBriefingTime()) ? List.of() : List.of(setting);
+        });
         LocalDate today = LocalDate.of(2026, 9, 26);
 
         service.generateDueBriefings(LocalDateTime.of(today, LocalTime.of(9, 29)));

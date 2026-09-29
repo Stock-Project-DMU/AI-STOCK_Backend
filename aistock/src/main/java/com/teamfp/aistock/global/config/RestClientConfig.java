@@ -32,8 +32,8 @@ public class RestClientConfig {
         return RestClient.builder().requestFactory(requestFactory);
     }
 
-    @Bean("lsRestClientBuilder")
-    public RestClient.Builder lsRestClientBuilder() {
+    @Bean("marketDataRestClientBuilder")
+    public RestClient.Builder marketDataRestClientBuilder() {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(1_000);
         factory.setReadTimeout(3_000);

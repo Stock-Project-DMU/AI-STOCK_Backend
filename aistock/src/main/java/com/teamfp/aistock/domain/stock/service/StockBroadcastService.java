@@ -7,27 +7,28 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
+import com.teamfp.aistock.domain.order.service.OrderExecutionService;
 import com.teamfp.aistock.domain.stock.dto.HogaDto;
 import com.teamfp.aistock.domain.stock.dto.PriceDirection;
 import com.teamfp.aistock.domain.stock.dto.StockPriceDto;
 import com.teamfp.aistock.domain.stock.dto.response.HogaResponse;
 import com.teamfp.aistock.domain.stock.dto.response.StockPriceResponse;
 import com.teamfp.aistock.global.redis.RedisStockCacheService;
-import com.teamfp.aistock.infra.ls.LsMarketDataListener;
-import com.teamfp.aistock.infra.ls.dto.LsHogaData;
-import com.teamfp.aistock.infra.ls.dto.LsTickData;
+import com.teamfp.aistock.infra.marketdata.MarketDataListener;
+import com.teamfp.aistock.infra.marketdata.dto.HogaData;
+import com.teamfp.aistock.infra.marketdata.dto.TickData;
 
 import lombok.RequiredArgsConstructor;
 
 /**
- * LS증권 실시간 체결/호가를 수신해 Redis 캐싱 + STOMP 브로드캐스팅으로 동시에 처리한다
- * (CLAUDE.md 8번 아키텍처). tick 자체의 Throttle(200ms)은 LsWebSocketHandler/AsyncConfig
+ * 외부 시세 데이터 제공사 실시간 체결/호가를 수신해 Redis 캐싱 + STOMP 브로드캐스팅으로 동시에 처리한다
+ * (CLAUDE.md 8번 아키텍처). tick 자체의 Throttle(200ms)은 MarketDataWebSocketHandler/AsyncConfig
  * 어디에도 구현돼있지 않아(NAMING.md 8-4 참고) 이 서비스에서 종목별로 직접 적용한다 — 체결과
  * 호가는 별도 스트림이라 각각 독립적인 200ms 창을 둔다.
  */
 @Service
 @RequiredArgsConstructor
-public class StockBroadcastService implements LsMarketDataListener {
+public class StockBroadcastService implements MarketDataListener {
 
     private static final long THROTTLE_INTERVAL_MILLIS = 200L;
     private static final String STOCK_PRICE_TOPIC_PREFIX = "/topic/stock/";
@@ -36,12 +37,17 @@ public class StockBroadcastService implements LsMarketDataListener {
     private final RedisStockCacheService redisStockCacheService;
     private final StockNameResolver stockNameResolver;
     private final SimpMessagingTemplate messagingTemplate;
+    // 지정가 체결 판단(CLAUDE.md 8번 "tick 수신 시 pending:orders 확인 → 조건 충족 시
+    // 낙관적 락으로 체결"). OrderExecutionService 자체는 tick 수신 경로를 모르고 호출만
+    // 기다리는 구조라(OrderExecutionService 클래스 상단 Javadoc 참고), 실제 tick 파이프라인인
+    // 여기서 종목코드·체결가를 넘겨 호출해야 지정가 주문이 실제로 체결된다.
+    private final OrderExecutionService orderExecutionService;
 
     private final ConcurrentHashMap<String, Long> lastTickProcessedAt = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> lastHogaProcessedAt = new ConcurrentHashMap<>();
 
     @Override
-    public void onTickReceived(LsTickData tickData) {
+    public void onTickReceived(TickData tickData) {
         String stockCode = tickData.getStockCode();
         if (isThrottled(lastTickProcessedAt, stockCode)) {
             return;
@@ -50,6 +56,7 @@ public class StockBroadcastService implements LsMarketDataListener {
         StockPriceDto dto = toStockPriceDto(tickData);
         redisStockCacheService.saveStockPrice(stockCode, dto);
         broadcastPrice(stockCode, dto);
+        orderExecutionService.checkAndExecute(stockCode, tickData.getCurrentPrice());
     }
 
     public void broadcastPrice(String stockCode, StockPriceDto dto) {
@@ -57,7 +64,7 @@ public class StockBroadcastService implements LsMarketDataListener {
     }
 
     @Override
-    public void onHogaReceived(LsHogaData hogaData) {
+    public void onHogaReceived(HogaData hogaData) {
         String stockCode = hogaData.getStockCode();
         if (isThrottled(lastHogaProcessedAt, stockCode)) {
             return;
@@ -73,11 +80,11 @@ public class StockBroadcastService implements LsMarketDataListener {
                 STOCK_PRICE_TOPIC_PREFIX + stockCode + STOCK_HOGA_TOPIC_SUFFIX, HogaResponse.from(dto));
     }
 
-    private StockPriceDto toStockPriceDto(LsTickData tickData) {
+    private StockPriceDto toStockPriceDto(TickData tickData) {
         String stockCode = tickData.getStockCode();
         String stockName = resolveStockName(stockCode, tickData.getStockName());
         PriceDirection direction = PriceDirection.fromChangeRate(tickData.getChangeRate());
-        // LS 원본 change 필드는 부호 없는 절대값이라, changeRate로 판단한 방향을 부호로 적용한다.
+        // 외부 시세 데이터 원본 change 필드는 부호 없는 절대값이라, changeRate로 판단한 방향을 부호로 적용한다.
         long changeAmount = direction == PriceDirection.DOWN ? -tickData.getChangeAmount() : tickData.getChangeAmount();
 
         return StockPriceDto.builder()
@@ -91,7 +98,7 @@ public class StockBroadcastService implements LsMarketDataListener {
                 .build();
     }
 
-    private HogaDto toHogaDto(LsHogaData hogaData) {
+    private HogaDto toHogaDto(HogaData hogaData) {
         return HogaDto.builder()
                 .stockCode(hogaData.getStockCode())
                 .askPrices(hogaData.getAskPrices())
@@ -102,7 +109,7 @@ public class StockBroadcastService implements LsMarketDataListener {
                 .build();
     }
 
-    // LsTickData.stockName은 항상 null(NAMING.md 6번)이라 StockNameResolver로 우리 DB에서
+    // TickData.stockName은 항상 null(NAMING.md 6번)이라 StockNameResolver로 우리 DB에서
     // 찾는다 — 어디에도 없으면(KNOWN_ISSUES.md 1번) stockCode를 이름 대신 사용한다.
     private String resolveStockName(String stockCode, String tickStockName) {
         if (tickStockName != null) {

@@ -38,15 +38,14 @@ import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.repository.InvestmentProfileRepository;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.redis.RedisAiToolCacheService;
-import com.teamfp.aistock.global.redis.RedisRateLimiterService;
 import com.teamfp.aistock.infra.dart.DartApiClient;
 import com.teamfp.aistock.infra.gemini.GeminiApiClient;
-import com.teamfp.aistock.infra.ls.LsAccessTokenProvider;
-import com.teamfp.aistock.infra.ls.LsHighItemApiClient;
-import com.teamfp.aistock.infra.ls.LsInvestInfoApiClient;
-import com.teamfp.aistock.infra.ls.LsInvestorTrendApiClient;
-import com.teamfp.aistock.infra.ls.LsMarketDataApiClient;
-import com.teamfp.aistock.infra.ls.LsSectorApiClient;
+import com.teamfp.aistock.infra.marketdata.MarketDataAccessTokenProvider;
+import com.teamfp.aistock.infra.marketdata.HighItemApiClient;
+import com.teamfp.aistock.infra.marketdata.InvestInfoApiClient;
+import com.teamfp.aistock.infra.marketdata.InvestorTrendApiClient;
+import com.teamfp.aistock.infra.marketdata.MarketDataApiClient;
+import com.teamfp.aistock.infra.marketdata.SectorApiClient;
 import com.teamfp.aistock.infra.naver.NaverNewsApiClient;
 
 /**
@@ -122,7 +121,6 @@ class LiveGeminiManualCheck {
         redisTemplate.setHashValueSerializer(new StringRedisSerializer());
         redisTemplate.afterPropertiesSet();
 
-        RedisRateLimiterService rateLimiterService = new RedisRateLimiterService(redisTemplate);
         RedisAiToolCacheService aiToolCacheService = new RedisAiToolCacheService(redisTemplate);
 
         GeminiApiClient geminiApiClient = new GeminiApiClient(RestClient.builder());
@@ -142,60 +140,60 @@ class LiveGeminiManualCheck {
         ReflectionTestUtils.setField(naverNewsApiClient, "clientSecret", System.getenv("NAVER_CLIENT_SECRET"));
         ReflectionTestUtils.setField(naverNewsApiClient, "apiUrl", "https://naverapihub.apigw.ntruss.com/search/v1/news");
 
-        // LsAccessTokenProvider(2026-08-10 분리) — LsMarketDataApiClient/LsInvestorTrendApiClient/
-        // LsInvestInfoApiClient 3개가 공유하는 토큰 발급 컴포넌트. 이 셋이 전부 같은 인스턴스를
+        // MarketDataAccessTokenProvider(2026-08-10 분리) — MarketDataApiClient/InvestorTrendApiClient/
+        // InvestInfoApiClient 3개가 공유하는 토큰 발급 컴포넌트. 이 셋이 전부 같은 인스턴스를
         // 주입받아야 실제로도 동일한 발급 로직을 타는 실제 서비스 구성과 같아진다.
-        LsAccessTokenProvider lsAccessTokenProvider = new LsAccessTokenProvider(RestClient.builder());
-        ReflectionTestUtils.setField(lsAccessTokenProvider, "tokenUrl", "https://openapi.ls-sec.co.kr:8080/oauth2/token");
-        ReflectionTestUtils.setField(lsAccessTokenProvider, "appKey", System.getenv("LS_APP_KEY"));
-        ReflectionTestUtils.setField(lsAccessTokenProvider, "appSecret", System.getenv("LS_APP_SECRET"));
+        MarketDataAccessTokenProvider marketDataAccessTokenProvider = new MarketDataAccessTokenProvider(RestClient.builder());
+        ReflectionTestUtils.setField(marketDataAccessTokenProvider, "tokenUrl", "https://openapi.ls-sec.co.kr:8080/oauth2/token");
+        ReflectionTestUtils.setField(marketDataAccessTokenProvider, "appKey", System.getenv("MARKET_DATA_APP_KEY"));
+        ReflectionTestUtils.setField(marketDataAccessTokenProvider, "appSecret", System.getenv("MARKET_DATA_APP_SECRET"));
 
-        LsMarketDataApiClient lsMarketDataApiClient = new LsMarketDataApiClient(lsAccessTokenProvider, RestClient.builder());
-        ReflectionTestUtils.setField(lsMarketDataApiClient, "marketDataUrl", "https://openapi.ls-sec.co.kr:8080/stock/market-data");
+        MarketDataApiClient marketDataApiClient = new MarketDataApiClient(marketDataAccessTokenProvider, Optional.empty(), RestClient.builder());
+        ReflectionTestUtils.setField(marketDataApiClient, "marketDataUrl", "https://openapi.ls-sec.co.kr:8080/stock/market-data");
 
-        LsInvestorTrendApiClient lsInvestorTrendApiClient = new LsInvestorTrendApiClient(lsAccessTokenProvider, RestClient.builder());
-        ReflectionTestUtils.setField(lsInvestorTrendApiClient, "frgrIttUrl", "https://openapi.ls-sec.co.kr:8080/stock/frgr-itt");
+        InvestorTrendApiClient investorTrendApiClient = new InvestorTrendApiClient(marketDataAccessTokenProvider, RestClient.builder());
+        ReflectionTestUtils.setField(investorTrendApiClient, "frgrIttUrl", "https://openapi.ls-sec.co.kr:8080/stock/frgr-itt");
 
-        LsInvestInfoApiClient lsInvestInfoApiClient = new LsInvestInfoApiClient(lsAccessTokenProvider, RestClient.builder());
-        ReflectionTestUtils.setField(lsInvestInfoApiClient, "investInfoUrl", "https://openapi.ls-sec.co.kr:8080/stock/investinfo");
+        InvestInfoApiClient investInfoApiClient = new InvestInfoApiClient(marketDataAccessTokenProvider, RestClient.builder());
+        ReflectionTestUtils.setField(investInfoApiClient, "investInfoUrl", "https://openapi.ls-sec.co.kr:8080/stock/investinfo");
 
         // 2026-08-11 추가 — get_market_ranking/get_theme_info 도구 전용.
-        LsHighItemApiClient lsHighItemApiClient = new LsHighItemApiClient(lsAccessTokenProvider, RestClient.builder());
-        ReflectionTestUtils.setField(lsHighItemApiClient, "highItemUrl", "https://openapi.ls-sec.co.kr:8080/stock/high-item");
+        HighItemApiClient highItemApiClient = new HighItemApiClient(marketDataAccessTokenProvider, RestClient.builder());
+        ReflectionTestUtils.setField(highItemApiClient, "highItemUrl", "https://openapi.ls-sec.co.kr:8080/stock/high-item");
 
-        LsSectorApiClient lsSectorApiClient = new LsSectorApiClient(lsAccessTokenProvider, RestClient.builder());
-        ReflectionTestUtils.setField(lsSectorApiClient, "sectorUrl", "https://openapi.ls-sec.co.kr:8080/stock/sector");
+        SectorApiClient sectorApiClient = new SectorApiClient(marketDataAccessTokenProvider, RestClient.builder());
+        ReflectionTestUtils.setField(sectorApiClient, "sectorUrl", "https://openapi.ls-sec.co.kr:8080/stock/sector");
 
         // 2026-08-11 추가 — 나머지 13개 도구 전용 클라이언트.
-        com.teamfp.aistock.infra.ls.LsEtfApiClient lsEtfApiClient =
-                new com.teamfp.aistock.infra.ls.LsEtfApiClient(lsAccessTokenProvider, RestClient.builder());
-        ReflectionTestUtils.setField(lsEtfApiClient, "etfUrl", "https://openapi.ls-sec.co.kr:8080/stock/etf");
+        com.teamfp.aistock.infra.marketdata.EtfApiClient etfApiClient =
+                new com.teamfp.aistock.infra.marketdata.EtfApiClient(marketDataAccessTokenProvider, RestClient.builder());
+        ReflectionTestUtils.setField(etfApiClient, "etfUrl", "https://openapi.ls-sec.co.kr:8080/stock/etf");
 
-        com.teamfp.aistock.infra.ls.LsProgramApiClient lsProgramApiClient =
-                new com.teamfp.aistock.infra.ls.LsProgramApiClient(lsAccessTokenProvider, RestClient.builder());
-        ReflectionTestUtils.setField(lsProgramApiClient, "programUrl", "https://openapi.ls-sec.co.kr:8080/stock/program");
+        com.teamfp.aistock.infra.marketdata.ProgramApiClient programApiClient =
+                new com.teamfp.aistock.infra.marketdata.ProgramApiClient(marketDataAccessTokenProvider, RestClient.builder());
+        ReflectionTestUtils.setField(programApiClient, "programUrl", "https://openapi.ls-sec.co.kr:8080/stock/program");
 
-        com.teamfp.aistock.infra.ls.LsInvestorApiClient lsInvestorApiClient =
-                new com.teamfp.aistock.infra.ls.LsInvestorApiClient(lsAccessTokenProvider, RestClient.builder());
-        ReflectionTestUtils.setField(lsInvestorApiClient, "investorUrl", "https://openapi.ls-sec.co.kr:8080/stock/investor");
+        com.teamfp.aistock.infra.marketdata.InvestorApiClient investorApiClient =
+                new com.teamfp.aistock.infra.marketdata.InvestorApiClient(marketDataAccessTokenProvider, RestClient.builder());
+        ReflectionTestUtils.setField(investorApiClient, "investorUrl", "https://openapi.ls-sec.co.kr:8080/stock/investor");
 
-        com.teamfp.aistock.infra.ls.LsEtcApiClient lsEtcApiClient =
-                new com.teamfp.aistock.infra.ls.LsEtcApiClient(lsAccessTokenProvider, RestClient.builder());
-        ReflectionTestUtils.setField(lsEtcApiClient, "etcUrl", "https://openapi.ls-sec.co.kr:8080/stock/etc");
+        com.teamfp.aistock.infra.marketdata.EtcApiClient etcApiClient =
+                new com.teamfp.aistock.infra.marketdata.EtcApiClient(marketDataAccessTokenProvider, RestClient.builder());
+        ReflectionTestUtils.setField(etcApiClient, "etcUrl", "https://openapi.ls-sec.co.kr:8080/stock/etc");
 
-        com.teamfp.aistock.infra.ls.LsIndustryApiClient lsIndustryApiClient =
-                new com.teamfp.aistock.infra.ls.LsIndustryApiClient(lsAccessTokenProvider, RestClient.builder());
-        ReflectionTestUtils.setField(lsIndustryApiClient, "industryUrl", "https://openapi.ls-sec.co.kr:8080/indtp/market-data");
+        com.teamfp.aistock.infra.marketdata.IndustryApiClient industryApiClient =
+                new com.teamfp.aistock.infra.marketdata.IndustryApiClient(marketDataAccessTokenProvider, RestClient.builder());
+        ReflectionTestUtils.setField(industryApiClient, "industryUrl", "https://openapi.ls-sec.co.kr:8080/indtp/market-data");
 
         Executor syncExecutor = Runnable::run;
 
         AiPlanningService aiPlanningService = new AiPlanningService(
                 org.mockito.Mockito.mock(com.teamfp.aistock.domain.ai.service.PlanningPreferencesService.class),
                 sessionRepository, messageRepository, userRepository, investmentProfileRepository,
-                accountService, holdingValuationService, rateLimiterService, aiToolCacheService,
-                geminiApiClient, dartApiClient, naverNewsApiClient, lsMarketDataApiClient,
-                lsInvestorTrendApiClient, lsInvestInfoApiClient, lsHighItemApiClient, lsSectorApiClient,
-                lsEtfApiClient, lsProgramApiClient, lsInvestorApiClient, lsEtcApiClient, lsIndustryApiClient,
+                accountService, holdingValuationService, aiToolCacheService,
+                geminiApiClient, dartApiClient, naverNewsApiClient, marketDataApiClient,
+                investorTrendApiClient, investInfoApiClient, highItemApiClient, sectorApiClient,
+                etfApiClient, programApiClient, investorApiClient, etcApiClient, industryApiClient,
                 syncExecutor);
         ReflectionTestUtils.setField(aiPlanningService, "self", aiPlanningService);
 

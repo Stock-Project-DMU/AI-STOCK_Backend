@@ -3,7 +3,7 @@ package com.teamfp.aistock.domain.stock.service;
 import org.springframework.stereotype.Service;
 import com.teamfp.aistock.domain.stock.dto.StockPriceDto;
 import com.teamfp.aistock.global.redis.RedisStockCacheService;
-import com.teamfp.aistock.infra.ls.LsMarketDataApiClient;
+import com.teamfp.aistock.infra.marketdata.MarketDataApiClient;
 import lombok.RequiredArgsConstructor;
 
 /** Server-verified quote for watchlists and simulated orders when no live tick is cached. */
@@ -11,14 +11,14 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class StockQuoteService {
     private final RedisStockCacheService redisStockCacheService;
-    private final LsMarketDataApiClient lsMarketDataApiClient;
+    private final MarketDataApiClient marketDataApiClient;
 
     public StockPriceDto getStockPrice(String stockCode) {
         StockPriceDto cached = redisStockCacheService.getStockPrice(stockCode);
         if (cached != null && cached.getCurrentPrice() > 0
                 && cached.getStockName() != null && !cached.getStockName().isBlank()) return cached;
         // Do not publish REST snapshots as live ticks or trigger pending-order execution.
-        return lsMarketDataApiClient.getCurrentPrice(stockCode)
+        return marketDataApiClient.getCurrentPrice(stockCode)
                 .filter(q -> q.getCurrentPrice() > 0
                         && q.getStockName() != null && !q.getStockName().isBlank())
                 .map(q -> StockPriceDto.builder().stockCode(stockCode).stockName(q.getStockName())

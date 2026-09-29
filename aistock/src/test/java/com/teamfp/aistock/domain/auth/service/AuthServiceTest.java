@@ -5,6 +5,8 @@ import com.teamfp.aistock.domain.account.dto.response.AccountInfoResponse;
 import com.teamfp.aistock.domain.account.entity.AccountStatus;
 import com.teamfp.aistock.domain.account.service.AccountService;
 import com.teamfp.aistock.domain.auth.dto.request.SignupRequest;
+import com.teamfp.aistock.domain.auth.dto.request.RecoveryEmailCodeRequest;
+import com.teamfp.aistock.domain.auth.dto.request.RecoveryEmailCodeRequest.RecoveryPurpose;
 import com.teamfp.aistock.domain.auth.dto.response.SignupResponse;
 import com.teamfp.aistock.domain.user.entity.Role;
 import com.teamfp.aistock.domain.user.entity.User;
@@ -12,6 +14,7 @@ import com.teamfp.aistock.domain.user.repository.SocialAccountRepository;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
+import com.teamfp.aistock.global.redis.EmailVerificationPurpose;
 import com.teamfp.aistock.global.redis.RedisAuthCodeService;
 import com.teamfp.aistock.global.redis.RedisTokenService;
 import com.teamfp.aistock.global.security.JwtProvider;
@@ -25,6 +28,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -39,6 +43,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
@@ -59,6 +64,8 @@ class AuthServiceTest {
     @Mock
     private RedisAuthCodeService redisAuthCodeService;
     @Mock
+    private RecoveryEmailService recoveryEmailService;
+    @Mock
     private MailClient mailClient;
     @Mock
     private AccountService accountService;
@@ -66,21 +73,85 @@ class AuthServiceTest {
     private AuthService authService;
 
     @Test
-    void recoveryRejectsCodeBeforeLookingUpIdentity() {
-        var request = new com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest(
-                "tester01", "테스터", "tester01@example.com", LocalDate.of(2000, 1, 1), "000000", "newpass123");
-        assertThatThrownBy(() -> authService.findLoginId(request)).isInstanceOf(CustomException.class);
+    void recoverySendCodeAlwaysDelegatesWithoutExposingIdentity() {
+        var request = new RecoveryEmailCodeRequest(RecoveryPurpose.FIND_ID,
+                null, "다른 이름", "tester01@example.com", LocalDate.of(2000, 1, 1));
+        authService.sendRecoveryEmailCode(request);
+        verify(recoveryEmailService).sendCode(request);
         verify(userRepository, never()).findByEmail(anyString());
+    }
+
+    @Test
+    void recoverySendCodeDoesNotExposeQueueSaturation() {
+        var request = new RecoveryEmailCodeRequest(RecoveryPurpose.FIND_ID,
+                null, "테스터", "tester01@example.com", LocalDate.of(2000, 1, 1));
+        doThrow(new TaskRejectedException("queue full")).when(recoveryEmailService).sendCode(request);
+
+        authService.sendRecoveryEmailCode(request);
+
+        verify(recoveryEmailService).sendCode(request);
+    }
+
+    @Test
+    void recoveryRejectsUnverifiedEmailBeforeReturningId() {
+        var request = new com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest(
+                null, "테스터", "tester01@example.com", LocalDate.of(2000, 1, 1), null);
+        assertThatThrownBy(() -> authService.findLoginId(request))
+                .isInstanceOf(CustomException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.EMAIL_NOT_VERIFIED);
+        verify(userRepository, never()).findByEmail(anyString());
+    }
+
+    @Test
+    void findIdRecoveryReturnsLoginIdAfterEmailVerification() {
+        var request = new com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest(
+                null, "테스터", "tester01@example.com", LocalDate.of(2000, 1, 1), null);
+        var user = User.builder().loginId("tester01").name(request.name()).email(request.email())
+                .birthdate(request.birthdate()).isActive(true).build();
+        given(userRepository.findByEmail(request.email())).willReturn(java.util.Optional.of(user));
+        given(redisAuthCodeService.isEmailVerified(request.email(), EmailVerificationPurpose.FIND_ID)).willReturn(true);
+        given(redisAuthCodeService.consumeEmailVerified(request.email(), EmailVerificationPurpose.FIND_ID)).willReturn(true);
+
+        assertThat(authService.findLoginId(request)).isEqualTo("tester01");
+        verify(redisAuthCodeService).consumeEmailVerified(request.email(), EmailVerificationPurpose.FIND_ID);
+    }
+
+    @Test
+    void idRecoveryRequiresFindIdVerification() {
+        var request = new com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest(
+                null, "테스터", "tester01@example.com", LocalDate.of(2000, 1, 1), null);
+
+        assertThatThrownBy(() -> authService.findLoginId(request))
+                .isInstanceOf(CustomException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.EMAIL_NOT_VERIFIED);
+        verify(redisAuthCodeService).isEmailVerified(request.email(), EmailVerificationPurpose.FIND_ID);
+        verify(userRepository, never()).findByEmail(anyString());
+    }
+
+    @Test
+    void verifiedEmailWithWrongIdentityDoesNotConsumeVerification() {
+        var request = new com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest(
+                null, "다른 이름", "tester01@example.com", LocalDate.of(2000, 1, 1), null);
+        var user = User.builder().loginId("tester01").name("테스터").email(request.email())
+                .birthdate(request.birthdate()).isActive(true).build();
+        given(redisAuthCodeService.isEmailVerified(request.email(), EmailVerificationPurpose.FIND_ID)).willReturn(true);
+        given(userRepository.findByEmail(request.email())).willReturn(java.util.Optional.of(user));
+
+        assertThatThrownBy(() -> authService.findLoginId(request))
+                .isInstanceOf(CustomException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.RECOVERY_INFO_MISMATCH);
+        verify(redisAuthCodeService, never()).consumeEmailVerified(request.email(), EmailVerificationPurpose.FIND_ID);
     }
 
     @Test
     void passwordRecoveryUpdatesHashAndRevokesRefreshToken() {
         var request = new com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest(
-                "tester01", "테스터", "tester01@example.com", null, "123456", "newpass123");
+                "tester01", "테스터", "tester01@example.com", null, "newpass123");
         var user = User.builder().loginId("tester01").name("테스터").email("tester01@example.com")
                 .password("oldHash").isActive(true).build();
         ReflectionTestUtils.setField(user, "userId", 10L);
-        given(redisAuthCodeService.verifyAndDeleteEmailCode(request.email(), request.code())).willReturn(true);
+        given(redisAuthCodeService.isEmailVerified(request.email(), EmailVerificationPurpose.RESET_PASSWORD)).willReturn(true);
+        given(redisAuthCodeService.consumeEmailVerified(request.email(), EmailVerificationPurpose.RESET_PASSWORD)).willReturn(true);
         given(userRepository.findByEmail(request.email())).willReturn(java.util.Optional.of(user));
         given(passwordEncoder.encode(request.newPassword())).willReturn("newHash");
         authService.resetPassword(request);
@@ -105,6 +176,7 @@ class AuthServiceTest {
                 jwtProvider,
                 redisTokenService,
                 redisAuthCodeService,
+                recoveryEmailService,
                 mailClient,
                 accountService,
                 List.of(),
@@ -291,6 +363,7 @@ class AuthServiceTest {
         @DisplayName("6자리 인증코드를 생성해 Redis에 저장하고 메일로 발송한다")
         void sendEmailCode_savesAndSendsSixDigitCode() {
             String email = "tester01@example.com";
+            given(redisAuthCodeService.tryStartEmailSend(email)).willReturn(true);
 
             authService.sendEmailCode(email);
 
@@ -302,6 +375,14 @@ class AuthServiceTest {
             assertThat(redisCodeCaptor.getValue()).matches("\\d{6}");
             assertThat(mailCodeCaptor.getValue()).isEqualTo(redisCodeCaptor.getValue());
         }
+
+        @Test
+        void sendEmailCode_rejectsRequestsDuringCooldown() {
+            assertThatThrownBy(() -> authService.sendEmailCode("tester01@example.com"))
+                    .isInstanceOf(CustomException.class)
+                    .extracting("errorCode").isEqualTo(ErrorCode.EMAIL_SEND_COOLDOWN);
+            verify(mailClient, never()).sendAuthCode(anyString(), anyString());
+        }
     }
 
     @Nested
@@ -312,26 +393,23 @@ class AuthServiceTest {
         @DisplayName("코드가 일치하면 예외 없이 통과한다")
         void verifyEmailCode_matched_doesNotThrow() {
             given(redisAuthCodeService.verifyAndDeleteEmailCode("tester01@example.com", "123456"))
-                    .willReturn(true);
+                    .willReturn(EmailVerificationPurpose.FIND_ID);
 
             authService.verifyEmailCode("tester01@example.com", "123456");
 
             verify(redisAuthCodeService).verifyAndDeleteEmailCode("tester01@example.com", "123456");
-            verify(redisAuthCodeService).markEmailVerified("tester01@example.com");
+            verify(redisAuthCodeService).markEmailVerified("tester01@example.com", EmailVerificationPurpose.FIND_ID);
         }
 
         @Test
         @DisplayName("코드가 일치하지 않거나 만료되었으면 EMAIL_CODE_MISMATCH 예외를 던진다")
         void verifyEmailCode_notMatched_throwsException() {
-            given(redisAuthCodeService.verifyAndDeleteEmailCode(anyString(), anyString()))
-                    .willReturn(false);
-
             assertThatThrownBy(() -> authService.verifyEmailCode("tester01@example.com", "000000"))
                     .isInstanceOf(CustomException.class)
                     .extracting(e -> ((CustomException) e).getErrorCode())
                     .isEqualTo(ErrorCode.EMAIL_CODE_MISMATCH);
 
-            verify(redisAuthCodeService, never()).markEmailVerified(anyString());
+            verify(redisAuthCodeService, never()).markEmailVerified(anyString(), any());
         }
     }
 }

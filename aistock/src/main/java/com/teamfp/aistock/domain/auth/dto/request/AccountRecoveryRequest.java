@@ -12,6 +12,5 @@ public record AccountRecoveryRequest(
         @NotBlank @Size(max = 100) String name,
         @NotBlank @Email String email,
         LocalDate birthdate,
-        @NotBlank @Pattern(regexp = "[0-9]{6}") String code,
         @Pattern(regexp = "^(?=.*[A-Za-z])(?=.*\\d).{8,}$") @MaxByteSize(max = 72) String newPassword
 ) {}
