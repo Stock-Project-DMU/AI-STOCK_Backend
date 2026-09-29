@@ -42,7 +42,7 @@ public class AuthController {
     @PostMapping("/recovery/send-code")
     public ApiResponse<Void> sendRecoveryEmailCode(@Valid @RequestBody RecoveryEmailCodeRequest request) {
         authService.sendRecoveryEmailCode(request);
-        return ApiResponse.success("인증코드가 발송되었습니다.", null);
+        return ApiResponse.success("정보가 일치하면 인증코드를 발송합니다.", null);
     }
 
     private final AuthService authService;

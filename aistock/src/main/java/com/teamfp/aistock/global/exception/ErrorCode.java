@@ -13,6 +13,7 @@ public enum ErrorCode {
     EMAIL_CODE_MISMATCH(HttpStatus.BAD_REQUEST, "EMAIL_CODE_MISMATCH", "이메일 인증 코드가 일치하지 않습니다."),
     EMAIL_CODE_EXPIRED(HttpStatus.BAD_REQUEST, "EMAIL_CODE_EXPIRED", "이메일 인증 코드가 만료되었습니다."),
     EMAIL_NOT_VERIFIED(HttpStatus.BAD_REQUEST, "EMAIL_NOT_VERIFIED", "이메일 인증이 필요합니다."),
+    EMAIL_SEND_COOLDOWN(HttpStatus.TOO_MANY_REQUESTS, "EMAIL_SEND_COOLDOWN", "인증번호를 다시 요청하기 전에 잠시 기다려 주세요."),
     RECOVERY_INFO_MISMATCH(HttpStatus.BAD_REQUEST, "RECOVERY_INFO_MISMATCH", "입력한 회원 정보가 일치하지 않습니다."),
     INSUFFICIENT_BALANCE(HttpStatus.BAD_REQUEST, "INSUFFICIENT_BALANCE", "계좌 잔액이 부족합니다."),
     INSUFFICIENT_HOLDING(HttpStatus.BAD_REQUEST, "INSUFFICIENT_HOLDING", "보유 주식이 부족합니다."),
