@@ -70,6 +70,7 @@ class OrderServiceIntegrationTest {
         // 사용자 눈으로 DB에 남은 실제 행을 직접 확인해볼 수 있도록 이번엔 @Transactional을 빼서
         // 테스트가 끝나도 롤백되지 않고 커밋된 채로 남긴다(재실행 시 중복 방지용으로 매번 다른 값 사용).
         long uniqueSuffix = System.currentTimeMillis();
+        String stockCode = "T" + Long.toString(uniqueSuffix, 36).toUpperCase();
 
         // 1) 실제 MySQL에 사용자 + 계좌를 만든다 (잔고 100만원)
         User user = userRepository.save(User.builder()
@@ -94,15 +95,15 @@ class OrderServiceIntegrationTest {
                 + ", balance=" + account.getBalance() + "원");
 
         // 2) 실제 Redis에 현재가 캐시를 채운다 (외부 시세 데이터 제공사 WebSocket 대신 수동 시딩)
-        redisStockCacheService.saveStockPrice("005930", StockPriceDto.builder()
-                .stockCode("005930")
-                .stockName("삼성전자")
+        redisStockCacheService.saveStockPrice(stockCode, StockPriceDto.builder()
+                .stockCode(stockCode)
+                .stockName("통합테스트종목")
                 .currentPrice(70_000L)
                 .build());
-        System.out.println("[Redis] stock:price:005930 = 70,000원으로 시딩 완료");
+        System.out.println("[Redis] 테스트 종목 현재가 70,000원 시딩 완료");
 
         // 3) OrderService 빈을 직접 호출 (Controller/JWT 레이어는 이 테스트 범위 밖)
-        CreateOrderRequest request = new CreateOrderRequest(account.getAccountId(), "005930", OrderType.BUY, 10, PriceType.MARKET, 0L);
+        CreateOrderRequest request = new CreateOrderRequest(account.getAccountId(), stockCode, OrderType.BUY, 10, PriceType.MARKET, 0L);
         CreateOrderResponse response = orderService.createMarketOrder(user.getUserId(), request);
 
         System.out.println("[체결 결과] orderId=" + response.orderId()
