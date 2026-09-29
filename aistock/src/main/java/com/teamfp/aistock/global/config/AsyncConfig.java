@@ -28,6 +28,17 @@ public class AsyncConfig {
         return executor;
     }
 
+    @Bean
+    public Executor mailTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(200);
+        executor.setThreadNamePrefix("mail-executor-");
+        executor.initialize();
+        return executor;
+    }
+
     // AiPlanningService.converseWithTools()가 Gemini의 parallel function calling 응답(한
     // 라운드에서 여러 도구를 동시에 요청)을 실제로 동시에 실행할 때 쓴다. 도구 실행은 DART/네이버
     // 호출을 기다리는 블로킹 I/O라, ForkJoinPool.commonPool()(다른 병렬 스트림과 공유)을 쓰면

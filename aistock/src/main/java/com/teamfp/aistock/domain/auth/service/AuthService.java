@@ -4,6 +4,8 @@ import com.teamfp.aistock.domain.account.dto.request.CreateAccountRequest;
 import com.teamfp.aistock.domain.account.service.AccountService;
 import com.teamfp.aistock.domain.auth.dto.request.LoginRequest;
 import com.teamfp.aistock.domain.auth.dto.request.OAuthLoginRequest;
+import com.teamfp.aistock.domain.auth.dto.request.RecoveryEmailCodeRequest;
+import com.teamfp.aistock.domain.auth.dto.request.RecoveryEmailCodeRequest.RecoveryPurpose;
 import com.teamfp.aistock.domain.auth.dto.request.SignupRequest;
 import com.teamfp.aistock.domain.auth.dto.response.LoginResponse;
 import com.teamfp.aistock.domain.auth.dto.response.SignupResponse;
@@ -17,6 +19,7 @@ import com.teamfp.aistock.domain.user.repository.SocialAccountRepository;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
+import com.teamfp.aistock.global.redis.EmailVerificationPurpose;
 import com.teamfp.aistock.global.redis.RedisAuthCodeService;
 import com.teamfp.aistock.global.redis.RedisTokenService;
 import com.teamfp.aistock.global.security.JwtProvider;
@@ -29,11 +32,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -54,11 +59,19 @@ public class AuthService {
     }
 
     public String findLoginId(com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest request) {
-        User user = verifyRecoveryIdentity(request);
-        if (request.birthdate() == null || !request.birthdate().equals(user.getBirthdate())) {
-            throw new CustomException(ErrorCode.INVALID_INPUT);
-        }
+        requireVerifiedRecoveryEmail(request.email(), EmailVerificationPurpose.FIND_ID);
+        User user = findRecoveryUser(RecoveryPurpose.FIND_ID, request.email(), request.name(),
+                null, request.birthdate());
+        consumeVerifiedRecoveryEmail(request.email(), EmailVerificationPurpose.FIND_ID);
         return user.getLoginId();
+    }
+
+    public void sendRecoveryEmailCode(RecoveryEmailCodeRequest request) {
+        try {
+            recoveryEmailService.sendCode(request);
+        } catch (TaskRejectedException exception) {
+            log.warn("계정 복구 메일 작업 큐가 가득 차 요청을 처리하지 못했습니다.");
+        }
     }
 
     @Transactional
@@ -67,23 +80,40 @@ public class AuthService {
                 || request.loginId() == null || request.loginId().isBlank()) {
             throw new CustomException(ErrorCode.INVALID_INPUT);
         }
-        User user = verifyRecoveryIdentity(request);
-        if (!request.loginId().equals(user.getLoginId())) {
-            throw new CustomException(ErrorCode.INVALID_INPUT);
-        }
+        requireVerifiedRecoveryEmail(request.email(), EmailVerificationPurpose.RESET_PASSWORD);
+        User user = findRecoveryUser(RecoveryPurpose.RESET_PASSWORD, request.email(),
+                request.name(), request.loginId(), null);
+        consumeVerifiedRecoveryEmail(request.email(), EmailVerificationPurpose.RESET_PASSWORD);
         user.changePassword(passwordEncoder.encode(request.newPassword()));
         redisTokenService.deleteRefreshToken(user.getUserId());
     }
 
-    private User verifyRecoveryIdentity(com.teamfp.aistock.domain.auth.dto.request.AccountRecoveryRequest request) {
-        // 이메일 소유 증명을 먼저 소비해 비인증 계정 조회와 인증코드 재사용을 차단한다.
-        if (!redisAuthCodeService.verifyAndDeleteEmailCode(request.email(), request.code())) {
-            throw new CustomException(ErrorCode.EMAIL_CODE_MISMATCH);
+    private User findRecoveryUser(RecoveryPurpose purpose, String email, String name,
+                                  String loginId, LocalDate birthdate) {
+        if (purpose == null || email == null || name == null) {
+            throw new CustomException(ErrorCode.RECOVERY_INFO_MISMATCH);
         }
-        return userRepository.findByEmail(request.email())
+        return userRepository.findByEmail(email)
                 .filter(User::isActive)
-                .filter(user -> request.name().equals(user.getName()) && user.getLoginId() != null)
-                .orElseThrow(() -> new CustomException(ErrorCode.INVALID_INPUT));
+                .filter(user -> name.equals(user.getName()) && user.getLoginId() != null)
+                .filter(user -> switch (purpose) {
+                    case FIND_ID -> birthdate != null && birthdate.equals(user.getBirthdate());
+                    case RESET_PASSWORD -> loginId != null && loginId.equals(user.getLoginId())
+                            && user.getPassword() != null;
+                })
+                .orElseThrow(() -> new CustomException(ErrorCode.RECOVERY_INFO_MISMATCH));
+    }
+
+    private void requireVerifiedRecoveryEmail(String email, EmailVerificationPurpose purpose) {
+        if (!redisAuthCodeService.isEmailVerified(email, purpose)) {
+            throw new CustomException(ErrorCode.EMAIL_NOT_VERIFIED);
+        }
+    }
+
+    private void consumeVerifiedRecoveryEmail(String email, EmailVerificationPurpose purpose) {
+        if (!redisAuthCodeService.consumeEmailVerified(email, purpose)) {
+            throw new CustomException(ErrorCode.EMAIL_NOT_VERIFIED);
+        }
     }
 
     private static final SecureRandom EMAIL_CODE_RANDOM = new SecureRandom();
@@ -97,6 +127,7 @@ public class AuthService {
     private final JwtProvider jwtProvider;
     private final RedisTokenService redisTokenService;
     private final RedisAuthCodeService redisAuthCodeService;
+    private final RecoveryEmailService recoveryEmailService;
     private final MailClient mailClient;
     private final AccountService accountService;
     private final Map<SocialProvider, OAuthClient> oauthClients;
@@ -109,6 +140,7 @@ public class AuthService {
             JwtProvider jwtProvider,
             RedisTokenService redisTokenService,
             RedisAuthCodeService redisAuthCodeService,
+            RecoveryEmailService recoveryEmailService,
             MailClient mailClient,
             AccountService accountService,
             List<OAuthClient> clientList,
@@ -120,6 +152,7 @@ public class AuthService {
         this.jwtProvider = jwtProvider;
         this.redisTokenService = redisTokenService;
         this.redisAuthCodeService = redisAuthCodeService;
+        this.recoveryEmailService = recoveryEmailService;
         this.mailClient = mailClient;
         this.accountService = accountService;
         this.oauthClients = clientList.stream()
@@ -383,10 +416,13 @@ public class AuthService {
     }
 
     /**
-     * 이메일 인증 코드 발송. 6자리 숫자 코드를 생성해 Redis(auth:email_code:{email}, TTL 5분)에
+     * 이메일 인증 코드 발송. 6자리 숫자 코드를 생성해 Redis(TTL 5분)에
      * 저장한 뒤 MailClient로 실제 메일을 보낸다.
      */
     public void sendEmailCode(String email) {
+        if (!redisAuthCodeService.tryStartEmailSend(email)) {
+            throw new CustomException(ErrorCode.EMAIL_SEND_COOLDOWN);
+        }
         String code = generateEmailCode();
         redisAuthCodeService.saveEmailCode(email, code);
         mailClient.sendAuthCode(email, code);
@@ -395,13 +431,14 @@ public class AuthService {
     /**
      * 이메일 인증 코드 검증. RedisAuthCodeService.verifyAndDeleteEmailCode()는 코드 불일치와
      * TTL 만료(키 없음)를 구분하지 않고 둘 다 false를 반환하므로, 두 경우 모두
-     * EMAIL_CODE_MISMATCH로 응답한다. 검증에 성공하면 signup()이 확인할 인증 완료 마커를 남긴다.
+     * EMAIL_CODE_MISMATCH로 응답한다. 검증에 성공하면 발송 목적에 맞는 인증 완료 마커를 남긴다.
      */
     public void verifyEmailCode(String email, String code) {
-        if (!redisAuthCodeService.verifyAndDeleteEmailCode(email, code)) {
+        EmailVerificationPurpose purpose = redisAuthCodeService.verifyAndDeleteEmailCode(email, code);
+        if (purpose == null) {
             throw new CustomException(ErrorCode.EMAIL_CODE_MISMATCH);
         }
-        redisAuthCodeService.markEmailVerified(email);
+        redisAuthCodeService.markEmailVerified(email, purpose);
     }
 
     private String generateEmailCode() {
