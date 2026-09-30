@@ -35,9 +35,13 @@ public class NewsChatService {
             List.of("companyName", "periodDays"));
 
     public NewsChatResponse chat(Long userId, NewsChatRequest request) {
-        String now = ZonedDateTime.now(ZoneId.of("Asia/Seoul")).toString();
         var setting = settingRepository.findByUserId(userId);
         String outletDomain = setting.map(s -> s.getOutletDomain()).orElse(null);
+        return chatForOutlet(outletDomain, request);
+    }
+
+    public NewsChatResponse chatForOutlet(String outletDomain, NewsChatRequest request) {
+        String now = ZonedDateTime.now(ZoneId.of("Asia/Seoul")).toString();
         String outletName = outletDomain == null ? null : NewsRelevanceMatcher.OUTLET_NAMES.getOrDefault(outletDomain, "선택한 언론사");
         var history = request.history().stream().map(t -> new GeminiRequest.HistoryTurn(
                 t.role().equals("USER") ? "user" : "model", t.content())).toList();

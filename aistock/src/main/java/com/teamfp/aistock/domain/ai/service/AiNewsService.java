@@ -45,7 +45,8 @@ import lombok.extern.slf4j.Slf4j;
  * feature/ai-news(맞춤형 뉴스 브리핑) — AI 재무설계사(AiPlanningService)와는 성격이 다르다.
  * 재무설계사는 사용자 질문마다 대화형으로 답하는 채팅 서비스지만, 이 기능은 사용자가 미리
  * 골라둔 언론사 설정을 바탕으로 매일 스케줄러가 알아서 오늘의 시황을 요약해 브리핑을
- * "만들어 두는" 단방향 비서다(2026-08-24 사용자 확정) — 대화 이력도, 도구 판단도 없다.
+ * "만들어 두는" 비서다. 생성된 브리핑과 별도로 뉴스 검색 채팅의 대화 이력은
+ * NewsChatSessionService가 설정 조합별로 관리한다.
  */
 @Slf4j
 @Service
@@ -335,6 +336,7 @@ public class AiNewsService {
         NewsBriefing briefing = NewsBriefing.builder()
                 .user(setting.getUser())
                 .outletDomain(setting.getOutletDomain())
+                .briefingTime(setting.getBriefingTime())
                 .briefingDate(today)
                 .content(content)
                 .sourceLinksJson(serializeSourceLinks(sourceLinks))

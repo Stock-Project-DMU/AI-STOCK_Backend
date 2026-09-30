@@ -4,15 +4,21 @@ import java.util.List;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.teamfp.aistock.domain.ai.dto.request.NewsBriefingSettingRequest;
+import com.teamfp.aistock.domain.ai.dto.request.NewsChatMessageRequest;
 import com.teamfp.aistock.domain.ai.dto.response.NewsBriefingResponse;
 import com.teamfp.aistock.domain.ai.dto.response.NewsBriefingSettingResponse;
 import com.teamfp.aistock.domain.ai.dto.response.NewsOutletResponse;
+import com.teamfp.aistock.domain.ai.dto.response.NewsChatMessageResponse;
+import com.teamfp.aistock.domain.ai.dto.response.NewsChatSessionsResponse;
 import com.teamfp.aistock.domain.ai.service.AiNewsService;
+import com.teamfp.aistock.domain.ai.service.NewsChatSessionService;
 import com.teamfp.aistock.global.response.ApiResponse;
 import com.teamfp.aistock.global.util.SecurityUtil;
 
@@ -28,12 +34,29 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class AiNewsController {
     private final com.teamfp.aistock.domain.ai.service.NewsChatService newsChatService;
+    private final NewsChatSessionService newsChatSessionService;
 
     @org.springframework.web.bind.annotation.PostMapping("/chat")
     public ApiResponse<com.teamfp.aistock.domain.ai.dto.response.NewsChatResponse> chat(
             @Valid @RequestBody com.teamfp.aistock.domain.ai.dto.request.NewsChatRequest request) {
         Long userId = SecurityUtil.getCurrentUserId();
         return ApiResponse.success(newsChatService.chat(userId, request));
+    }
+
+    @PostMapping("/chat/sessions/sync")
+    public ApiResponse<NewsChatSessionsResponse> syncChatSessions() {
+        return ApiResponse.success(newsChatSessionService.sync(SecurityUtil.getCurrentUserId()));
+    }
+
+    @GetMapping("/chat/sessions/{sessionId}/messages")
+    public ApiResponse<List<NewsChatMessageResponse>> getChatMessages(@PathVariable Long sessionId) {
+        return ApiResponse.success(newsChatSessionService.getMessages(SecurityUtil.getCurrentUserId(), sessionId));
+    }
+
+    @PostMapping("/chat/sessions/{sessionId}/messages")
+    public ApiResponse<List<NewsChatMessageResponse>> sendChatMessage(
+            @PathVariable Long sessionId, @Valid @RequestBody NewsChatMessageRequest request) {
+        return ApiResponse.success(newsChatSessionService.send(SecurityUtil.getCurrentUserId(), sessionId, request));
     }
 
     @GetMapping("/briefings")

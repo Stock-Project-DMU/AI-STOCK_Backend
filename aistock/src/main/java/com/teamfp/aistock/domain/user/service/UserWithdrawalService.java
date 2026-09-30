@@ -47,12 +47,14 @@ public class UserWithdrawalService {
         // DB에 FK CASCADE가 없어도 자식부터 삭제되도록 순서를 명시한다.
         entityManager.createNativeQuery("delete from ai_planning_messages where session_id in (select session_id from ai_planning_sessions where user_id = :userId)")
                 .setParameter("userId", userId).executeUpdate();
+        entityManager.createNativeQuery("delete from news_chat_messages where session_id in (select session_id from news_chat_sessions where user_id = :userId)")
+                .setParameter("userId", userId).executeUpdate();
         for (String table : java.util.List.of("account_transactions", "charge_requests", "holdings", "orders")) {
             entityManager.createNativeQuery("delete from " + table + " where account_id in (select account_id from accounts where user_id = :userId)")
                     .setParameter("userId", userId).executeUpdate();
         }
         for (String table : java.util.List.of("social_accounts", "investment_profile", "watchlist", "recent_viewed",
-                "ai_planning_sessions", "simulations", "notifications", "inquiries", "news_briefing_settings",
+                "ai_planning_sessions", "news_chat_sessions", "simulations", "notifications", "inquiries", "news_briefing_settings",
                 "news_briefings", "goal_plans", "planning_preferences", "accounts")) {
             entityManager.createNativeQuery("delete from " + table + " where user_id = :userId")
                     .setParameter("userId", userId).executeUpdate();
