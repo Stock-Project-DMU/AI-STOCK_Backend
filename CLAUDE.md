@@ -228,7 +228,12 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
   익명 세션에는 `/topic/stock/{stockCode}`·`/topic/stock/{stockCode}/hoga` 구독만 허용하고 SEND는
   막는다. 토큰이 있는데 무효면 여전히 거부한다(비회원 호가 제공, #06, 2026-09-25).
 - **tick 처리**: `@Async` + 전용 스레드풀 (`AsyncConfig`)
-- **지정가 체결**: tick 수신 시 `pending:orders` 확인 → 조건 충족 시 낙관적 락으로 체결
+- **지정가 체결**: tick 수신 시 `pending:orders` 확인 → 조건 충족 시 낙관적 락으로 체결.
+  주문 접수 시에도 커밋 직후 현재가(`StockQuoteService`)로 체결 조건을 1회 확인한다
+  (`OrderService.tryImmediateExecution()`, `OrderExecutionService.execute()`는 이 afterCommit 경로
+  때문에 `REQUIRES_NEW`). 미체결 주문이 있는 종목은 `StockSubscriptionManager`의 주문 구독
+  (`increaseOrderSubscription`/`decreaseOrderSubscription`)으로 체결·취소될 때까지 real/mock 모두
+  구독을 유지한다(fix/realtime-trade-fix, 2026-09-30).
 - **서버 시작 순서**: `@PostConstruct`로 DB PENDING 주문 Redis 재적재 완료 후 외부 시세 데이터 WebSocket 연결
 - **외부 시세 데이터 재연결**: 지수 백오프 (1→2→4→최대 30초)
 - **외부 시세 데이터 REST 장애 처리**: `infra/marketdata`의 REST 클라이언트는 제공사 호출(토큰 발급 포함)이
@@ -267,7 +272,7 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
   - 위 4개 mock 파생 로직이 쓰는 `market`(KOSPI/KOSDAQ)·`etf` 필드는 t1102 실제 응답에는 없는
     필드로, local-market-data-generator가 stocks.json의 로컬 메타데이터를 market_data.json에
     함께 써 넣는다(`CurrentPriceDetailDto.market`/`etf`, real 모드 파싱 경로에서는 채워지지 않음).
-  - `MockMarketDataGenerator`(20초 주기 폴링)는 `MarketDataWebSocketClient`(real 전용) 대신
+  - `MockMarketDataGenerator`(5초 주기 폴링, generator.py 기본 수집 주기 10초)는 `MarketDataWebSocketClient`(real 전용) 대신
     변경분을 감지해 STOMP로 실시간 브로드캐스트한다(현재가/호가 대상).
   `LocalMarketDataReader`는 원본을 파일 또는 HTTP 둘 중 하나에서 읽는다:
   - **파일 모드(로컬 개발 기본값)**: `market-data.url`이 비어있으면 `market-data.local-path`
