@@ -4,6 +4,7 @@ import com.teamfp.aistock.infra.marketdata.*;
 import com.teamfp.aistock.infra.marketdata.dto.*;
 import com.teamfp.aistock.infra.naver.NaverNewsApiClient;
 import com.teamfp.aistock.infra.naver.dto.*;
+import com.teamfp.aistock.domain.stock.dto.response.StockSearchSuggestion;
 import com.teamfp.aistock.global.exception.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -39,6 +40,15 @@ public class MarketQueryService {
                 .orElseThrow(() -> new CustomException(ErrorCode.STOCK_NOT_FOUND));
     }
 
+    public List<StockSearchSuggestion> suggestStocks(String query) {
+        if (query == null || query.isBlank() || query.length() > 100) {
+            throw new CustomException(ErrorCode.INVALID_INPUT);
+        }
+        return dartApiClient.searchListedStocks(query, 8).stream()
+                .map(stock -> new StockSearchSuggestion(stock.stockCode(), stock.stockName()))
+                .toList();
+    }
+
     public List<IndustryPriceDto> getIndexes() {
         requireMarketConfigured();
         return java.util.stream.Stream.of("코스피", "코스닥").map(industryApiClient::getCurrentPrice)
@@ -50,7 +60,7 @@ public class MarketQueryService {
         validateCode(stockCode);
         if (section.equals("analysts")) return investInfoApiClient.getInvestmentOpinions(stockCode);
         if (section.equals("peers")) return highItemApiClient.getTopMarketCap();
-        String corpCode = dartApiClient.resolveCorpCodeByName(getDetail(stockCode).getStockName())
+        String corpCode = dartApiClient.resolveCorpCodeByStockCode(stockCode)
                 .orElseThrow(() -> new CustomException(ErrorCode.STOCK_NOT_FOUND));
         return switch (section) {
             case "finance" -> dartApiClient.getFinancials(new com.teamfp.aistock.infra.dart.dto.DartFinancialRequest(corpCode, java.time.LocalDate.now().getYear() - 1));
