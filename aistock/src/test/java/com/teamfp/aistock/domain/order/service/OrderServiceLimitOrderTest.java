@@ -36,6 +36,7 @@ import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.redis.RedisPendingOrderService;
 import com.teamfp.aistock.domain.stock.service.StockQuoteService;
+import com.teamfp.aistock.domain.stock.service.StockSubscriptionManager;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -43,7 +44,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -78,6 +82,12 @@ class OrderServiceLimitOrderTest {
 
     @Mock
     private org.springframework.context.ApplicationEventPublisher eventPublisher;
+
+    @Mock
+    private StockSubscriptionManager stockSubscriptionManager;
+
+    @Mock
+    private OrderExecutionService orderExecutionService;
 
     @InjectMocks
     private OrderService orderService;
@@ -249,7 +259,8 @@ class OrderServiceLimitOrderTest {
 
             assertThat(response.status()).isEqualTo(OrderStatus.PENDING);
             assertThat(account.getFrozenBalance()).isEqualTo(70_000L);
-            verify(stockQuoteService, never()).getStockPrice(anyString());
+            // 종목명 조회에는 시세를 쓰지 않는다 — 한 번의 호출은 커밋 직후 즉시 체결 확인(tryImmediateExecution)이다.
+            verify(stockQuoteService, times(1)).getStockPrice(STOCK_CODE);
 
             ArgumentCaptor<PendingOrderDto> captor = ArgumentCaptor.forClass(PendingOrderDto.class);
             verify(redisPendingOrderService).addPendingOrder(eq(STOCK_CODE), captor.capture());
@@ -349,6 +360,85 @@ class OrderServiceLimitOrderTest {
             CreateOrderResponse response = orderService.createLimitOrder(USER_ID, limitRequestOf(OrderType.SELL, 6, 80_000L));
 
             assertThat(response.status()).isEqualTo(OrderStatus.PENDING);
+        }
+    }
+
+    @Nested
+    @DisplayName("지정가 주문 접수 직후 즉시 체결 확인과 미체결 주문 종목 구독")
+    class ImmediateExecutionAndOrderSubscription {
+
+        private StockPriceDto priceOf(long currentPrice) {
+            return StockPriceDto.builder().stockCode(STOCK_CODE).stockName("삼성전자").currentPrice(currentPrice).build();
+        }
+
+        @Test
+        @DisplayName("주문 접수 후 구독을 먼저 올리고 대기 리스트에 넣은 뒤, 현재가로 체결 조건을 1회 확인한다")
+        void registersSubscriptionThenPendingOrderThenChecksImmediately() {
+            when(stockQuoteService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(65_000L));
+
+            orderService.createLimitOrder(USER_ID, limitRequestOf(OrderType.BUY, 10, 70_000L));
+
+            var ordered = inOrder(stockSubscriptionManager, redisPendingOrderService, orderExecutionService);
+            ordered.verify(stockSubscriptionManager).increaseOrderSubscription(STOCK_CODE);
+            ordered.verify(redisPendingOrderService).addPendingOrder(eq(STOCK_CODE), any(PendingOrderDto.class));
+            ordered.verify(orderExecutionService).checkAndExecute(STOCK_CODE, 65_000L);
+        }
+
+        @Test
+        @DisplayName("현재가 조회가 실패해도 주문 접수는 정상 응답하고 체결은 다음 tick에 맡긴다")
+        void quoteFailure_DoesNotFailOrder() {
+            when(holdingRepository.findByAccountIdAndStockCode(any(), anyString()))
+                    .thenReturn(Optional.of(Holding.builder().account(account).stockCode(STOCK_CODE).stockName("삼성전자")
+                            .quantity(1).avgPrice(60_000L).build()));
+            when(stockQuoteService.getStockPrice(STOCK_CODE))
+                    .thenThrow(new CustomException(ErrorCode.MARKET_DATA_UNAVAILABLE));
+
+            CreateOrderResponse response = orderService.createLimitOrder(USER_ID, limitRequestOf(OrderType.BUY, 1, 70_000L));
+
+            assertThat(response.status()).isEqualTo(OrderStatus.PENDING);
+            verify(redisPendingOrderService).addPendingOrder(eq(STOCK_CODE), any(PendingOrderDto.class));
+            verify(orderExecutionService, never()).checkAndExecute(anyString(), anyLong());
+        }
+
+        @Test
+        @DisplayName("대기 리스트 등록이 실패하면 방금 올린 구독을 되돌린다")
+        void addPendingOrderFailure_RollsBackSubscription() {
+            when(stockQuoteService.getStockPrice(STOCK_CODE)).thenReturn(priceOf(65_000L));
+            doThrow(new CustomException(ErrorCode.REDIS_SERIALIZATION_ERROR))
+                    .when(redisPendingOrderService).addPendingOrder(eq(STOCK_CODE), any(PendingOrderDto.class));
+
+            assertThatThrownBy(() -> orderService.createLimitOrder(USER_ID, limitRequestOf(OrderType.BUY, 10, 70_000L)))
+                    .isInstanceOf(CustomException.class);
+
+            verify(stockSubscriptionManager).increaseOrderSubscription(STOCK_CODE);
+            verify(stockSubscriptionManager).decreaseOrderSubscription(STOCK_CODE);
+            verify(orderExecutionService, never()).checkAndExecute(anyString(), anyLong());
+        }
+
+        @Test
+        @DisplayName("취소한 주문을 대기 리스트에서 실제로 지웠을 때만 구독을 줄인다")
+        void cancel_DecreasesSubscriptionOnlyWhenRemoved() {
+            Order order = pendingBuyOrder(70_000L, 10);
+            account.freezeForOrder(700_000L);
+            when(orderRepository.findByOrderIdAndUserIdForUpdate(1L, USER_ID)).thenReturn(Optional.of(order));
+            when(redisPendingOrderService.removePendingOrder(STOCK_CODE, order.getOrderId())).thenReturn(true);
+
+            orderService.cancelOrder(USER_ID, 1L);
+
+            verify(stockSubscriptionManager).decreaseOrderSubscription(STOCK_CODE);
+        }
+
+        @Test
+        @DisplayName("체결 경로가 먼저 대기 리스트에서 지운 주문이면 취소 시 구독을 다시 줄이지 않는다")
+        void cancel_DoesNotDecreaseTwice_WhenAlreadyRemoved() {
+            Order order = pendingBuyOrder(70_000L, 10);
+            account.freezeForOrder(700_000L);
+            when(orderRepository.findByOrderIdAndUserIdForUpdate(1L, USER_ID)).thenReturn(Optional.of(order));
+            when(redisPendingOrderService.removePendingOrder(STOCK_CODE, order.getOrderId())).thenReturn(false);
+
+            orderService.cancelOrder(USER_ID, 1L);
+
+            verify(stockSubscriptionManager, never()).decreaseOrderSubscription(anyString());
         }
     }
 

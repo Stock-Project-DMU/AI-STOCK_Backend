@@ -23,6 +23,9 @@ import com.teamfp.aistock.domain.stock.dto.StockPriceDto;
 import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 /**
@@ -100,9 +103,24 @@ class RedisMarketServicesTest {
         String json = objectMapper.writeValueAsString(dto);
         when(listOperations.range("pending:orders:005930", 0, -1)).thenReturn(List.of(json));
 
-        redisPendingOrderService.removePendingOrder("005930", 1L);
+        when(listOperations.remove("pending:orders:005930", 1, json)).thenReturn(1L);
+
+        boolean removed = redisPendingOrderService.removePendingOrder("005930", 1L);
 
         verify(listOperations).remove("pending:orders:005930", 1, json);
+        assertThat(removed).isTrue();
+    }
+
+    @Test
+    @DisplayName("미체결 주문 제거 - 이미 리스트에 없는 주문이면 false를 반환하고 LREM하지 않는다")
+    void removePendingOrder_ReturnsFalse_WhenAlreadyRemoved() {
+        when(redisTemplate.opsForList()).thenReturn(listOperations);
+        when(listOperations.range("pending:orders:005930", 0, -1)).thenReturn(List.of());
+
+        boolean removed = redisPendingOrderService.removePendingOrder("005930", 1L);
+
+        assertThat(removed).isFalse();
+        verify(listOperations, never()).remove(anyString(), anyLong(), any());
     }
 
     @Test
