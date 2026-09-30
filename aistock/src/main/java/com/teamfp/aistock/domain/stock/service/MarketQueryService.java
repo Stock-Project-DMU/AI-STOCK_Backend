@@ -64,7 +64,9 @@ public class MarketQueryService {
         return switch (sort) {
             case "volume" -> highItemApiClient.getTopVolume();
             case "value" -> highItemApiClient.getTopTradingValue();
-            case "change" -> highItemApiClient.getTopPriceChangeRate();
+            // 상승·하락 순위는 코스피+코스닥 전체 시장 기준(#13). "change"는 기존 호출 호환용 상승 순위 별칭.
+            case "rise", "change" -> highItemApiClient.getTopPriceChangeRate();
+            case "fall" -> highItemApiClient.getTopPriceDeclineRate();
             case "market-cap" -> highItemApiClient.getTopMarketCap();
             default -> throw new CustomException(ErrorCode.INVALID_INPUT);
         };

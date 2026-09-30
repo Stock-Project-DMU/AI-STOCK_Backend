@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
@@ -76,6 +78,22 @@ class HighItemApiClientTest {
         }
 
         @Test
+        @DisplayName("코스피+코스닥 전체(gubun1=0)·상승률(gubun2=0)·당일(gubun3=0) 조건으로 t1441을 호출한다(#13)")
+        void request_usesWholeMarketTodayRisingCondition() {
+            when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+            mockServer.expect(requestTo(HIGH_ITEM_URL))
+                    .andExpect(header("tr_cd", "t1441"))
+                    .andExpect(jsonPath("$.t1441InBlock.gubun1").value("0"))
+                    .andExpect(jsonPath("$.t1441InBlock.gubun2").value("0"))
+                    .andExpect(jsonPath("$.t1441InBlock.gubun3").value("0"))
+                    .andRespond(withSuccess("{\"t1441OutBlock1\":[]}", MediaType.APPLICATION_JSON));
+
+            client.getTopPriceChangeRate();
+
+            mockServer.verify();
+        }
+
+        @Test
         @DisplayName("sign이 하락(5)이면 change가 양수 크기로 와도 changeAmount를 음수로 뒤집는다")
         void success_negativeChangeAmount_whenSignIndicatesDecline() {
             when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
@@ -131,6 +149,34 @@ class HighItemApiClientTest {
                     .isInstanceOf(CustomException.class)
                     .extracting(e -> ((CustomException) e).getErrorCode())
                     .isEqualTo(ErrorCode.MARKET_DATA_UNAVAILABLE);
+            mockServer.verify();
+        }
+    }
+
+    @Nested
+    @DisplayName("하락률상위 조회 (getTopPriceDeclineRate, t1441)")
+    class GetTopPriceDeclineRate {
+
+        @Test
+        @DisplayName("코스피+코스닥 전체(gubun1=0)·하락률(gubun2=1)·당일(gubun3=0) 조건으로 t1441을 호출한다(#13)")
+        void request_usesWholeMarketTodayFallingCondition() {
+            when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+            mockServer.expect(requestTo(HIGH_ITEM_URL))
+                    .andExpect(header("tr_cd", "t1441"))
+                    .andExpect(jsonPath("$.t1441InBlock.gubun1").value("0"))
+                    .andExpect(jsonPath("$.t1441InBlock.gubun2").value("1"))
+                    .andExpect(jsonPath("$.t1441InBlock.gubun3").value("0"))
+                    .andRespond(withSuccess("""
+                            {"t1441OutBlock1":[
+                              {"hname":"하드웰옵틱스","shcode":"000230","price":6140,"sign":"5","change":"70","diff":"-1.13","volume":7691}
+                            ]}""", MediaType.APPLICATION_JSON));
+
+            List<RankingItemDto> result = client.getTopPriceDeclineRate();
+
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).getRank()).isEqualTo(1);
+            assertThat(result.get(0).getChangeRate()).isEqualTo(-1.13);
+            assertThat(result.get(0).getChangeAmount()).isEqualTo(-70L);
             mockServer.verify();
         }
     }
@@ -194,15 +240,51 @@ class HighItemApiClientTest {
         }
 
         @Test
-        @DisplayName("등락율상위는 mock 종목을 등락률 내림차순으로 정렬한다")
-        void getTopPriceChangeRate_sortsByChangeRateDescending() {
+        @DisplayName("상승률상위는 mock 전체 종목 중 상승 종목만 등락률 내림차순으로 정렬한다(#13)")
+        void getTopPriceChangeRate_onlyRisingSortedDescending() {
             when(localMarketDataReader.getAllCurrentPrices()).thenReturn(Map.of(
                     "A", stock("A", "가", 1000, 100, -1.5),
-                    "B", stock("B", "나", 1000, 100, 5.0)));
+                    "B", stock("B", "나", 1000, 100, 5.0),
+                    "C", stock("C", "다", 1000, 100, 0.0),
+                    "D", stock("D", "라", 1000, 100, 2.3)));
 
             List<RankingItemDto> result = mockModeClient.getTopPriceChangeRate();
 
-            assertThat(result).extracting(RankingItemDto::getStockCode).containsExactly("B", "A");
+            assertThat(result).extracting(RankingItemDto::getStockCode).containsExactly("B", "D");
+            assertThat(result).extracting(RankingItemDto::getRank).containsExactly(1, 2);
+            verify(accessTokenProvider, never()).issueAccessToken();
+        }
+
+        @Test
+        @DisplayName("하락률상위는 mock 전체 종목 중 하락 종목만 등락률 오름차순(하락폭 큰 순)으로 정렬한다(#13)")
+        void getTopPriceDeclineRate_onlyFallingSortedAscending() {
+            when(localMarketDataReader.getAllCurrentPrices()).thenReturn(Map.of(
+                    "A", stock("A", "가", 1000, 100, -1.5),
+                    "B", stock("B", "나", 1000, 100, 5.0),
+                    "C", stock("C", "다", 1000, 100, 0.0),
+                    "D", stock("D", "라", 1000, 100, -7.2)));
+
+            List<RankingItemDto> result = mockModeClient.getTopPriceDeclineRate();
+
+            assertThat(result).extracting(RankingItemDto::getStockCode).containsExactly("D", "A");
+            assertThat(result).extracting(RankingItemDto::getRank).containsExactly(1, 2);
+            verify(accessTokenProvider, never()).issueAccessToken();
+        }
+
+        @Test
+        @DisplayName("하락 종목이 10개를 넘으면 하락률 상위 10건까지만 반환한다")
+        void getTopPriceDeclineRate_limitsToTenItems() {
+            Map<String, CurrentPriceDetailDto> all = new java.util.HashMap<>();
+            for (int i = 1; i <= 15; i++) {
+                all.put("C%d".formatted(i), stock("C%d".formatted(i), "종목%d".formatted(i), 1000, 100, -i));
+            }
+            when(localMarketDataReader.getAllCurrentPrices()).thenReturn(all);
+
+            List<RankingItemDto> result = mockModeClient.getTopPriceDeclineRate();
+
+            assertThat(result).hasSize(10);
+            assertThat(result.get(0).getStockCode()).isEqualTo("C15");
+            assertThat(result.get(9).getStockCode()).isEqualTo("C6");
         }
 
         @Test

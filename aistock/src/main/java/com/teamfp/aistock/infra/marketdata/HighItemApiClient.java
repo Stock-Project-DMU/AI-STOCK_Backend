@@ -39,8 +39,8 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
     private static final int MAX_RANKING_ITEMS = 10;
 
     private final MarketDataAccessTokenProvider accessTokenProvider;
-    // market-data.mode=mock일 때만 존재. getTopPriceChangeRate/getTopMarketCap/getTopVolume/
-    // getTopTradingValue 4개(=MarketQueryService.getRankings()가 실제로 노출하는 4종)만
+    // market-data.mode=mock일 때만 존재. getTopPriceChangeRate/getTopPriceDeclineRate/getTopMarketCap/
+    // getTopVolume/getTopTradingValue 5개(=MarketQueryService.getRankings()가 실제로 노출하는 종류)만
     // mock 분기를 탄다 — 나머지 3개(급증/시간외 2종)는 AI 상담 도구 전용이라 이번 mock 지원
     // 범위 밖이다(순위 mock 지원 추가, 2026-09-21).
     private final Optional<LocalMarketDataReader> localMarketDataReader;
@@ -57,13 +57,31 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
         this.localMarketDataReader = localMarketDataReader;
     }
 
-    /** 등락율상위(t1441) — 오늘 상승률(gubun1="2") 상위 종목. */
+    /** 등락율상위(t1441) — 코스피+코스닥 전체 시장의 당일 상승률 상위 종목. */
     public List<RankingItemDto> getTopPriceChangeRate() {
+        return priceChangeRateRanking(true);
+    }
+
+    /** 등락율상위(t1441) — 코스피+코스닥 전체 시장의 당일 하락률 상위 종목. */
+    public List<RankingItemDto> getTopPriceDeclineRate() {
+        return priceChangeRateRanking(false);
+    }
+
+    /**
+     * t1441 InBlock: gubun1(0:전체/1:코스피/2:코스닥), gubun2(0:상승률/1:하락률/2:보합),
+     * gubun3(0:당일/1:전일). 이전에는 "1","2","1"(코스피만·보합·전일)로 호출하고 있어 상승 순위가
+     * 아니었다 — 전체 시장(0)·당일(0) 기준으로 고정하고 상승/하락만 gubun2로 나눈다(#13, 2026-09-30).
+     * mock 모드도 같은 의미로 맞춰 상승 순위엔 상승 종목만, 하락 순위엔 하락 종목만 담는다.
+     */
+    private List<RankingItemDto> priceChangeRateRanking(boolean rising) {
         if (localMarketDataReader.isPresent()) {
-            return mockRanking(Comparator.comparingDouble(CurrentPriceDetailDto::getChangeRate).reversed(), null);
+            Comparator<CurrentPriceDetailDto> byChangeRate = Comparator.comparingDouble(CurrentPriceDetailDto::getChangeRate);
+            return mockRanking(
+                    dto -> rising ? dto.getChangeRate() > 0 : dto.getChangeRate() < 0,
+                    rising ? byChangeRate.reversed() : byChangeRate, null);
         }
         Map<String, Object> inBlock = Map.of(
-                "gubun1", "1", "gubun2", "2", "gubun3", "1",
+                "gubun1", "0", "gubun2", rising ? "0" : "1", "gubun3", "0",
                 "jc_num", 0, "sprice", 0, "eprice", 0, "volume", 0, "idx", 0, "jc_num2", 0);
         return callAndParse("t1441", "t1441OutBlock1", inBlock, row -> RankingItemDto.builder()
                 .stockCode(stringOf(row.get("shcode")))
@@ -145,10 +163,17 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
     private List<RankingItemDto> mockRanking(
             Comparator<CurrentPriceDetailDto> comparator,
             java.util.function.Function<CurrentPriceDetailDto, String> extraInfoFn) {
+        return mockRanking(dto -> true, comparator, extraInfoFn);
+    }
+
+    private List<RankingItemDto> mockRanking(
+            java.util.function.Predicate<CurrentPriceDetailDto> filter,
+            Comparator<CurrentPriceDetailDto> comparator,
+            java.util.function.Function<CurrentPriceDetailDto, String> extraInfoFn) {
         Map<String, CurrentPriceDetailDto> all = localMarketDataReader.get().getAllCurrentPrices();
         List<RankingItemDto> items = new java.util.ArrayList<>();
         int rank = 1;
-        for (CurrentPriceDetailDto dto : all.values().stream().sorted(comparator).toList()) {
+        for (CurrentPriceDetailDto dto : all.values().stream().filter(filter).sorted(comparator).toList()) {
             if (rank > MAX_RANKING_ITEMS) {
                 break;
             }

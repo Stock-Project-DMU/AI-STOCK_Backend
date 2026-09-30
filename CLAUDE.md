@@ -249,7 +249,9 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
     (fabricated) OHLC 시계열을 만들어 반환하며(같은 종목은 항상 같은 그래프), 가장 최근 구간의
     종가만 mock 현재가와 일치시킨다. **실제 과거 시세가 아니다.**
   - `HighItemApiClient.getTopVolume()`/`getTopTradingValue()`/`getTopPriceChangeRate()`/
-    `getTopMarketCap()` — 순위(`MarketQueryService.getRankings()`가 노출하는 4종). 전종목이 아니라
+    `getTopPriceDeclineRate()`/`getTopMarketCap()` — 순위(`MarketQueryService.getRankings()`가 노출하는
+    5종). 상승/하락 순위는 real 모드에서 t1441을 코스피+코스닥 전체·당일 조건으로 호출하고, mock
+    모드에서는 상승 종목만/하락 종목만 걸러 정렬한다(상승·하락 순위 전체 시장 기준, #13, 2026-09-30). 전종목이 아니라
     `LocalMarketDataReader.getAllCurrentPrices()`(stocks.json에 등록된 종목만, 2026-09-21 기준
     105개)를 정렬해 상위 10개만 뽑는 근사치다. 같은 클래스의 나머지 3개
     (`getSurgingVolumeVsYesterday()`/시간외 2종)는 mock 대상이 아니다.
