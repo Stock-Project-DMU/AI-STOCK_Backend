@@ -8,7 +8,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
-import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.infra.marketdata.dto.FinancialRankingDto;
 import com.teamfp.aistock.infra.marketdata.dto.InvestmentOpinionDto;
 import com.teamfp.aistock.infra.marketdata.dto.MarketLiquidityDto;
@@ -52,47 +51,37 @@ public class InvestInfoApiClient extends MarketDataApiClientSupport {
     }
 
     /**
-     * 종목코드로 증권사별 투자의견/목표주가 변경 이력(최신 5건)을 조회한다. 실패하거나 데이터가
-     * 없으면 빈 리스트를 반환한다.
+     * 종목코드로 증권사별 투자의견/목표주가 변경 이력(최신 5건)을 조회한다. 데이터가 없으면 빈
+     * 리스트를 반환하고, 외부 시세 데이터 호출 자체가 실패하면 CustomException(MARKET_DATA_UNAVAILABLE)을 던진다(#05).
      */
     public List<InvestmentOpinionDto> getInvestmentOpinions(String stockCode) {
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
-            inBlock.put("shcode", stockCode);
-            inBlock.put("gubun1", "");
-            inBlock.put("tradno", "");
-            inBlock.put("cts_date", "");
-            Map<String, Object> requestBody = Map.of("t3401InBlock", inBlock);
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
+        inBlock.put("shcode", stockCode);
+        inBlock.put("gubun1", "");
+        inBlock.put("tradno", "");
+        inBlock.put("cts_date", "");
+        Map<String, Object> requestBody = Map.of("t3401InBlock", inBlock);
 
-            Map<String, Object> response = call(investInfoUrl, INVESTMENT_OPINION_TR_CD, requestBody, token, "외부 시세 데이터 투자의견 조회 실패");
+        Map<String, Object> response = call(investInfoUrl, INVESTMENT_OPINION_TR_CD, requestBody, token, "외부 시세 데이터 투자의견 조회 실패");
 
-            return parseOpinions(stockCode, response);
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 투자의견 조회 중 오류 - stockCode: {}, 사유: {}", stockCode, e.getMessage());
-            return List.of();
-        }
+        return parseOpinions(stockCode, response);
     }
 
     /**
-     * 종목코드로 주주총회 일정(전체 이력 중 upgu=09만 필터링, 최신 5건)을 조회한다. 실패하거나
-     * 데이터가 없으면 빈 리스트를 반환한다.
+     * 종목코드로 주주총회 일정(전체 이력 중 upgu=09만 필터링, 최신 5건)을 조회한다. 데이터가 없으면
+     * 빈 리스트를 반환하고, 외부 시세 데이터 호출 자체가 실패하면 CustomException(MARKET_DATA_UNAVAILABLE)을 던진다(#05).
      */
     public List<ShareholderMeetingDto> getShareholderMeetingSchedule(String stockCode) {
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
-            inBlock.put("shcode", stockCode);
-            inBlock.put("date", "");
-            Map<String, Object> requestBody = Map.of("t3202InBlock", inBlock);
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
+        inBlock.put("shcode", stockCode);
+        inBlock.put("date", "");
+        Map<String, Object> requestBody = Map.of("t3202InBlock", inBlock);
 
-            Map<String, Object> response = call(investInfoUrl, SCHEDULE_TR_CD, requestBody, token, "외부 시세 데이터 증시일정 조회 실패");
+        Map<String, Object> response = call(investInfoUrl, SCHEDULE_TR_CD, requestBody, token, "외부 시세 데이터 증시일정 조회 실패");
 
-            return parseShareholderMeetings(stockCode, response);
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 증시일정 조회 중 오류 - stockCode: {}, 사유: {}", stockCode, e.getMessage());
-            return List.of();
-        }
+        return parseShareholderMeetings(stockCode, response);
     }
 
     @SuppressWarnings("unchecked")
@@ -171,47 +160,39 @@ public class InvestInfoApiClient extends MarketDataApiClientSupport {
      * 시장 전체를 훑는 질문에 답할 수 있는 몇 안 되는 외부 시세 데이터 TR이다(2026-08-11 확인).
      *
      * @param criteria 정렬 기준 외부 시세 데이터 코드 — 1:매출액증가율 2:영업이익증가율 3:세전계속이익증가율
-     *                 4:부채비율 5:유보율 6:EPS 7:BPS 8:ROE 9:PER a:PBR b:PEG. 실패하면 빈 리스트.
+     *                 4:부채비율 5:유보율 6:EPS 7:BPS 8:ROE 9:PER a:PBR b:PEG. 호출 실패 시
+     *                 CustomException(MARKET_DATA_UNAVAILABLE)을 던진다(#05).
      */
     public List<FinancialRankingDto> getFinancialRanking(String criteria) {
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
-            inBlock.put("gubun", "0");
-            inBlock.put("gubun1", criteria);
-            inBlock.put("gubun2", "0");
-            inBlock.put("cnt", MAX_FINANCIAL_RANKING_ITEMS);
-            inBlock.put("exchgubun", "K");
-            Map<String, Object> requestBody = Map.of("t3341InBlock", inBlock);
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
+        inBlock.put("gubun", "0");
+        inBlock.put("gubun1", criteria);
+        inBlock.put("gubun2", "0");
+        inBlock.put("cnt", MAX_FINANCIAL_RANKING_ITEMS);
+        inBlock.put("exchgubun", "K");
+        Map<String, Object> requestBody = Map.of("t3341InBlock", inBlock);
 
-            Map<String, Object> response = call(investInfoUrl, FINANCIAL_RANKING_TR_CD, requestBody, token, "외부 시세 데이터 재무순위종합 조회 실패");
+        Map<String, Object> response = call(investInfoUrl, FINANCIAL_RANKING_TR_CD, requestBody, token, "외부 시세 데이터 재무순위종합 조회 실패");
 
-            return parseFinancialRanking(response);
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 재무순위종합 조회 중 오류 - criteria: {}, 사유: {}", criteria, e.getMessage());
-            return List.of();
-        }
+        return parseFinancialRanking(response);
     }
 
     /**
      * 해외지수·환율·선물의 현재가를 조회한다(t3521). 예: kind="S", symbol="DJI@DJI"(다우),
-     * "NAS@IXIC"(나스닥종합), "USDKRWSMBS"(원/달러 환율). 실패하거나 없으면 빈 값.
+     * "NAS@IXIC"(나스닥종합), "USDKRWSMBS"(원/달러 환율). 데이터가 없으면 빈 값, 호출 실패 시
+     * CustomException(MARKET_DATA_UNAVAILABLE)을 던진다(#05).
      */
     public Optional<OverseasIndexDto> getOverseasIndex(String kind, String symbol) {
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
-            inBlock.put("kind", kind);
-            inBlock.put("symbol", symbol);
-            Map<String, Object> requestBody = Map.of("t3521InBlock", inBlock);
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
+        inBlock.put("kind", kind);
+        inBlock.put("symbol", symbol);
+        Map<String, Object> requestBody = Map.of("t3521InBlock", inBlock);
 
-            Map<String, Object> response = call(investInfoUrl, OVERSEAS_INDEX_TR_CD, requestBody, token, "외부 시세 데이터 해외지수 조회 실패");
+        Map<String, Object> response = call(investInfoUrl, OVERSEAS_INDEX_TR_CD, requestBody, token, "외부 시세 데이터 해외지수 조회 실패");
 
-            return parseOverseasIndex(symbol, response);
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 해외지수 조회 중 오류 - symbol: {}, 사유: {}", symbol, e.getMessage());
-            return Optional.empty();
-        }
+        return parseOverseasIndex(symbol, response);
     }
 
     /**
@@ -231,30 +212,25 @@ public class InvestInfoApiClient extends MarketDataApiClientSupport {
      */
     public List<MarketLiquidityDto> getMarketLiquidityTrend(Integer periodMonths) {
         boolean longPeriod = periodMonths != null && periodMonths > 0;
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            java.time.LocalDate today = java.time.LocalDate.now();
-            String toDate = today.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE);
-            java.time.LocalDate fromLocalDate = longPeriod
-                    ? today.minusMonths(Math.min(periodMonths, MAX_PERIOD_MONTHS))
-                    : today.minusDays(7);
-            String fromDate = fromLocalDate.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE);
-            int cap = longPeriod ? MAX_LONG_PERIOD_ITEMS : MAX_LIQUIDITY_ITEMS;
-            Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
-            inBlock.put("fdate", fromDate);
-            inBlock.put("tdate", toDate);
-            inBlock.put("gubun", "0");
-            inBlock.put("cnt", cap);
-            inBlock.put("idx", 0);
-            Map<String, Object> requestBody = Map.of("t8428InBlock", inBlock);
+        String token = accessTokenProvider.issueAccessToken();
+        java.time.LocalDate today = java.time.LocalDate.now();
+        String toDate = today.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE);
+        java.time.LocalDate fromLocalDate = longPeriod
+                ? today.minusMonths(Math.min(periodMonths, MAX_PERIOD_MONTHS))
+                : today.minusDays(7);
+        String fromDate = fromLocalDate.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE);
+        int cap = longPeriod ? MAX_LONG_PERIOD_ITEMS : MAX_LIQUIDITY_ITEMS;
+        Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
+        inBlock.put("fdate", fromDate);
+        inBlock.put("tdate", toDate);
+        inBlock.put("gubun", "0");
+        inBlock.put("cnt", cap);
+        inBlock.put("idx", 0);
+        Map<String, Object> requestBody = Map.of("t8428InBlock", inBlock);
 
-            Map<String, Object> response = call(investInfoUrl, MARKET_LIQUIDITY_TR_CD, requestBody, token, "외부 시세 데이터 증시주변자금추이 조회 실패");
+        Map<String, Object> response = call(investInfoUrl, MARKET_LIQUIDITY_TR_CD, requestBody, token, "외부 시세 데이터 증시주변자금추이 조회 실패");
 
-            return parseMarketLiquidity(response, cap);
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 증시주변자금추이 조회 중 오류 - 사유: {}", e.getMessage());
-            return List.of();
-        }
+        return parseMarketLiquidity(response, cap);
     }
 
     @SuppressWarnings("unchecked")

@@ -23,6 +23,7 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
+import com.teamfp.aistock.infra.marketdata.dto.HistoricalPriceDto;
 import com.teamfp.aistock.infra.marketdata.dto.MultiStockPriceDto;
 import com.teamfp.aistock.infra.marketdata.dto.PivotLevelDto;
 import com.teamfp.aistock.infra.marketdata.dto.StockRiskFlagDto;
@@ -279,6 +280,70 @@ class MarketDataApiClientTest {
             List<MultiStockPriceDto> result = client.getMultiStockPrices(List.of());
 
             assertThat(result).isEmpty();
+        }
+    }
+
+    @Nested
+    @DisplayName("기간별주가 조회 mock 분기 (getHistoricalPrices, market-data.mode=mock)")
+    class GetHistoricalPricesMockBranch {
+
+        @Mock
+        private LocalMarketDataReader localMarketDataReader;
+
+        @Test
+        @DisplayName("localMarketDataReader가 존재하면 외부 시세 데이터 API를 호출하지 않고 합성 시계열을 반환한다")
+        void usesLocalReader_whenPresent_andSkipsRealApiCall() {
+            CurrentPriceDetailDto localResult = CurrentPriceDetailDto.builder()
+                    .stockCode(STOCK_CODE)
+                    .stockName("삼성전자(로컬)")
+                    .currentPrice(70000L)
+                    .volume(1_000_000L)
+                    .listingShares(5_969_782L)
+                    .build();
+            when(localMarketDataReader.getCurrentPrice(STOCK_CODE)).thenReturn(Optional.of(localResult));
+            MarketDataApiClient mockModeClient =
+                    new MarketDataApiClient(accessTokenProvider, Optional.of(localMarketDataReader), RestClient.builder());
+            ReflectionTestUtils.setField(mockModeClient, "marketDataUrl", MARKET_DATA_URL);
+
+            List<HistoricalPriceDto> result = mockModeClient.getHistoricalPrices(STOCK_CODE, 12);
+
+            assertThat(result).hasSize(12);
+            assertThat(result.get(0).getClose()).isEqualTo(70000L);
+            verify(accessTokenProvider, never()).issueAccessToken();
+        }
+
+        @Test
+        @DisplayName("같은 종목코드로 반복 호출해도 항상 같은 시계열을 반환한다(결정적)")
+        void deterministic_sameStockCode_sameSeries() {
+            CurrentPriceDetailDto localResult = CurrentPriceDetailDto.builder()
+                    .stockCode(STOCK_CODE)
+                    .stockName("삼성전자(로컬)")
+                    .currentPrice(70000L)
+                    .volume(1_000_000L)
+                    .build();
+            when(localMarketDataReader.getCurrentPrice(STOCK_CODE)).thenReturn(Optional.of(localResult));
+            MarketDataApiClient mockModeClient =
+                    new MarketDataApiClient(accessTokenProvider, Optional.of(localMarketDataReader), RestClient.builder());
+            ReflectionTestUtils.setField(mockModeClient, "marketDataUrl", MARKET_DATA_URL);
+
+            List<HistoricalPriceDto> first = mockModeClient.getHistoricalPrices(STOCK_CODE, 6);
+            List<HistoricalPriceDto> second = mockModeClient.getHistoricalPrices(STOCK_CODE, 6);
+
+            assertThat(first).usingRecursiveComparison().isEqualTo(second);
+        }
+
+        @Test
+        @DisplayName("localMarketDataReader가 빈 값을 반환하면 실제 외부 시세 데이터 API로 폴백하지 않고 그대로 빈 리스트를 반환한다")
+        void empty_whenLocalReaderEmpty_noFallbackToRealApi() {
+            when(localMarketDataReader.getCurrentPrice(STOCK_CODE)).thenReturn(Optional.empty());
+            MarketDataApiClient mockModeClient =
+                    new MarketDataApiClient(accessTokenProvider, Optional.of(localMarketDataReader), RestClient.builder());
+            ReflectionTestUtils.setField(mockModeClient, "marketDataUrl", MARKET_DATA_URL);
+
+            List<HistoricalPriceDto> result = mockModeClient.getHistoricalPrices(STOCK_CODE, 12);
+
+            assertThat(result).isEmpty();
+            verify(accessTokenProvider, never()).issueAccessToken();
         }
     }
 }

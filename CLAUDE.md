@@ -224,15 +224,51 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
 
 - **실시간 시세**: 외부 시세 데이터 제공사 WebSocket 수신 → Throttle 200ms → Redis 캐싱 + STOMP 브로드캐스팅 동시 처리
 - **STOMP 토픽**: `/topic/stock/{stockCode}` (브로드캐스팅), `/user/{userId}/queue` (유니캐스팅)
+- **비회원 실시간 시세**: `StompAuthInterceptor`는 토큰 없는 CONNECT를 익명 세션으로 허용하되,
+  익명 세션에는 `/topic/stock/{stockCode}`·`/topic/stock/{stockCode}/hoga` 구독만 허용하고 SEND는
+  막는다. 토큰이 있는데 무효면 여전히 거부한다(비회원 호가 제공, #06, 2026-09-25).
 - **tick 처리**: `@Async` + 전용 스레드풀 (`AsyncConfig`)
 - **지정가 체결**: tick 수신 시 `pending:orders` 확인 → 조건 충족 시 낙관적 락으로 체결
 - **서버 시작 순서**: `@PostConstruct`로 DB PENDING 주문 Redis 재적재 완료 후 외부 시세 데이터 WebSocket 연결
 - **외부 시세 데이터 재연결**: 지수 백오프 (1→2→4→최대 30초)
-- **외부 시세 데이터 mock 모드**: `market-data.mode=mock`이면 `MarketDataApiClient.getCurrentPrice()`와
-  `StockService.getCurrentPrice()`/`getHoga()`가 실제 외부 시세 데이터 API·Redis 대신 `LocalMarketDataReader`로
-  시세·호가를 공급하고, `MockMarketDataGenerator`(20초 주기 폴링)가 `MarketDataWebSocketClient`(real 전용) 대신
-  변경분을 감지해 STOMP로 실시간 브로드캐스트한다. mock 전환 대상은 이 경로들뿐이며, 나머지 외부 시세 데이터
-  REST 메서드와 `MarketDataAccessTokenProvider`는 `market-data.mode`와 무관하게 항상 실제 외부 시세 데이터 API를 호출한다.
+- **외부 시세 데이터 REST 장애 처리**: `infra/marketdata`의 REST 클라이언트는 제공사 호출(토큰 발급 포함)이
+  네트워크 오류·HTTP 오류로 실패하면 `CustomException(ErrorCode.MARKET_DATA_UNAVAILABLE)`(503)을 던진다
+  (`MarketDataApiClientSupport.invokeMarketData()`). 빈 목록/`Optional.empty()`는 "제공사가 정상 응답했지만
+  데이터가 없음"만 뜻하므로, 클라이언트에서 이 예외를 잡아 빈 값으로 삼키지 않는다. REST API는 이 예외를
+  그대로 전파하고, `AiPlanningService`는 도구 결과를 일시 장애 전용 문구로 바꿔 Gemini에 넘긴다
+  (외부 장애와 빈 목록 구분 처리, #05, 2026-09-24). mock 모드의 `LocalMarketDataReader`는 대상이 아니다.
+- **외부 시세 데이터 mock 모드**: `market-data.mode=mock`이면 아래 경로들이 실제 외부 시세 데이터
+  API·Redis 대신 `LocalMarketDataReader`로 데이터를 공급한다(순위·지수·ETF 시세·차트 mock 지원 추가,
+  2026-09-21). `MarketDataAccessTokenProvider`와 이 목록에 없는 나머지 REST 메서드(t1105/t1305의
+  `getRecentHistoricalPrices()`·t1404/t1405·t1486·t8407·`EtfApiClient.getConstituents()` 등)는
+  여전히 `market-data.mode`와 무관하게 항상 실제 외부 시세 데이터 API를 호출한다.
+  - `MarketDataApiClient.getCurrentPrice()`/`StockService.getCurrentPrice()`·`getHoga()` — 종목
+    현재가·호가(가장 먼저 추가된 mock 경로).
+  - `MarketDataApiClient.getHistoricalPrices(stockCode, periodMonths)` — 차트. market_data.json에는
+    현재가 스냅샷 1건뿐이라 실제 과거 시세가 없다. 종목코드로 시드를 고정한 결정적 합성
+    (fabricated) OHLC 시계열을 만들어 반환하며(같은 종목은 항상 같은 그래프), 가장 최근 구간의
+    종가만 mock 현재가와 일치시킨다. **실제 과거 시세가 아니다.**
+  - `HighItemApiClient.getTopVolume()`/`getTopTradingValue()`/`getTopPriceChangeRate()`/
+    `getTopPriceDeclineRate()`/`getTopMarketCap()` — 순위(`MarketQueryService.getRankings()`가 노출하는
+    5종). 상승/하락 순위는 real 모드에서 t1441을 코스피+코스닥 전체·당일 조건으로 호출하고, mock
+    모드에서는 상승 종목만/하락 종목만 걸러 정렬한다(상승·하락 순위 전체 시장 기준, #13, 2026-09-30). 전종목이 아니라
+    `LocalMarketDataReader.getAllCurrentPrices()`(stocks.json에 등록된 종목만, 2026-09-21 기준
+    105개)를 정렬해 상위 10개만 뽑는 근사치다. 같은 클래스의 나머지 3개
+    (`getSurgingVolumeVsYesterday()`/시간외 2종)는 mock 대상이 아니다.
+  - `IndustryApiClient.getCurrentPrice(marketName)` — 지수(코스피/코스닥). 실지수는 전종목 시가총액
+    가중평균이라 105개 mock 종목으로 재현 불가능해, 고정 베이스값(`MOCK_BASE_INDEX_VALUE`)을 같은
+    시장 mock 종목의 평균 등락률만큼 흔든 근사치를 쓴다. **실제 지수 값이 아니다.** 같은 클래스의
+    `getTrend()`/`getExpectedIndex()`는 mock 대상이 아니다.
+  - `EtfApiClient.getCurrentPrice()` — ETF 시세. stocks.json에 `isEtf: true`로 등록된 종목만
+    mock 데이터가 있고(2026-09-21 기준 5개), 등록되지 않은 ETF 코드는 real 모드와 동일하게
+    빈 값을 반환한다. ETF 종목에는 `exchgubun`("K"=KRX 고정값)도 함께 채워지며 별도 매핑
+    없이 `CurrentPriceDetailDto` 그대로 반환된다 — 실제 t1901 API의 exchgubun 스펙과는 무관한
+    mock 전용 필드다(ETF exchgubun 신규 필드 반영, #04, 2026-09-23).
+  - 위 4개 mock 파생 로직이 쓰는 `market`(KOSPI/KOSDAQ)·`etf` 필드는 t1102 실제 응답에는 없는
+    필드로, local-market-data-generator가 stocks.json의 로컬 메타데이터를 market_data.json에
+    함께 써 넣는다(`CurrentPriceDetailDto.market`/`etf`, real 모드 파싱 경로에서는 채워지지 않음).
+  - `MockMarketDataGenerator`(20초 주기 폴링)는 `MarketDataWebSocketClient`(real 전용) 대신
+    변경분을 감지해 STOMP로 실시간 브로드캐스트한다(현재가/호가 대상).
   `LocalMarketDataReader`는 원본을 파일 또는 HTTP 둘 중 하나에서 읽는다:
   - **파일 모드(로컬 개발 기본값)**: `market-data.url`이 비어있으면 `market-data.local-path`
     디렉토리의 `market_data.json` 단일 파일(종목코드를 키로, 현재가·호가 필드가 함께 들어있는

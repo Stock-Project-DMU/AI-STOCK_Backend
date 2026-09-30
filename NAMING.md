@@ -178,6 +178,7 @@
 | `INVALID_ADMIN_CODE` | 400 (v8 추가 — 관리자 회원가입 시 코드 불일치) |
 | `INQUIRY_NOT_FOUND` | 404 (v8 추가) |
 | `STOCK_PRICE_NOT_AVAILABLE` | 503 (order-market 추가 — 종목은 존재하지만 `stock:price:{stockCode}` Redis 캐시가 TTL 만료 등으로 비어 있어 현재가 주문을 체결할 수 없는 경우. `STOCK_NOT_FOUND`(종목 자체가 없음)와 혼동하지 않도록 분리) |
+| `MARKET_DATA_UNAVAILABLE` | 503 (외부 장애와 빈 목록 구분 처리, #05, 2026-09-24 추가 — 외부 시세 데이터 제공사 REST 호출(토큰 발급 포함)이 네트워크 오류·HTTP 오류로 실패한 경우. `infra/marketdata`의 REST 클라이언트는 이 예외를 던지고, 빈 목록/`Optional.empty()`는 "제공사가 정상 응답했지만 데이터가 없음"만 뜻한다. `EXTERNAL_API_ERROR`(Gemini/DART/네이버 등 다른 외부 API)와 구분) |
 | `ORDER_ALREADY_PROCESSED` | 409 (order-limit 추가 — 이미 `EXECUTED`/`CANCELLED` 상태인 주문을 다시 취소(`DELETE /api/orders/{orderId}`)하려는 경우) |
 | `ACCOUNT_LIMIT_EXCEEDED` | 400 (mypage-account 추가 — 유저가 이미 계좌 3개를 보유한 상태에서 추가 개설을 시도하는 경우) |
 | `CHARGE_LIMIT_EXCEEDED` | 400 (mypage-account 추가 — 계좌의 `chargeCount`가 이미 3회에 도달한 상태에서 추가 충전을 시도하는 경우. 문의(inquiries) 기능으로 관리자에게 요청하도록 안내) |
@@ -255,6 +256,17 @@ STOMP 엔드포인트: `/ws-stomp`
 
 ### `StompAuthInterceptor`
 메서드: `preSend(Message<?> message, MessageChannel channel)`, `onSessionDisconnect(SessionDisconnectEvent event)`
+(private) `authenticate(StompHeaderAccessor)`, `isAnonymous(StompHeaderAccessor)`, `isPublicDestination(String)` /
+상수: `PUBLIC_STOCK_TOPIC_PATTERN` (`^/topic/stock/[A-Za-z0-9]+(/hoga)?$`)
+
+> **비회원 호가 제공 (#06, 2026-09-25)**: CONNECT에 `Authorization` 헤더가 **없으면** 익명 세션으로
+> 연결을 허용한다(`accessor.setUser()` 미호출, `admin:online:users` 집계 제외). 헤더가 있는데
+> Bearer 형식이 아니거나 토큰이 무효·만료면 익명으로 강등하지 않고 기존처럼 `INVALID_TOKEN`으로
+> 거부한다. 익명 세션은 SUBSCRIBE 시 `PUBLIC_STOCK_TOPIC_PATTERN`에 맞는 종목 현재가
+> (`/topic/stock/{stockCode}`)·호가(`/topic/stock/{stockCode}/hoga`) 토픽만 허용하고, 그 외
+> 목적지(`/user/queue` 등) 구독과 모든 SEND는 `ACCESS_DENIED`로 막는다. 로그인 세션의 동작은
+> 바뀌지 않는다. REST 쪽(`GET /api/stocks/*`, `/api/stocks/*/hoga`)은 이미 `SecurityConfig`에서
+> 공개돼 있어 변경 없다.
 
 > v8 추가: CONNECT 커맨드 검증 통과 시 `RedisOnlineStatusService.addOnline(userId)` 호출.
 >
@@ -786,7 +798,7 @@ confirmedCurrentPrices`(`executeTool()`이 `aiToolTaskExecutor`로 동시 실행
 | `MarketDataApiClient` | `market-data-url` | `getCurrentPrice(String stockCode)`→t1102(`market-data.mode=mock`이면 `LocalMarketDataReader`로 대체, feature/ls-local-data 2026-08-30 추가 — 나머지 메서드 및 다른 9개 클라이언트는 그대로 항상 실제 외부 시세 데이터 API 호출), `getRiskFlags(String stockCode)`→t1404+t1405, `getPivotLevels(String stockCode)`→t1105, `getRecentHistoricalPrices(String stockCode)`/`getHistoricalPrices(String stockCode, Integer periodMonths)`→t1305(periodMonths 없으면 일봉 최근 5건, 있으면 월봉으로 전환해 최대 24개월=2년, 2026-08-13 추가 — open/high/low도 함께 파싱), `getMultiStockPrices(List<String> stockCodes)`→t8407(최대 5종목), `getRecentCallAuctionPrices(String stockCode)`→t1486(최대 5건, 시간대 게이트는 호출부 책임) |
 | `InvestorTrendApiClient` | `frgr-itt-url` | `getRecentTrend(String stockCode)`/`getTrend(String stockCode, Integer periodMonths)`→t1716(외인기관종목별동향, periodMonths 없으면 최근 10일·최대 5건, 있으면 최대 24개월=2년까지 일별 원본 그대로 반환해 호출부가 합계·최고/최저일 계산, 2026-08-13 추가) |
 | `InvestInfoApiClient` | `investinfo-url` | `getInvestmentOpinions(String stockCode)`→t3401(최대 5건), `getShareholderMeetingSchedule(String stockCode)`→t3202(`upgu=="09"` 필터, 최대 5건), `getFinancialRanking(String criteria)`→t3341(최대 10건), `getOverseasIndex(String kind, String symbol)`→t3521, `getRecentMarketLiquidityTrend()`/`getMarketLiquidityTrend(Integer periodMonths)`→t8428(periodMonths 없으면 최근 7일·최대 5건, 있으면 최대 24개월=2년, 2026-08-13 추가) |
-| `HighItemApiClient` | `high-item-url` | `getTopPriceChangeRate()`→t1441, `getTopMarketCap()`→t1444, `getTopVolume()`→t1452, `getTopTradingValue()`→t1463, `getSurgingVolumeVsYesterday()`→t1466, `getTopAfterHoursPriceChangeRate()`→t1481, `getTopAfterHoursVolume()`→t1482 (전부 `List<RankingItemDto>`, 최대 10건) |
+| `HighItemApiClient` | `high-item-url` | `getTopPriceChangeRate()`→t1441(전체 시장·당일 상승률), `getTopPriceDeclineRate()`→t1441(전체 시장·당일 하락률), `getTopMarketCap()`→t1444, `getTopVolume()`→t1452, `getTopTradingValue()`→t1463, `getSurgingVolumeVsYesterday()`→t1466, `getTopAfterHoursPriceChangeRate()`→t1481, `getTopAfterHoursVolume()`→t1482 (전부 `List<RankingItemDto>`, 최대 10건) |
 | `SectorApiClient` | `sector-url` | `getThemeConstituentsByName(String themeName)`→t8425(테마명→코드 프로세스 수명 캐시) 후 t1537, `getThemesForStock(String stockCode)`→t1532, `getHotThemes()`→t1533 |
 | `EtfApiClient` | `etf-url` | `getCurrentPrice(String stockCode)`→t1901, `getConstituents(String stockCode)`→t1904(최대 10건) |
 | `ProgramApiClient` | `program-url` | `getTopProgramTradingStocks()`→t1636(최대 10건), `getMarketSnapshot()`→t1640(gubun=`11` 거래소 전체) |
@@ -868,6 +880,12 @@ call(String url, String trCd, Map<String, Object> requestBody, String token, Str
 제공한다. 10개 클라이언트 전부 이 클래스를 상속한다. 예외— `InvestorTrendApiClient`는 실패/누락
 시 0.0이 아니라 `null`을 돌려주는 자체 `parseDouble(Object): Double`을 그대로 로컬에 유지한다(그
 파일의 호출부가 "값 없음"과 "0"을 구분해야 함) — 이 파일만 `parseDoubleOrZero`를 안 쓴다.
+
+> **`static <T> T invokeMarketData(Supplier<T> apiCall, String errorLabel)` 추가 (외부 장애와 빈 목록 구분
+> 처리, #05, 2026-09-24)**: `ExternalApiInvoker.call()`을 감싸 외부 시세 데이터 REST 호출 실패를
+> `ErrorCode.MARKET_DATA_UNAVAILABLE`로 바꿔 던진다. `call()`과 `MarketDataAccessTokenProvider.issueAccessToken()`이
+> 이 메서드를 거친다. 10개 클라이언트는 이 예외를 잡아 빈 목록/`Optional.empty()`로 삼키지 않는다 —
+> 빈 값은 "정상 응답이지만 데이터 없음"만 뜻한다.
 
 > **`parseNullableDouble(Object)` 베이스 클래스로 승격 (코드리뷰 반영)**: 원래
 > `MarketDataApiClient`에만 있던 private 메서드였는데, `EtfApiClient.getCurrentPrice()`가
@@ -1643,7 +1661,7 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 
 - `PlanningPreferences` / Repository / Service / Controller, `PlanningPreferencesRequest(savedBriefingDates, linkedBriefingDates, linkedGoalPlanIds)`: GET/PUT `/api/ai/planning/preferences`. 본인 브리핑 저장과 AI 자료 연동 설정. `getPreferences`, `savePreferences`, `describeConnections`, `updateSelections`. 사용자 소유권 검증, 목록 개수 제한, 낙관적 잠금 적용.
 
-- `MarketQueryController`, `MarketQueryService`: GET `/api/market/rankings?sort=volume|value|change|market-cap`, GET `/api/market/stocks/{stockCode}/history?months=12`, GET `/api/market/stocks/{stockCode}/detail`, GET `/api/market/news?query=`. 기존 외부 시세 데이터/네이버 클라이언트 재사용. `getRankings`, `getHistory`, `getDetail`, `getNews`.
+- `MarketQueryController`, `MarketQueryService`: GET `/api/market/rankings?sort=volume|value|rise|fall|market-cap` (`rise`/`fall`은 코스피+코스닥 전체 시장 기준 상승률/하락률 상위 10, `change`는 `rise`의 호환 별칭), GET `/api/market/stocks/{stockCode}/history?months=12`, GET `/api/market/stocks/{stockCode}/detail`, GET `/api/market/news?query=`. 기존 외부 시세 데이터/네이버 클라이언트 재사용. `getRankings`, `getHistory`, `getDetail`, `getNews`.
 - `AiNewsService.getBriefingHistory`, `getBriefing`, `NewsBriefingRepository.findTop100ByUserUserIdOrderByBriefingDateDesc`: GET `/api/ai/news/briefings`, GET `/api/ai/news/briefings/{date}`. 날짜별 본인 소유 브리핑만 조회.
 
 - `GoalPlan`, `GoalPlanRepository`, `GoalPlanService`, `GoalPlanController`, `GoalPlanRequest(goal, monthlyPayment, years, annualReturn, aggressive)`, `GoalPlanResponse(planId, settings, futureValue, aggressiveFutureValue, saved, createdAt)`.

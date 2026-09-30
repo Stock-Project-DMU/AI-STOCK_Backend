@@ -1,8 +1,12 @@
 package com.teamfp.aistock.infra.marketdata;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import java.util.List;
@@ -20,6 +24,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import com.teamfp.aistock.global.exception.CustomException;
+import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
 import com.teamfp.aistock.infra.marketdata.dto.EtfConstituentDto;
 
@@ -40,7 +46,7 @@ class EtfApiClientTest {
         RestClient.Builder builder = RestClient.builder();
         mockServer = MockRestServiceServer.bindTo(builder).build();
 
-        client = new EtfApiClient(accessTokenProvider, builder);
+        client = new EtfApiClient(accessTokenProvider, java.util.Optional.empty(), builder);
         ReflectionTestUtils.setField(client, "etfUrl", ETF_URL);
     }
 
@@ -107,6 +113,45 @@ class EtfApiClientTest {
         }
 
         @Test
+        @DisplayName("외부 시세 데이터 제공사가 5xx로 실패하면 빈 값으로 삼키지 않고 MARKET_DATA_UNAVAILABLE을 던진다(#05)")
+        void fail_throwsMarketDataUnavailable_whenProviderReturnsServerError() {
+            when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+            mockServer.expect(requestTo(ETF_URL)).andRespond(withServerError());
+
+            assertThatThrownBy(() -> client.getCurrentPrice(STOCK_CODE))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.MARKET_DATA_UNAVAILABLE);
+            mockServer.verify();
+        }
+
+        @Test
+        @DisplayName("정상 응답이지만 t1901OutBlock이 없으면 장애가 아니라 빈 값으로 구분해 반환한다(#05)")
+        void success_returnsEmpty_whenResponseHasNoOutBlock() {
+            when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+            mockServer.expect(requestTo(ETF_URL))
+                    .andRespond(withSuccess("""
+                            {"rsp_cd":"00000","rsp_msg":"조회완료"}""", MediaType.APPLICATION_JSON));
+
+            Optional<CurrentPriceDetailDto> result = client.getCurrentPrice(STOCK_CODE);
+
+            assertThat(result).isEmpty();
+            mockServer.verify();
+        }
+
+        @Test
+        @DisplayName("토큰 발급이 MARKET_DATA_UNAVAILABLE로 실패하면 그대로 전파한다(#05)")
+        void fail_propagatesTokenFailure() {
+            when(accessTokenProvider.issueAccessToken())
+                    .thenThrow(new CustomException(ErrorCode.MARKET_DATA_UNAVAILABLE));
+
+            assertThatThrownBy(() -> client.getCurrentPrice(STOCK_CODE))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.MARKET_DATA_UNAVAILABLE);
+        }
+
+        @Test
         @DisplayName("t1901OutBlock이 없으면 빈 값을 반환한다")
         void empty_whenOutBlockMissing() {
             when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
@@ -138,6 +183,96 @@ class EtfApiClientTest {
             assertThat(result.get(0).getStockName()).isEqualTo("삼성전자");
             assertThat(result.get(0).getWeight()).isEqualTo(25.5);
             mockServer.verify();
+        }
+
+        @Test
+        @DisplayName("정상 응답의 구성종목 배열이 비어 있으면 빈 목록을 반환한다(#05)")
+        void success_returnsEmptyList_whenNoConstituents() {
+            when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+            mockServer.expect(requestTo(ETF_URL))
+                    .andRespond(withSuccess("""
+                            {"rsp_cd":"00000","t1904OutBlock1":[]}""", MediaType.APPLICATION_JSON));
+
+            assertThat(client.getConstituents(STOCK_CODE)).isEmpty();
+            mockServer.verify();
+        }
+
+        @Test
+        @DisplayName("외부 시세 데이터 제공사가 5xx로 실패하면 빈 목록 대신 MARKET_DATA_UNAVAILABLE을 던진다(#05)")
+        void fail_throwsMarketDataUnavailable_whenProviderReturnsServerError() {
+            when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+            mockServer.expect(requestTo(ETF_URL)).andRespond(withServerError());
+
+            assertThatThrownBy(() -> client.getConstituents(STOCK_CODE))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.MARKET_DATA_UNAVAILABLE);
+            mockServer.verify();
+        }
+    }
+
+    @Nested
+    @DisplayName("ETF현재가 조회 mock 분기 (getCurrentPrice, market-data.mode=mock)")
+    class GetCurrentPriceMockBranch {
+
+        @Mock
+        private LocalMarketDataReader localMarketDataReader;
+
+        private EtfApiClient mockModeClient;
+
+        @BeforeEach
+        void setUpMockMode() {
+            mockModeClient = new EtfApiClient(accessTokenProvider, Optional.of(localMarketDataReader), RestClient.builder());
+        }
+
+        @Test
+        @DisplayName("mock 데이터의 종목이 ETF(etf=true)면 외부 시세 데이터 API를 호출하지 않고 그대로 반환한다")
+        void usesLocalReader_whenEtfFlagTrue() {
+            CurrentPriceDetailDto localResult = CurrentPriceDetailDto.builder()
+                    .stockCode(STOCK_CODE).stockName("KODEX 200(로컬)").currentPrice(98265L).etf(true).build();
+            when(localMarketDataReader.getCurrentPrice(STOCK_CODE)).thenReturn(Optional.of(localResult));
+
+            Optional<CurrentPriceDetailDto> result = mockModeClient.getCurrentPrice(STOCK_CODE);
+
+            assertThat(result).isPresent();
+            assertThat(result.get().getStockName()).isEqualTo("KODEX 200(로컬)");
+            verify(accessTokenProvider, never()).issueAccessToken();
+        }
+
+        @Test
+        @DisplayName("mock 데이터의 종목코드는 있어도 ETF가 아니면(etf=false) 빈 값을 반환한다")
+        void empty_whenStockCodeExistsButNotEtf() {
+            CurrentPriceDetailDto localResult = CurrentPriceDetailDto.builder()
+                    .stockCode("005930").stockName("삼성전자").currentPrice(70000L).etf(false).build();
+            when(localMarketDataReader.getCurrentPrice("005930")).thenReturn(Optional.of(localResult));
+
+            Optional<CurrentPriceDetailDto> result = mockModeClient.getCurrentPrice("005930");
+
+            assertThat(result).isEmpty();
+        }
+
+        @Test
+        @DisplayName("mock 데이터에 종목코드 자체가 없으면 빈 값을 반환한다")
+        void empty_whenStockCodeMissing() {
+            when(localMarketDataReader.getCurrentPrice(STOCK_CODE)).thenReturn(Optional.empty());
+
+            Optional<CurrentPriceDetailDto> result = mockModeClient.getCurrentPrice(STOCK_CODE);
+
+            assertThat(result).isEmpty();
+        }
+
+        @Test
+        @DisplayName("mock 데이터의 exchgubun 필드를 별도 매핑 없이 그대로 반환한다")
+        void returnsExchgubun_whenPresentInMockData() {
+            CurrentPriceDetailDto localResult = CurrentPriceDetailDto.builder()
+                    .stockCode(STOCK_CODE).stockName("KODEX 200(로컬)").currentPrice(98265L)
+                    .etf(true).exchgubun("K").build();
+            when(localMarketDataReader.getCurrentPrice(STOCK_CODE)).thenReturn(Optional.of(localResult));
+
+            Optional<CurrentPriceDetailDto> result = mockModeClient.getCurrentPrice(STOCK_CODE);
+
+            assertThat(result).isPresent();
+            assertThat(result.get().getExchgubun()).isEqualTo("K");
         }
     }
 }

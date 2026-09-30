@@ -8,7 +8,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
-import com.teamfp.aistock.global.exception.CustomException;
+import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
 import com.teamfp.aistock.infra.marketdata.dto.ExpectedIndexDto;
 import com.teamfp.aistock.infra.marketdata.dto.IndustryPriceDto;
 import com.teamfp.aistock.infra.marketdata.dto.IndustryTrendDto;
@@ -40,39 +40,78 @@ public class IndustryApiClient extends MarketDataApiClientSupport {
     private static final String GUBUN2_DAY = "1";
     private static final String GUBUN2_MONTH = "3";
 
+    // market-data.mode=mock 전용 지수 근사 베이스값 — 실제 지수는 상장 전종목 시가총액
+    // 가중평균이라 105개 종목뿐인 mock 데이터로는 재현할 수 없다. 그래서 대략적인 최근 수준을
+    // 고정 베이스로 두고, 같은 시장(KOSPI/KOSDAQ)의 mock 종목 평균 등락률만큼 흔들어 "그럴듯하게
+    // 움직이는" 근사치를 만든다 — 실제 지수 값이 아니라 로컬 개발용 근사치임을 반드시 이 주석으로
+    // 남겨둔다(지수 mock 지원 추가, 2026-09-21).
+    private static final Map<String, Double> MOCK_BASE_INDEX_VALUE = Map.of("코스피", 3200.0, "코스닥", 780.0);
+    private static final Map<String, String> MOCK_MARKET_BY_NAME = Map.of("코스피", "KOSPI", "코스닥", "KOSDAQ");
+
     private final MarketDataAccessTokenProvider accessTokenProvider;
+    private final Optional<LocalMarketDataReader> localMarketDataReader;
 
     @Value("${market-data.industry-url}")
     private String industryUrl;
 
-    public IndustryApiClient(MarketDataAccessTokenProvider accessTokenProvider, @org.springframework.beans.factory.annotation.Qualifier("marketDataRestClientBuilder") RestClient.Builder restClientBuilder) {
+    public IndustryApiClient(
+            MarketDataAccessTokenProvider accessTokenProvider,
+            Optional<LocalMarketDataReader> localMarketDataReader,
+            @org.springframework.beans.factory.annotation.Qualifier("marketDataRestClientBuilder") RestClient.Builder restClientBuilder) {
         super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
+        this.localMarketDataReader = localMarketDataReader;
     }
 
     /** 업종현재가(t1511) — 업종지수 현재가 스냅샷. marketName은 "코스피" 또는 "코스닥". */
     public Optional<IndustryPriceDto> getCurrentPrice(String marketName) {
         String upcode = INDUSTRY_CODE_BY_NAME.getOrDefault(marketName, "001");
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            Map<String, Object> requestBody = Map.of("t1511InBlock", Map.of("upcode", upcode));
+        if (localMarketDataReader.isPresent()) {
+            return mockCurrentPrice(marketName, upcode);
+        }
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> requestBody = Map.of("t1511InBlock", Map.of("upcode", upcode));
 
-            Map<String, Object> response = call("t1511", requestBody, token);
-            if (response == null || !(response.get("t1511OutBlock") instanceof Map)) {
-                return Optional.empty();
-            }
-            @SuppressWarnings("unchecked")
-            Map<String, Object> outBlock = (Map<String, Object>) response.get("t1511OutBlock");
-            return Optional.of(IndustryPriceDto.builder()
-                    .industryCode(upcode)
-                    .industryName(stringOf(outBlock.get("hname")))
-                    .indexValue(parseDoubleOrZero(outBlock.get("pricejisu")))
-                    .changeRate(parseDoubleOrZero(outBlock.get("diffjisu")))
-                    .build());
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 업종현재가 조회 중 오류 - marketName: {}, 사유: {}", marketName, e.getMessage());
+        Map<String, Object> response = call("t1511", requestBody, token);
+        if (response == null || !(response.get("t1511OutBlock") instanceof Map)) {
             return Optional.empty();
         }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> outBlock = (Map<String, Object>) response.get("t1511OutBlock");
+        return Optional.of(IndustryPriceDto.builder()
+                .industryCode(upcode)
+                .industryName(stringOf(outBlock.get("hname")))
+                .indexValue(parseDoubleOrZero(outBlock.get("pricejisu")))
+                .changeRate(parseDoubleOrZero(outBlock.get("diffjisu")))
+                .build());
+    }
+
+    /**
+     * market-data.mode=mock 전용 — MOCK_BASE_INDEX_VALUE의 고정 베이스값을, 같은 시장
+     * (marketName→market 매핑은 MOCK_MARKET_BY_NAME) 소속 mock 종목들의 평균 등락률만큼
+     * 흔들어 지수 스냅샷을 근사한다. 해당 시장에 mock 종목이 하나도 없으면(예: stocks.json이
+     * 완전히 비었으면) 빈 값을 반환한다.
+     */
+    private Optional<IndustryPriceDto> mockCurrentPrice(String marketName, String upcode) {
+        String market = MOCK_MARKET_BY_NAME.get(marketName);
+        Double baseIndexValue = MOCK_BASE_INDEX_VALUE.get(marketName);
+        if (market == null || baseIndexValue == null) {
+            return Optional.empty();
+        }
+        List<CurrentPriceDetailDto> matched = localMarketDataReader.get().getAllCurrentPrices().values().stream()
+                .filter(dto -> market.equals(dto.getMarket()))
+                .toList();
+        if (matched.isEmpty()) {
+            return Optional.empty();
+        }
+        double avgChangeRate = matched.stream().mapToDouble(CurrentPriceDetailDto::getChangeRate).average().orElse(0.0);
+        double indexValue = baseIndexValue * (1 + avgChangeRate / 100.0);
+        return Optional.of(IndustryPriceDto.builder()
+                .industryCode(upcode)
+                .industryName(marketName)
+                .indexValue(Math.round(indexValue * 100.0) / 100.0)
+                .changeRate(Math.round(avgChangeRate * 100.0) / 100.0)
+                .build());
     }
 
     /** 업종기간별추이(t1514) — 최근 5거래일 지수 추이. */
@@ -90,36 +129,31 @@ public class IndustryApiClient extends MarketDataApiClientSupport {
         boolean longPeriod = periodMonths != null && periodMonths > 0;
         String gubun2 = longPeriod ? GUBUN2_MONTH : GUBUN2_DAY;
         int cnt = longPeriod ? Math.min(periodMonths, MAX_PERIOD_MONTHS) : MAX_TREND_ITEMS;
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
-            inBlock.put("upcode", upcode);
-            inBlock.put("gubun1", " ");
-            inBlock.put("gubun2", gubun2);
-            inBlock.put("cts_date", " ");
-            inBlock.put("cnt", cnt);
-            inBlock.put("rate_gbn", "1");
-            Map<String, Object> requestBody = Map.of("t1514InBlock", inBlock);
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
+        inBlock.put("upcode", upcode);
+        inBlock.put("gubun1", " ");
+        inBlock.put("gubun2", gubun2);
+        inBlock.put("cts_date", " ");
+        inBlock.put("cnt", cnt);
+        inBlock.put("rate_gbn", "1");
+        Map<String, Object> requestBody = Map.of("t1514InBlock", inBlock);
 
-            Map<String, Object> response = call("t1514", requestBody, token);
-            if (response == null || !(response.get("t1514OutBlock1") instanceof List)) {
-                return List.of();
-            }
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> outBlock = (List<Map<String, Object>>) response.get("t1514OutBlock1");
-            return outBlock.stream()
-                    .limit(cnt)
-                    .map(row -> IndustryTrendDto.builder()
-                            .date(stringOf(row.get("date")))
-                            .indexValue(parseDoubleOrZero(row.get("jisu")))
-                            .changeRate(parseDoubleOrZero(row.get("diff")))
-                            .foreignNetBuy(parseLong(row.get("frgsvolume")))
-                            .build())
-                    .toList();
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 업종기간별추이 조회 중 오류 - marketName: {}, 사유: {}", marketName, e.getMessage());
+        Map<String, Object> response = call("t1514", requestBody, token);
+        if (response == null || !(response.get("t1514OutBlock1") instanceof List)) {
             return List.of();
         }
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> outBlock = (List<Map<String, Object>>) response.get("t1514OutBlock1");
+        return outBlock.stream()
+                .limit(cnt)
+                .map(row -> IndustryTrendDto.builder()
+                        .date(stringOf(row.get("date")))
+                        .indexValue(parseDoubleOrZero(row.get("jisu")))
+                        .changeRate(parseDoubleOrZero(row.get("diff")))
+                        .foreignNetBuy(parseLong(row.get("frgsvolume")))
+                        .build())
+                .toList();
     }
 
     /**
@@ -128,29 +162,24 @@ public class IndustryApiClient extends MarketDataApiClientSupport {
     public Optional<ExpectedIndexDto> getExpectedIndex(String marketName, String callAuctionSession) {
         String upcode = INDUSTRY_CODE_BY_NAME.getOrDefault(marketName, "001");
         String gubun = "장후".equals(callAuctionSession) ? "2" : "1";
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            Map<String, Object> requestBody = Map.of("t1485InBlock", Map.of("upcode", upcode, "gubun", gubun));
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> requestBody = Map.of("t1485InBlock", Map.of("upcode", upcode, "gubun", gubun));
 
-            Map<String, Object> response = call("t1485", requestBody, token);
-            if (response == null || !(response.get("t1485OutBlock") instanceof Map)) {
-                return Optional.empty();
-            }
-            @SuppressWarnings("unchecked")
-            Map<String, Object> outBlock = (Map<String, Object>) response.get("t1485OutBlock");
-            // t1485OutBlock에는 diff가 없고 change만 있는데, 이 change도 부호 없는 크기로 오고
-            // 방향은 sign 필드로 온다(t1102 등과 동일 패턴, 실측: sign=5인데 change="152.93" 양수).
-            // signedDoubleOrZero로 sign 기준 부호를 다시 매긴다(2026-09-11).
-            return Optional.of(ExpectedIndexDto.builder()
-                    .expectedIndexValue(parseDoubleOrZero(outBlock.get("pricejisu")))
-                    .changeRate(signedDoubleOrZero(outBlock.get("change"), outBlock.get("sign")))
-                    .upperLimitStockCount(parseLongPrimitive(outBlock.get("yupjo")))
-                    .lowerLimitStockCount(parseLongPrimitive(outBlock.get("ydownjo")))
-                    .build());
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 예상지수 조회 중 오류 - marketName: {}, 사유: {}", marketName, e.getMessage());
+        Map<String, Object> response = call("t1485", requestBody, token);
+        if (response == null || !(response.get("t1485OutBlock") instanceof Map)) {
             return Optional.empty();
         }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> outBlock = (Map<String, Object>) response.get("t1485OutBlock");
+        // t1485OutBlock에는 diff가 없고 change만 있는데, 이 change도 부호 없는 크기로 오고
+        // 방향은 sign 필드로 온다(t1102 등과 동일 패턴, 실측: sign=5인데 change="152.93" 양수).
+        // signedDoubleOrZero로 sign 기준 부호를 다시 매긴다(2026-09-11).
+        return Optional.of(ExpectedIndexDto.builder()
+                .expectedIndexValue(parseDoubleOrZero(outBlock.get("pricejisu")))
+                .changeRate(signedDoubleOrZero(outBlock.get("change"), outBlock.get("sign")))
+                .upperLimitStockCount(parseLongPrimitive(outBlock.get("yupjo")))
+                .lowerLimitStockCount(parseLongPrimitive(outBlock.get("ydownjo")))
+                .build());
     }
 
     private Map<String, Object> call(String trCd, Map<String, Object> requestBody, String token) {

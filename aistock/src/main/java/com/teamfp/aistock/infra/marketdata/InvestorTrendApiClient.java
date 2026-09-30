@@ -9,7 +9,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
-import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.infra.marketdata.dto.ForeignInstitutionalTrendDto;
 
 import lombok.extern.slf4j.Slf4j;
@@ -62,8 +61,8 @@ public class InvestorTrendApiClient extends MarketDataApiClientSupport {
 
     /**
      * 종목코드로 최근 {@value #LOOKBACK_DAYS}일간의 일별 외국인·기관·개인 순매수 동향(KRX 기준)과
-     * 외국인 보유한도 소진율(FSC 기준)을 조회한다. 실패하거나 데이터가 없으면 빈 리스트를
-     * 반환한다 — 다른 외부 시세 데이터/DART 조회들과 동일하게 예외를 던지지 않는다.
+     * 외국인 보유한도 소진율(FSC 기준)을 조회한다. 데이터가 없으면 빈 리스트를 반환하고,
+     * 외부 시세 데이터 호출 자체가 실패하면 CustomException(MARKET_DATA_UNAVAILABLE)을 던진다(#05).
      */
     public List<ForeignInstitutionalTrendDto> getRecentTrend(String stockCode) {
         return getTrend(stockCode, null);
@@ -77,21 +76,16 @@ public class InvestorTrendApiClient extends MarketDataApiClientSupport {
      */
     public List<ForeignInstitutionalTrendDto> getTrend(String stockCode, Integer periodMonths) {
         boolean longPeriod = periodMonths != null && periodMonths > 0;
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            LocalDate today = LocalDate.now();
-            LocalDate fromDate = longPeriod
-                    ? today.minusMonths(Math.min(periodMonths, MAX_PERIOD_MONTHS))
-                    : today.minusDays(LOOKBACK_DAYS);
-            Map<String, Object> requestBody = Map.of("t1716InBlock", buildT1716RequestBody(stockCode, fromDate, today));
+        String token = accessTokenProvider.issueAccessToken();
+        LocalDate today = LocalDate.now();
+        LocalDate fromDate = longPeriod
+                ? today.minusMonths(Math.min(periodMonths, MAX_PERIOD_MONTHS))
+                : today.minusDays(LOOKBACK_DAYS);
+        Map<String, Object> requestBody = Map.of("t1716InBlock", buildT1716RequestBody(stockCode, fromDate, today));
 
-            Map<String, Object> response = call(frgrIttUrl, FOREIGN_INSTITUTIONAL_TREND_TR_CD, requestBody, token, "외부 시세 데이터 외국인/기관 매매동향 조회 실패");
+        Map<String, Object> response = call(frgrIttUrl, FOREIGN_INSTITUTIONAL_TREND_TR_CD, requestBody, token, "외부 시세 데이터 외국인/기관 매매동향 조회 실패");
 
-            return parseTrend(stockCode, response, longPeriod);
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 외국인/기관 매매동향 조회 중 오류 - stockCode: {}, 사유: {}", stockCode, e.getMessage());
-            return List.of();
-        }
+        return parseTrend(stockCode, response, longPeriod);
     }
 
     private Map<String, Object> buildT1716RequestBody(String stockCode, LocalDate fromDate, LocalDate today) {

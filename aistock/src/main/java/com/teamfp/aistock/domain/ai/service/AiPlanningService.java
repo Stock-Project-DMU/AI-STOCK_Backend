@@ -1371,6 +1371,17 @@ public class AiPlanningService {
                     case INDUSTRY_INFO_TOOL_NAME -> executeIndustryInfoLookup(functionCall);
                     default -> executeEtfInfoLookup(functionCall);
                 };
+            } catch (CustomException e) {
+                // 외부 시세 데이터 제공사 장애(MARKET_DATA_UNAVAILABLE)는 "데이터 없음"과 다른 안내를 줘야
+                // 하므로 뭉뚱그린 오류 문구 대신 장애 전용 문구로 돌려준다(외부 장애와 빈 목록 구분 처리, #05).
+                // withResolvedStockCode()를 거치지 않는 도구(순위·해외지수·현재가 등)는 여기서 처리된다.
+                if (e.getErrorCode() == ErrorCode.MARKET_DATA_UNAVAILABLE) {
+                    log.warn("외부 시세 데이터 제공사 장애로 도구 실행 실패 - name: {}, 사유: {}", functionCall.name(), e.getMessage());
+                    return Map.of("result", MARKET_DATA_UNAVAILABLE_MESSAGE);
+                }
+                log.warn("도구 실행 중 예상치 못한 오류 - name: {}, args: {}, 사유: {}",
+                        functionCall.name(), functionCall.args(), e.getMessage());
+                return Map.of("result", "요청을 처리하는 중 오류가 발생했습니다.");
             } catch (RuntimeException e) {
                 log.warn("도구 실행 중 예상치 못한 오류 - name: {}, args: {}, 사유: {}",
                         functionCall.name(), functionCall.args(), e.getMessage());
@@ -1417,6 +1428,13 @@ public class AiPlanningService {
     }
 
     private static final String TOOL_ERROR_MARKER = "toolError";
+
+    // 외부 시세 데이터 제공사 장애 시 Gemini에 돌려줄 도구 결과 — 빈 결과("데이터가 없음")와 달리 일시적
+    // 장애라는 점을 분명히 해, Gemini가 "해당 정보가 없다"고 단정하지 않고 잠시 후 다시 시도하라고
+    // 안내하게 한다(외부 장애와 빈 목록 구분 처리, #05).
+    private static final String MARKET_DATA_UNAVAILABLE_MESSAGE =
+            "외부 시세 데이터 제공사와 일시적으로 연결할 수 없어 지금은 조회할 수 없습니다 — 데이터가 없는 것이 아니라 "
+                    + "일시적인 장애이므로, 잠시 후 다시 시도해 달라고 안내하세요.";
 
     // 도구 실행 중 CustomException을 내부에서 잡아 오류 안내 문구로 대신할 때 사용한다.
     // executeTool()이 이 마커를 보고 30분 캐싱을 건너뛴다 — 외부 API 장애는 일시적일 수 있으므로
@@ -1719,9 +1737,10 @@ public class AiPlanningService {
     // 채워지는 구조라 AI가 임의의 회사를 물어보는 상황에는 맞지 않아(2026-08-07 확인 —
     // subscribe() 호출부가 아직 어디에도 연결돼 있지 않음), 그 대신 매번 REST로 직접
     // 조회한다(MarketDataApiClient 참고). corp_code 캐시와 달리 비상장 회사는 stockCode
-    // 자체가 없어 애초에 조회 불가능하고, 상장사라도 외부 시세 데이터 쪽 응답이 비거나 실패하면 빈 값이
+    // 자체가 없어 애초에 조회 불가능하고, 상장사라도 외부 시세 데이터 쪽 응답이 비면 빈 값이
     // 돌아올 수 있다 — 두 경우 모두 예외 없이 그 사실을 답변 문구로 그대로 돌려준다(다른
-    // 도구들과 동일한 원칙).
+    // 도구들과 동일한 원칙). 제공사 장애는 빈 값이 아니라 MARKET_DATA_UNAVAILABLE 예외로 오며,
+    // executeTool()이 장애 전용 문구로 바꿔 돌려준다(#05).
     // 2026-08-11 추가 — confirmedCurrentPrices: 라이브 테스트에서 가격/거래량처럼 절대 틀리면
     // 안 되는 숫자를 Gemini가 도구 결과를 받고도 답변 문장을 쓰며 다른 값으로 지어내는 사례가
     // 반복 확인됐다(콤마 포맷팅, "그대로 인용하라" 지시 둘 다 시도했으나 완전히는 못 막음).
@@ -1745,7 +1764,7 @@ public class AiPlanningService {
 
         Optional<CurrentPriceDetailDto> priceLookup = marketDataApiClient.getCurrentPrice(stockCode.get());
         if (priceLookup.isEmpty()) {
-            return Map.of("result", "'%s'는 지금 현재가를 확인할 수 없습니다 — 외부 시세 데이터 제공사 시세 조회가 실패했거나 해당 종목 정보가 없을 수 있습니다."
+            return Map.of("result", "'%s'는 외부 시세 데이터 제공사 응답에 현재가 정보가 없어 확인할 수 없습니다 — 거래정지·상장폐지 등으로 시세가 제공되지 않는 종목일 수 있습니다."
                     .formatted(companyName));
         }
         CurrentPriceDetailDto price = priceLookup.get();
@@ -1812,28 +1831,31 @@ public class AiPlanningService {
             return Map.of("result", "'%s'의 종목코드를 찾지 못해 %s 국내(코스피/코스닥) 상장 종목이 아니거나(해외 상장 종목 등) 회사명이 정확하지 않을 수 있습니다."
                     .formatted(companyName, notFoundMessage));
         }
-        // withResolvedCorpCode()와 동일한 이유로 lookup 실행을 try로 감싼다 — 외부 시세 데이터 조회 자체는
-        // 실패해도 예외 없이 빈 결과를 주는 경우가 많지만, 모든 외부 시세 데이터 호출이 거치는
-        // MarketDataAccessTokenProvider는 인증 실패 시 CustomException을 던진다(코드리뷰 반영). 감싸지
+        // withResolvedCorpCode()와 동일한 이유로 lookup 실행을 try로 감싼다 — 외부 시세 데이터 클라이언트는
+        // 제공사 장애(토큰 발급·TR 호출 실패) 시 CustomException(MARKET_DATA_UNAVAILABLE)을 던지고,
+        // 빈 결과는 "정상 응답이지만 데이터 없음"만 뜻한다(외부 장애와 빈 목록 구분 처리, #05). 감싸지
         // 않으면 이 예외가 executeTool()의 최상위 catch까지 그대로 올라가 도구별 안내 문구
-        // 대신 뭉뚱그린 "요청을 처리하는 중 오류가 발생했습니다"만 반환된다.
+        // 대신 뭉뚱그린 문구만 반환된다.
         try {
             return lookup.apply(stockCode.get());
         } catch (CustomException e) {
             log.warn("외부 시세 데이터 조회 실패 - companyName: {}, 사유: {}", companyName, e.getMessage());
+            if (e.getErrorCode() == ErrorCode.MARKET_DATA_UNAVAILABLE) {
+                return errorResult(MARKET_DATA_UNAVAILABLE_MESSAGE);
+            }
             return errorResult(notFoundMessage);
         }
     }
 
-    // 최근 10일간 외국인/기관 순매수 동향(t1716)을 조회한다. InvestorTrendApiClient는 실패해도
-    // 예외를 던지지 않고 빈 리스트를 주므로 별도 try/catch 없이 결과가 비었는지만 확인한다.
+    // 최근 10일간 외국인/기관 순매수 동향(t1716)을 조회한다. 빈 리스트는 "데이터 없음"만 뜻하고,
+    // 제공사 장애는 MARKET_DATA_UNAVAILABLE 예외로 와서 withResolvedStockCode()가 장애 문구로 바꾼다(#05).
     private Map<String, Object> executeForeignInstitutionalTrendLookup(GeminiResponse.FunctionCall functionCall) {
         String companyName = stringArg(functionCall.args(), "companyName");
         Integer periodMonths = integerArg(functionCall.args(), "periodMonths");
         return withResolvedStockCode(companyName, stockCode -> {
             List<ForeignInstitutionalTrendDto> items = investorTrendApiClient.getTrend(stockCode, periodMonths);
             if (items.isEmpty()) {
-                return Map.of("result", "'%s'의 외국인/기관 매매동향을 확인할 수 없습니다 — 외부 시세 데이터 제공사 조회가 실패했거나 관련 데이터가 없을 수 있습니다."
+                return Map.of("result", "'%s'의 외국인/기관 매매동향 데이터가 없습니다."
                         .formatted(companyName));
             }
             String description = periodMonths != null && periodMonths > 0
@@ -2037,7 +2059,7 @@ public class AiPlanningService {
         }
         Optional<OverseasIndexDto> index = investInfoApiClient.getOverseasIndex(symbolSpec[0], symbolSpec[1]);
         if (index.isEmpty()) {
-            return Map.of("result", "'%s' 조회에 실패했습니다.".formatted(indexName));
+            return Map.of("result", "'%s' 시세 데이터가 없습니다.".formatted(indexName));
         }
         OverseasIndexDto value = index.get();
         return Map.of("result", "%s(%s 기준) %.2f, 전일 대비 %+.2f(%.2f%%)".formatted(

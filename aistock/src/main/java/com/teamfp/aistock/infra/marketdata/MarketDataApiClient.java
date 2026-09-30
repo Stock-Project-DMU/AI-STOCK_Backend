@@ -9,7 +9,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
-import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.infra.marketdata.dto.CallAuctionPriceDto;
 import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
 import com.teamfp.aistock.infra.marketdata.dto.HistoricalPriceDto;
@@ -77,9 +76,10 @@ public class MarketDataApiClient extends MarketDataApiClientSupport {
 
     /**
      * 종목코드로 현재가(장중이면 실시간 체결가, 장 마감 후라면 외부 시세 데이터가 돌려주는 마지막 체결가)와
-     * PER/PBR/52주 최고·최저·상장주식수·소진율을 함께 조회한다. 토큰 발급 실패, TR 호출 실패,
-     * 응답 구조가 예상과 다른 경우 전부 빈 값을 반환한다 — 호출자(AiPlanningService)가
-     * "확인할 수 없다"로 자연스럽게 처리하도록 예외를 던지지 않는다.
+     * PER/PBR/52주 최고·최저·상장주식수·소진율을 함께 조회한다. 응답 구조가 예상과 다르거나
+     * 현재가가 없으면 빈 값을 반환한다. 토큰 발급·TR 호출 자체가 실패하면(제공사 장애) 빈 값으로
+     * 삼키지 않고 CustomException(MARKET_DATA_UNAVAILABLE)을 던진다 — 호출자가 "종목 정보 없음"과
+     * "제공사 장애"를 구분해 안내할 수 있게 하기 위함이다(외부 장애와 빈 목록 구분 처리, #05).
      *
      * <p>{@code market-data.mode=mock}이면(={@code localMarketDataReader}가 존재하면) 외부 시세 데이터 API를 호출하지
      * 않고 로컬 파일 조회로 대체한다. 로컬 파일이 없거나 파싱에 실패해도 실제 외부 시세 데이터 API로 폴백하지
@@ -89,17 +89,12 @@ public class MarketDataApiClient extends MarketDataApiClientSupport {
         if (localMarketDataReader.isPresent()) {
             return localMarketDataReader.get().getCurrentPrice(stockCode);
         }
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            Map<String, Object> requestBody = Map.of("t1102InBlock", Map.of("shcode", stockCode));
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> requestBody = Map.of("t1102InBlock", Map.of("shcode", stockCode));
 
-            Map<String, Object> response = call(marketDataUrl, CURRENT_PRICE_TR_CD, requestBody, token, "외부 시세 데이터 현재가 조회 실패");
+        Map<String, Object> response = call(marketDataUrl, CURRENT_PRICE_TR_CD, requestBody, token, "외부 시세 데이터 현재가 조회 실패");
 
-            return parseCurrentPrice(stockCode, response);
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 현재가 조회 중 오류 - stockCode: {}, 사유: {}", stockCode, e.getMessage());
-            return Optional.empty();
-        }
+        return parseCurrentPrice(stockCode, response);
     }
 
     @SuppressWarnings("unchecked")
@@ -161,56 +156,46 @@ public class MarketDataApiClient extends MarketDataApiClientSupport {
 
     @SuppressWarnings("unchecked")
     private List<StockRiskFlagDto> fetchRiskFlags(String trCd, String outBlockKey, String stockCode, String flagType) {
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            Map<String, Object> inBlock = Map.of("gubun", "0", "jongchk", "1", "cts_shcode", " ");
-            Map<String, Object> requestBody = Map.of(trCd + "InBlock", inBlock);
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> inBlock = Map.of("gubun", "0", "jongchk", "1", "cts_shcode", " ");
+        Map<String, Object> requestBody = Map.of(trCd + "InBlock", inBlock);
 
-            Map<String, Object> response = call(marketDataUrl, trCd, requestBody, token, "외부 시세 데이터 위험신호(" + trCd + ") 조회 실패");
+        Map<String, Object> response = call(marketDataUrl, trCd, requestBody, token, "외부 시세 데이터 위험신호(" + trCd + ") 조회 실패");
 
-            if (response == null || !(response.get(outBlockKey) instanceof List)) {
-                return List.of();
-            }
-            List<Map<String, Object>> outBlock = (List<Map<String, Object>>) response.get(outBlockKey);
-            return outBlock.stream()
-                    .filter(row -> stockCode.equals(stringOf(row.get("shcode"))))
-                    .map(row -> StockRiskFlagDto.builder()
-                            .flagType(flagType)
-                            .reasonCode(stringOf(row.get("reason")))
-                            .date(stringOf(row.get("date")))
-                            .build())
-                    .toList();
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 위험신호({}) 조회 중 오류 - stockCode: {}, 사유: {}", trCd, stockCode, e.getMessage());
+        if (response == null || !(response.get(outBlockKey) instanceof List)) {
             return List.of();
         }
+        List<Map<String, Object>> outBlock = (List<Map<String, Object>>) response.get(outBlockKey);
+        return outBlock.stream()
+                .filter(row -> stockCode.equals(stringOf(row.get("shcode"))))
+                .map(row -> StockRiskFlagDto.builder()
+                        .flagType(flagType)
+                        .reasonCode(stringOf(row.get("reason")))
+                        .date(stringOf(row.get("date")))
+                        .build())
+                .toList();
     }
 
     /** 피봇/디마크(t1105) — 전일 시고저 기준 지지·저항선을 조회한다(2026-08-11 추가). */
     public Optional<PivotLevelDto> getPivotLevels(String stockCode) {
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            Map<String, Object> requestBody = Map.of("t1105InBlock", Map.of("shcode", stockCode, "exchgubun", "K"));
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> requestBody = Map.of("t1105InBlock", Map.of("shcode", stockCode, "exchgubun", "K"));
 
-            Map<String, Object> response = call(marketDataUrl, "t1105", requestBody, token, "외부 시세 데이터 피봇/디마크 조회 실패");
+        Map<String, Object> response = call(marketDataUrl, "t1105", requestBody, token, "외부 시세 데이터 피봇/디마크 조회 실패");
 
-            if (response == null || !(response.get("t1105OutBlock") instanceof Map)) {
-                return Optional.empty();
-            }
-            @SuppressWarnings("unchecked")
-            Map<String, Object> outBlock = (Map<String, Object>) response.get("t1105OutBlock");
-            return Optional.of(PivotLevelDto.builder()
-                    .stockCode(stockCode)
-                    .pivot(parseLong(outBlock.get("pbot")))
-                    .resistance1(parseLong(outBlock.get("offer1")))
-                    .support1(parseLong(outBlock.get("supp1")))
-                    .resistance2(parseLong(outBlock.get("offer2")))
-                    .support2(parseLong(outBlock.get("supp2")))
-                    .build());
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 피봇/디마크 조회 중 오류 - stockCode: {}, 사유: {}", stockCode, e.getMessage());
+        if (response == null || !(response.get("t1105OutBlock") instanceof Map)) {
             return Optional.empty();
         }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> outBlock = (Map<String, Object>) response.get("t1105OutBlock");
+        return Optional.of(PivotLevelDto.builder()
+                .stockCode(stockCode)
+                .pivot(parseLong(outBlock.get("pbot")))
+                .resistance1(parseLong(outBlock.get("offer1")))
+                .support1(parseLong(outBlock.get("supp1")))
+                .resistance2(parseLong(outBlock.get("offer2")))
+                .support2(parseLong(outBlock.get("supp2")))
+                .build());
     }
 
     /** 기간별주가(t1305) — 최근 며칠치 시세+시가총액+외국인/개인 순매수(2026-08-11 추가). */
@@ -229,42 +214,94 @@ public class MarketDataApiClient extends MarketDataApiClientSupport {
         boolean longPeriod = periodMonths != null && periodMonths > 0;
         int dwmcode = longPeriod ? DWMCODE_MONTH : DWMCODE_DAY;
         int cnt = longPeriod ? Math.min(periodMonths, MAX_PERIOD_MONTHS) : MAX_HISTORICAL_ITEMS;
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
-            inBlock.put("shcode", stockCode);
-            inBlock.put("dwmcode", dwmcode);
-            inBlock.put("date", "");
-            inBlock.put("idx", 0);
-            inBlock.put("cnt", cnt);
-            Map<String, Object> requestBody = Map.of("t1305InBlock", inBlock);
+        if (localMarketDataReader.isPresent()) {
+            return mockHistoricalPrices(stockCode, cnt, longPeriod);
+        }
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
+        inBlock.put("shcode", stockCode);
+        inBlock.put("dwmcode", dwmcode);
+        inBlock.put("date", "");
+        inBlock.put("idx", 0);
+        inBlock.put("cnt", cnt);
+        Map<String, Object> requestBody = Map.of("t1305InBlock", inBlock);
 
-            Map<String, Object> response = call(marketDataUrl, "t1305", requestBody, token, "외부 시세 데이터 기간별주가 조회 실패");
+        Map<String, Object> response = call(marketDataUrl, "t1305", requestBody, token, "외부 시세 데이터 기간별주가 조회 실패");
 
-            if (response == null || !(response.get("t1305OutBlock1") instanceof List)) {
-                return List.of();
-            }
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> outBlock = (List<Map<String, Object>>) response.get("t1305OutBlock1");
-            return outBlock.stream()
-                    .limit(cnt)
-                    .map(row -> HistoricalPriceDto.builder()
-                            .date(stringOf(row.get("date")))
-                            .open(parseLong(row.get("open")))
-                            .high(parseLong(row.get("high")))
-                            .low(parseLong(row.get("low")))
-                            .close(parseLong(row.get("close")))
-                            .changeRate(parseDoubleOrZero(row.get("diff")))
-                            .volume(parseLong(row.get("volume")))
-                            .marketCap(parseLong(row.get("marketcap")))
-                            .foreignNetBuy(parseLong(row.get("fpvolume")))
-                            .individualNetBuy(parseLong(row.get("ppvolume")))
-                            .build())
-                    .toList();
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 기간별주가 조회 중 오류 - stockCode: {}, 사유: {}", stockCode, e.getMessage());
+        if (response == null || !(response.get("t1305OutBlock1") instanceof List)) {
             return List.of();
         }
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> outBlock = (List<Map<String, Object>>) response.get("t1305OutBlock1");
+        return outBlock.stream()
+                .limit(cnt)
+                .map(row -> HistoricalPriceDto.builder()
+                        .date(stringOf(row.get("date")))
+                        .open(parseLong(row.get("open")))
+                        .high(parseLong(row.get("high")))
+                        .low(parseLong(row.get("low")))
+                        .close(parseLong(row.get("close")))
+                        .changeRate(parseDoubleOrZero(row.get("diff")))
+                        .volume(parseLong(row.get("volume")))
+                        .marketCap(parseLong(row.get("marketcap")))
+                        .foreignNetBuy(parseLong(row.get("fpvolume")))
+                        .individualNetBuy(parseLong(row.get("ppvolume")))
+                        .build())
+                .toList();
+    }
+
+    private static final java.time.format.DateTimeFormatter MOCK_HISTORY_DATE_FORMAT =
+            java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd");
+
+    /**
+     * market-data.mode=mock 전용 — market_data.json에는 현재가 스냅샷 1건뿐이라 실제 과거
+     * 시세가 전혀 없다. 그래서 종목코드로 시드를 고정한 결정적(deterministic) 합성(fabricated)
+     * 시계열을 만든다 — 같은 종목은 요청할 때마다 항상 같은 그래프를 그려 화면 깜빡임처럼
+     * 보이지 않게 하고, 가장 최근 구간(i=0)의 종가를 mock 현재가와 일치시켜 종목 상세(현재가)와
+     * 차트가 서로 모순되지 않게 한다. 실제 과거 시세가 절대 아니므로 real 모드로 착각하지
+     * 않도록 이 메서드 밖으로 새어나가는 로그·주석에 "실제"라는 표현을 쓰지 않는다(차트 mock
+     * 지원 추가, 2026-09-21).
+     */
+    private List<HistoricalPriceDto> mockHistoricalPrices(String stockCode, int cnt, boolean longPeriod) {
+        Optional<CurrentPriceDetailDto> currentOpt = localMarketDataReader.get().getCurrentPrice(stockCode);
+        if (currentOpt.isEmpty()) {
+            return List.of();
+        }
+        CurrentPriceDetailDto current = currentOpt.get();
+        java.util.Random random = new java.util.Random(stockCode.hashCode());
+        java.time.LocalDate date = java.time.LocalDate.now();
+
+        List<HistoricalPriceDto> result = new java.util.ArrayList<>();
+        long close = current.getCurrentPrice();
+        for (int i = 0; i < cnt; i++) {
+            double openRatio = 1 + (random.nextDouble() - 0.5) * 0.06;
+            long open = Math.max(1, Math.round(close * openRatio));
+            long high = Math.max(open, close) + Math.round(Math.max(open, close) * random.nextDouble() * 0.02);
+            long low = Math.max(1, Math.min(open, close) - Math.round(Math.min(open, close) * random.nextDouble() * 0.02));
+            long volume = Math.max(1, Math.round(current.getVolume() * (0.5 + random.nextDouble())));
+            double changeRate = open == 0 ? 0.0 : Math.round((close - open) * 10000.0 / open) / 100.0;
+            Long marketCap = current.getListingShares() != null ? close * current.getListingShares() * 1000 : null;
+            long foreignNetBuy = Math.round(volume * (random.nextDouble() - 0.5) * 0.4);
+            long individualNetBuy = Math.round(volume * (random.nextDouble() - 0.5) * 0.4);
+
+            result.add(HistoricalPriceDto.builder()
+                    .date(date.format(MOCK_HISTORY_DATE_FORMAT))
+                    .open(open)
+                    .high(high)
+                    .low(low)
+                    .close(close)
+                    .changeRate(changeRate)
+                    .volume(volume)
+                    .marketCap(marketCap)
+                    .foreignNetBuy(foreignNetBuy)
+                    .individualNetBuy(individualNetBuy)
+                    .build());
+
+            // 다음(과거) 구간의 종가 = 이번 구간의 시가로 이어 붙여 계단식 시계열을 만든다.
+            close = open;
+            date = longPeriod ? date.minusMonths(1) : date.minusDays(1);
+        }
+        return result;
     }
 
     /** API용주식멀티현재가조회(t8407) — 최대 5종목까지 한번에 현재가 조회(2026-08-11 추가). */
@@ -273,33 +310,28 @@ public class MarketDataApiClient extends MarketDataApiClientSupport {
             return List.of();
         }
         List<String> limited = stockCodes.size() > 5 ? stockCodes.subList(0, 5) : stockCodes;
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            String concatenatedCodes = String.join("", limited);
-            Map<String, Object> requestBody = Map.of("t8407InBlock",
-                    Map.of("nrec", limited.size(), "shcode", concatenatedCodes));
+        String token = accessTokenProvider.issueAccessToken();
+        String concatenatedCodes = String.join("", limited);
+        Map<String, Object> requestBody = Map.of("t8407InBlock",
+                Map.of("nrec", limited.size(), "shcode", concatenatedCodes));
 
-            Map<String, Object> response = call(marketDataUrl, "t8407", requestBody, token, "외부 시세 데이터 멀티종목현재가 조회 실패");
+        Map<String, Object> response = call(marketDataUrl, "t8407", requestBody, token, "외부 시세 데이터 멀티종목현재가 조회 실패");
 
-            if (response == null || !(response.get("t8407OutBlock1") instanceof List)) {
-                return List.of();
-            }
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> outBlock = (List<Map<String, Object>>) response.get("t8407OutBlock1");
-            return outBlock.stream()
-                    .map(row -> MultiStockPriceDto.builder()
-                            .stockCode(stringOf(row.get("shcode")))
-                            .stockName(stringOf(row.get("hname")))
-                            .price(parseLong(row.get("price")))
-                            .changeAmount(signedLong(row.get("change"), row.get("sign")))
-                            .changeRate(parseDoubleOrZero(row.get("diff")))
-                            .volume(parseLong(row.get("volume")))
-                            .build())
-                    .toList();
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 멀티종목현재가 조회 중 오류 - stockCodes: {}, 사유: {}", stockCodes, e.getMessage());
+        if (response == null || !(response.get("t8407OutBlock1") instanceof List)) {
             return List.of();
         }
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> outBlock = (List<Map<String, Object>>) response.get("t8407OutBlock1");
+        return outBlock.stream()
+                .map(row -> MultiStockPriceDto.builder()
+                        .stockCode(stringOf(row.get("shcode")))
+                        .stockName(stringOf(row.get("hname")))
+                        .price(parseLong(row.get("price")))
+                        .changeAmount(signedLong(row.get("change"), row.get("sign")))
+                        .changeRate(parseDoubleOrZero(row.get("diff")))
+                        .volume(parseLong(row.get("volume")))
+                        .build())
+                .toList();
     }
 
     /**
@@ -308,35 +340,30 @@ public class MarketDataApiClient extends MarketDataApiClientSupport {
      * 게이트를 걸어야 한다(호출부인 AiPlanningService의 책임 — 이 클라이언트 자체는 게이트를 모른다).
      */
     public List<CallAuctionPriceDto> getRecentCallAuctionPrices(String stockCode) {
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
-            inBlock.put("shcode", stockCode);
-            inBlock.put("cts_time", "");
-            inBlock.put("cnt", MAX_CALL_AUCTION_ITEMS);
-            inBlock.put("exchgubun", "K");
-            Map<String, Object> requestBody = Map.of("t1486InBlock", inBlock);
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
+        inBlock.put("shcode", stockCode);
+        inBlock.put("cts_time", "");
+        inBlock.put("cnt", MAX_CALL_AUCTION_ITEMS);
+        inBlock.put("exchgubun", "K");
+        Map<String, Object> requestBody = Map.of("t1486InBlock", inBlock);
 
-            Map<String, Object> response = call(marketDataUrl, "t1486", requestBody, token, "외부 시세 데이터 동시호가예상체결가 조회 실패");
+        Map<String, Object> response = call(marketDataUrl, "t1486", requestBody, token, "외부 시세 데이터 동시호가예상체결가 조회 실패");
 
-            if (response == null || !(response.get("t1486OutBlock1") instanceof List)) {
-                return List.of();
-            }
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> outBlock = (List<Map<String, Object>>) response.get("t1486OutBlock1");
-            return outBlock.stream()
-                    .limit(MAX_CALL_AUCTION_ITEMS)
-                    .map(row -> CallAuctionPriceDto.builder()
-                            .time(stringOf(row.get("chetime")))
-                            .price(parseLong(row.get("price")))
-                            .changeRate(parseDoubleOrZero(row.get("diff")))
-                            .expectedVolume(parseLong(row.get("cvolume")))
-                            .build())
-                    .toList();
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 동시호가예상체결가 조회 중 오류 - stockCode: {}, 사유: {}", stockCode, e.getMessage());
+        if (response == null || !(response.get("t1486OutBlock1") instanceof List)) {
             return List.of();
         }
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> outBlock = (List<Map<String, Object>>) response.get("t1486OutBlock1");
+        return outBlock.stream()
+                .limit(MAX_CALL_AUCTION_ITEMS)
+                .map(row -> CallAuctionPriceDto.builder()
+                        .time(stringOf(row.get("chetime")))
+                        .price(parseLong(row.get("price")))
+                        .changeRate(parseDoubleOrZero(row.get("diff")))
+                        .expectedVolume(parseLong(row.get("cvolume")))
+                        .build())
+                .toList();
     }
 
 }

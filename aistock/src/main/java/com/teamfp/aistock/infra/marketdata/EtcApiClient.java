@@ -9,7 +9,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
-import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.infra.marketdata.dto.NewListingDto;
 import com.teamfp.aistock.infra.marketdata.dto.ShortSellingTrendDto;
 import com.teamfp.aistock.infra.marketdata.dto.StockCreditInfoDto;
@@ -50,89 +49,74 @@ public class EtcApiClient extends MarketDataApiClientSupport {
 
     /** 예탁담보융자가능종목현황조회(CLNAQ00100) — 이 종목을 담보로 대출 가능한지. */
     public Optional<StockCreditInfoDto> getCollateralLoanEligibility(String stockCode) {
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
-            inBlock.put("QryTp", "0");
-            inBlock.put("IsuNo", "A" + stockCode);
-            inBlock.put("SecTpCode", "1");
-            inBlock.put("LoanIntrstGrdCode", "00");
-            inBlock.put("LoanTp", "1");
-            Map<String, Object> requestBody = Map.of("CLNAQ00100InBlock1", inBlock);
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
+        inBlock.put("QryTp", "0");
+        inBlock.put("IsuNo", "A" + stockCode);
+        inBlock.put("SecTpCode", "1");
+        inBlock.put("LoanIntrstGrdCode", "00");
+        inBlock.put("LoanTp", "1");
+        Map<String, Object> requestBody = Map.of("CLNAQ00100InBlock1", inBlock);
 
-            Map<String, Object> response = call("CLNAQ00100", requestBody, token);
-            if (response == null || !(response.get("CLNAQ00100OutBlock2") instanceof List)) {
-                return Optional.empty();
-            }
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> rows = (List<Map<String, Object>>) response.get("CLNAQ00100OutBlock2");
-            if (rows.isEmpty()) {
-                return Optional.empty();
-            }
-            Map<String, Object> row = rows.get(0);
-            String regType = stringOf(row.get("RegTpNm"));
-            return Optional.of(StockCreditInfoDto.builder()
-                    .stockCode(stockCode)
-                    .detail("담보융자 가능 여부: %s".formatted(regType != null ? regType : "정보없음"))
-                    .build());
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 담보대출가능여부 조회 중 오류 - stockCode: {}, 사유: {}", stockCode, e.getMessage());
+        Map<String, Object> response = call("CLNAQ00100", requestBody, token);
+        if (response == null || !(response.get("CLNAQ00100OutBlock2") instanceof List)) {
             return Optional.empty();
         }
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rows = (List<Map<String, Object>>) response.get("CLNAQ00100OutBlock2");
+        if (rows.isEmpty()) {
+            return Optional.empty();
+        }
+        Map<String, Object> row = rows.get(0);
+        String regType = stringOf(row.get("RegTpNm"));
+        return Optional.of(StockCreditInfoDto.builder()
+                .stockCode(stockCode)
+                .detail("담보융자 가능 여부: %s".formatted(regType != null ? regType : "정보없음"))
+                .build());
     }
 
     /** 증거금율별종목조회(t1411) — 이 종목 매수 시 증거금률. */
     public Optional<StockCreditInfoDto> getMarginRequirement(String stockCode) {
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            Map<String, Object> inBlock = Map.of(
-                    "gubun", "0", "jongchk", "1", "jkrate", "1", "shcode", stockCode, "idx", 0);
-            Map<String, Object> requestBody = Map.of("t1411InBlock", inBlock);
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> inBlock = Map.of(
+                "gubun", "0", "jongchk", "1", "jkrate", "1", "shcode", stockCode, "idx", 0);
+        Map<String, Object> requestBody = Map.of("t1411InBlock", inBlock);
 
-            Map<String, Object> response = call("t1411", requestBody, token);
-            if (response == null || !(response.get("t1411OutBlock1") instanceof List)) {
-                return Optional.empty();
-            }
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> rows = (List<Map<String, Object>>) response.get("t1411OutBlock1");
-            return rows.stream()
-                    .filter(row -> stockCode.equals(stringOf(row.get("shcode"))))
-                    .findFirst()
-                    .map(row -> StockCreditInfoDto.builder()
-                            .stockCode(stockCode)
-                            .detail("증거금률 %s%%".formatted(stringOf(row.get("jkrate"))))
-                            .build());
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 증거금율 조회 중 오류 - stockCode: {}, 사유: {}", stockCode, e.getMessage());
+        Map<String, Object> response = call("t1411", requestBody, token);
+        if (response == null || !(response.get("t1411OutBlock1") instanceof List)) {
             return Optional.empty();
         }
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rows = (List<Map<String, Object>>) response.get("t1411OutBlock1");
+        return rows.stream()
+                .filter(row -> stockCode.equals(stringOf(row.get("shcode"))))
+                .findFirst()
+                .map(row -> StockCreditInfoDto.builder()
+                        .stockCode(stockCode)
+                        .detail("증거금률 %s%%".formatted(stringOf(row.get("jkrate"))))
+                        .build());
     }
 
     /** 신용거래동향(t1921) — 최근 신용융자 잔고 추이(최근 5일). */
     public Optional<StockCreditInfoDto> getMarginTradingTrend(String stockCode) {
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            Map<String, Object> inBlock = Map.of("shcode", stockCode, "gubun", "1", "date", "", "idx", 0);
-            Map<String, Object> requestBody = Map.of("t1921InBlock", inBlock);
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> inBlock = Map.of("shcode", stockCode, "gubun", "1", "date", "", "idx", 0);
+        Map<String, Object> requestBody = Map.of("t1921InBlock", inBlock);
 
-            Map<String, Object> response = call("t1921", requestBody, token);
-            if (response == null || !(response.get("t1921OutBlock1") instanceof List)) {
-                return Optional.empty();
-            }
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> rows = (List<Map<String, Object>>) response.get("t1921OutBlock1");
-            String summary = rows.stream()
-                    .limit(MAX_TREND_ITEMS)
-                    .map(row -> "%s: 신용융자잔고비중 %s%%".formatted(stringOf(row.get("mmdate")), stringOf(row.get("jkrate"))))
-                    .collect(java.util.stream.Collectors.joining(", "));
-            if (summary.isBlank()) {
-                return Optional.empty();
-            }
-            return Optional.of(StockCreditInfoDto.builder().stockCode(stockCode).detail(summary).build());
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 신용거래동향 조회 중 오류 - stockCode: {}, 사유: {}", stockCode, e.getMessage());
+        Map<String, Object> response = call("t1921", requestBody, token);
+        if (response == null || !(response.get("t1921OutBlock1") instanceof List)) {
             return Optional.empty();
         }
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rows = (List<Map<String, Object>>) response.get("t1921OutBlock1");
+        String summary = rows.stream()
+                .limit(MAX_TREND_ITEMS)
+                .map(row -> "%s: 신용융자잔고비중 %s%%".formatted(stringOf(row.get("mmdate")), stringOf(row.get("jkrate"))))
+                .collect(java.util.stream.Collectors.joining(", "));
+        if (summary.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.of(StockCreditInfoDto.builder().stockCode(stockCode).detail(summary).build());
     }
 
     /** 종목별대차거래일간추이(t1941) — 최근 대차거래(공매도 준비 물량) 추이. */
@@ -147,48 +131,43 @@ public class EtcApiClient extends MarketDataApiClientSupport {
      */
     public Optional<StockCreditInfoDto> getSecuritiesLendingTrend(String stockCode, Integer periodMonths) {
         boolean longPeriod = periodMonths != null && periodMonths > 0;
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            java.time.LocalDate today = java.time.LocalDate.now();
-            java.time.LocalDate fromDate = longPeriod
-                    ? today.minusMonths(Math.min(periodMonths, MAX_PERIOD_MONTHS))
-                    : today.minusDays(7);
-            Map<String, Object> inBlock = Map.of(
-                    "shcode", stockCode,
-                    "sdate", fromDate.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE),
-                    "edate", today.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE));
-            Map<String, Object> requestBody = Map.of("t1941InBlock", inBlock);
+        String token = accessTokenProvider.issueAccessToken();
+        java.time.LocalDate today = java.time.LocalDate.now();
+        java.time.LocalDate fromDate = longPeriod
+                ? today.minusMonths(Math.min(periodMonths, MAX_PERIOD_MONTHS))
+                : today.minusDays(7);
+        Map<String, Object> inBlock = Map.of(
+                "shcode", stockCode,
+                "sdate", fromDate.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE),
+                "edate", today.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE));
+        Map<String, Object> requestBody = Map.of("t1941InBlock", inBlock);
 
-            Map<String, Object> response = call("t1941", requestBody, token);
-            if (response == null || !(response.get("t1941OutBlock1") instanceof List)) {
-                return Optional.empty();
-            }
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> rows = (List<Map<String, Object>>) response.get("t1941OutBlock1");
-            int cap = longPeriod ? MAX_LONG_PERIOD_ITEMS : MAX_TREND_ITEMS;
-            List<Map<String, Object>> limited = rows.size() > cap ? rows.subList(0, cap) : rows;
-            String summary;
-            if (!longPeriod) {
-                summary = limited.stream()
-                        .map(row -> "%s: 대차거래량 %s주".formatted(stringOf(row.get("date")), stringOf(row.get("tovolume"))))
-                        .collect(java.util.stream.Collectors.joining(", "));
-            } else {
-                // 2026-08-13 추가 — 장기간은 일별 나열 대신 합계·최고일만 계산해서 준다.
-                long total = limited.stream().mapToLong(row -> parseLongOrZero(row.get("tovolume"))).sum();
-                Map<String, Object> peak = limited.stream()
-                        .max(Comparator.comparingLong(row -> parseLongOrZero(row.get("tovolume"))))
-                        .orElse(null);
-                summary = peak == null ? "" : "최근 %d개월(실제 조회된 %d거래일 기준) 누적 대차거래량 %,d주, 가장 많았던 날은 %s(%s주)"
-                        .formatted(periodMonths, limited.size(), total, stringOf(peak.get("date")), stringOf(peak.get("tovolume")));
-            }
-            if (summary.isBlank()) {
-                return Optional.empty();
-            }
-            return Optional.of(StockCreditInfoDto.builder().stockCode(stockCode).detail(summary).build());
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 대차거래추이 조회 중 오류 - stockCode: {}, 사유: {}", stockCode, e.getMessage());
+        Map<String, Object> response = call("t1941", requestBody, token);
+        if (response == null || !(response.get("t1941OutBlock1") instanceof List)) {
             return Optional.empty();
         }
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rows = (List<Map<String, Object>>) response.get("t1941OutBlock1");
+        int cap = longPeriod ? MAX_LONG_PERIOD_ITEMS : MAX_TREND_ITEMS;
+        List<Map<String, Object>> limited = rows.size() > cap ? rows.subList(0, cap) : rows;
+        String summary;
+        if (!longPeriod) {
+            summary = limited.stream()
+                    .map(row -> "%s: 대차거래량 %s주".formatted(stringOf(row.get("date")), stringOf(row.get("tovolume"))))
+                    .collect(java.util.stream.Collectors.joining(", "));
+        } else {
+            // 2026-08-13 추가 — 장기간은 일별 나열 대신 합계·최고일만 계산해서 준다.
+            long total = limited.stream().mapToLong(row -> parseLongOrZero(row.get("tovolume"))).sum();
+            Map<String, Object> peak = limited.stream()
+                    .max(Comparator.comparingLong(row -> parseLongOrZero(row.get("tovolume"))))
+                    .orElse(null);
+            summary = peak == null ? "" : "최근 %d개월(실제 조회된 %d거래일 기준) 누적 대차거래량 %,d주, 가장 많았던 날은 %s(%s주)"
+                    .formatted(periodMonths, limited.size(), total, stringOf(peak.get("date")), stringOf(peak.get("tovolume")));
+        }
+        if (summary.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.of(StockCreditInfoDto.builder().stockCode(stockCode).detail(summary).build());
     }
 
     private long parseLongOrZero(Object value) {
@@ -210,37 +189,32 @@ public class EtcApiClient extends MarketDataApiClientSupport {
     public List<NewListingDto> getNewListings(Integer periodMonths) {
         boolean longPeriod = periodMonths != null && periodMonths > 0;
         int cap = longPeriod ? MAX_LONG_PERIOD_LISTING_ITEMS : MAX_LISTING_ITEMS;
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            java.time.LocalDate today = java.time.LocalDate.now();
-            java.time.format.DateTimeFormatter yyyyMM = java.time.format.DateTimeFormatter.ofPattern("yyyyMM");
-            java.time.LocalDate fromDate = longPeriod
-                    ? today.minusMonths(Math.min(periodMonths, MAX_PERIOD_MONTHS))
-                    : today.minusMonths(6);
-            Map<String, Object> inBlock = Map.of(
-                    "gubun", "1", "styymm", fromDate.format(yyyyMM),
-                    "enyymm", today.format(yyyyMM), "idx", 0);
-            Map<String, Object> requestBody = Map.of("t1403InBlock", inBlock);
+        String token = accessTokenProvider.issueAccessToken();
+        java.time.LocalDate today = java.time.LocalDate.now();
+        java.time.format.DateTimeFormatter yyyyMM = java.time.format.DateTimeFormatter.ofPattern("yyyyMM");
+        java.time.LocalDate fromDate = longPeriod
+                ? today.minusMonths(Math.min(periodMonths, MAX_PERIOD_MONTHS))
+                : today.minusMonths(6);
+        Map<String, Object> inBlock = Map.of(
+                "gubun", "1", "styymm", fromDate.format(yyyyMM),
+                "enyymm", today.format(yyyyMM), "idx", 0);
+        Map<String, Object> requestBody = Map.of("t1403InBlock", inBlock);
 
-            Map<String, Object> response = call("t1403", requestBody, token);
-            if (response == null || !(response.get("t1403OutBlock1") instanceof List)) {
-                return List.of();
-            }
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> outBlock = (List<Map<String, Object>>) response.get("t1403OutBlock1");
-            return outBlock.stream()
-                    .limit(cap)
-                    .map(row -> NewListingDto.builder()
-                            .stockCode(stringOf(row.get("shcode")))
-                            .stockName(stringOf(row.get("hname")))
-                            .listedDate(stringOf(row.get("date")))
-                            .price(parseLong(row.get("price")))
-                            .build())
-                    .toList();
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 신규상장종목 조회 중 오류 - 사유: {}", e.getMessage());
+        Map<String, Object> response = call("t1403", requestBody, token);
+        if (response == null || !(response.get("t1403OutBlock1") instanceof List)) {
             return List.of();
         }
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> outBlock = (List<Map<String, Object>>) response.get("t1403OutBlock1");
+        return outBlock.stream()
+                .limit(cap)
+                .map(row -> NewListingDto.builder()
+                        .stockCode(stringOf(row.get("shcode")))
+                        .stockName(stringOf(row.get("hname")))
+                        .listedDate(stringOf(row.get("date")))
+                        .price(parseLong(row.get("price")))
+                        .build())
+                .toList();
     }
 
     /** 공매도일별추이(t1927) — 최근 며칠간 공매도 거래량/비중. */
@@ -256,66 +230,56 @@ public class EtcApiClient extends MarketDataApiClientSupport {
      */
     public List<ShortSellingTrendDto> getShortSellingTrend(String stockCode, Integer periodMonths) {
         boolean longPeriod = periodMonths != null && periodMonths > 0;
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            java.time.LocalDate today = java.time.LocalDate.now();
-            java.time.LocalDate fromDate = longPeriod
-                    ? today.minusMonths(Math.min(periodMonths, MAX_PERIOD_MONTHS))
-                    : today.minusDays(7);
-            Map<String, Object> inBlock = Map.of(
-                    "shcode", stockCode, "date", "",
-                    "sdate", fromDate.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE),
-                    "edate", today.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE));
-            Map<String, Object> requestBody = Map.of("t1927InBlock", inBlock);
+        String token = accessTokenProvider.issueAccessToken();
+        java.time.LocalDate today = java.time.LocalDate.now();
+        java.time.LocalDate fromDate = longPeriod
+                ? today.minusMonths(Math.min(periodMonths, MAX_PERIOD_MONTHS))
+                : today.minusDays(7);
+        Map<String, Object> inBlock = Map.of(
+                "shcode", stockCode, "date", "",
+                "sdate", fromDate.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE),
+                "edate", today.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE));
+        Map<String, Object> requestBody = Map.of("t1927InBlock", inBlock);
 
-            Map<String, Object> response = call("t1927", requestBody, token);
-            if (response == null || !(response.get("t1927OutBlock1") instanceof List)) {
-                return List.of();
-            }
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> outBlock = (List<Map<String, Object>>) response.get("t1927OutBlock1");
-            int cap = longPeriod ? MAX_LONG_PERIOD_ITEMS : MAX_TREND_ITEMS;
-            return outBlock.stream()
-                    .limit(cap)
-                    .map(row -> ShortSellingTrendDto.builder()
-                            .date(stringOf(row.get("date")))
-                            .shortSellingVolume(parseLong(row.get("gm_vo")))
-                            .shortSellingValue(parseLong(row.get("gm_va")))
-                            .shortSellingRatio(parseDoubleOrZero(row.get("gm_per")))
-                            .build())
-                    .toList();
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 공매도일별추이 조회 중 오류 - stockCode: {}, 사유: {}", stockCode, e.getMessage());
+        Map<String, Object> response = call("t1927", requestBody, token);
+        if (response == null || !(response.get("t1927OutBlock1") instanceof List)) {
             return List.of();
         }
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> outBlock = (List<Map<String, Object>>) response.get("t1927OutBlock1");
+        int cap = longPeriod ? MAX_LONG_PERIOD_ITEMS : MAX_TREND_ITEMS;
+        return outBlock.stream()
+                .limit(cap)
+                .map(row -> ShortSellingTrendDto.builder()
+                        .date(stringOf(row.get("date")))
+                        .shortSellingVolume(parseLong(row.get("gm_vo")))
+                        .shortSellingValue(parseLong(row.get("gm_va")))
+                        .shortSellingRatio(parseDoubleOrZero(row.get("gm_per")))
+                        .build())
+                .toList();
     }
 
     /** 주식종목조회API용(t8436) — 종목 기본정보(상하한가, 스팩여부 등). */
     public Optional<StockMasterInfoDto> getStockMasterInfo(String stockCode) {
-        try {
-            String token = accessTokenProvider.issueAccessToken();
-            Map<String, Object> requestBody = Map.of("t8436InBlock", Map.of("gubun", "1"));
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> requestBody = Map.of("t8436InBlock", Map.of("gubun", "1"));
 
-            Map<String, Object> response = call("t8436", requestBody, token);
-            if (response == null || !(response.get("t8436OutBlock") instanceof List)) {
-                return Optional.empty();
-            }
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> rows = (List<Map<String, Object>>) response.get("t8436OutBlock");
-            return rows.stream()
-                    .filter(row -> stockCode.equals(stringOf(row.get("shcode"))))
-                    .findFirst()
-                    .map(row -> StockMasterInfoDto.builder()
-                            .stockCode(stockCode)
-                            .stockName(stringOf(row.get("hname")))
-                            .upperLimitPrice(parseLong(row.get("uplmtprice")))
-                            .lowerLimitPrice(parseLong(row.get("dnlmtprice")))
-                            .isSpac("Y".equals(stringOf(row.get("spac_gubun"))))
-                            .build());
-        } catch (CustomException e) {
-            log.warn("외부 시세 데이터 종목마스터 조회 중 오류 - stockCode: {}, 사유: {}", stockCode, e.getMessage());
+        Map<String, Object> response = call("t8436", requestBody, token);
+        if (response == null || !(response.get("t8436OutBlock") instanceof List)) {
             return Optional.empty();
         }
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rows = (List<Map<String, Object>>) response.get("t8436OutBlock");
+        return rows.stream()
+                .filter(row -> stockCode.equals(stringOf(row.get("shcode"))))
+                .findFirst()
+                .map(row -> StockMasterInfoDto.builder()
+                        .stockCode(stockCode)
+                        .stockName(stringOf(row.get("hname")))
+                        .upperLimitPrice(parseLong(row.get("uplmtprice")))
+                        .lowerLimitPrice(parseLong(row.get("dnlmtprice")))
+                        .isSpac("Y".equals(stringOf(row.get("spac_gubun"))))
+                        .build());
     }
 
     private Map<String, Object> call(String trCd, Map<String, Object> requestBody, String token) {
