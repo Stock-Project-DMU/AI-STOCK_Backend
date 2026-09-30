@@ -1,7 +1,6 @@
 package com.teamfp.aistock.domain.user.dto.response;
 
 import com.teamfp.aistock.domain.user.entity.Role;
-import com.teamfp.aistock.domain.user.entity.SocialProvider;
 import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.entity.UserStatus;
 
@@ -12,11 +11,10 @@ public record UserInfoResponse(
         String email,
         Role role,
         UserStatus status,
-        java.time.LocalDate birthdate,
-        SocialProvider socialProvider
+        java.time.LocalDate birthdate
 ) {
 
-    public static UserInfoResponse from(User user, SocialProvider socialProvider) {
+    public static UserInfoResponse from(User user) {
         return new UserInfoResponse(
                 user.getUserId(),
                 user.getLoginId(),
@@ -24,8 +22,7 @@ public record UserInfoResponse(
                 user.getEmail(),
                 user.getRole(),
                 user.getStatus(),
-                user.getBirthdate(),
-                socialProvider
+                user.getBirthdate()
         );
     }
 }

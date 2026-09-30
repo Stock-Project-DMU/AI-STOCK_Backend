@@ -22,9 +22,6 @@ import com.teamfp.aistock.domain.user.entity.InvestmentProfile;
 import com.teamfp.aistock.domain.user.entity.Role;
 import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.repository.InvestmentProfileRepository;
-import com.teamfp.aistock.domain.user.repository.SocialAccountRepository;
-import com.teamfp.aistock.domain.user.entity.SocialAccount;
-import com.teamfp.aistock.domain.user.entity.SocialProvider;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
@@ -56,9 +53,6 @@ class UserServiceTest {
     private InvestmentProfileRepository investmentProfileRepository;
 
     @Mock
-    private SocialAccountRepository socialAccountRepository;
-
-    @Mock
     private PasswordEncoder passwordEncoder;
 
     @Mock
@@ -73,7 +67,7 @@ class UserServiceTest {
     @BeforeEach
     void setUp() {
         ObjectMapper objectMapper = JsonMapper.builder().build();
-        userService = new UserService(userRepository, investmentProfileRepository, socialAccountRepository, objectMapper, passwordEncoder, redisTokenService);
+        userService = new UserService(userRepository, investmentProfileRepository, objectMapper, passwordEncoder, redisTokenService);
 
         user = User.builder()
                 .userId(USER_ID)
@@ -84,16 +78,6 @@ class UserServiceTest {
                 .role(Role.USER)
                 .isActive(true)
                 .build();
-    }
-
-    @Test
-    @DisplayName("내 정보에 연결된 소셜 로그인 제공자를 포함한다")
-    void getMyInfoIncludesSocialProvider() {
-        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
-        when(socialAccountRepository.findFirstByUser_UserIdOrderBySocialIdAsc(USER_ID))
-                .thenReturn(Optional.of(SocialAccount.builder().user(user).provider(SocialProvider.NAVER).providerId("naver-id").build()));
-
-        assertThat(userService.getMyInfo(USER_ID).socialProvider()).isEqualTo(SocialProvider.NAVER);
     }
 
     @Test
