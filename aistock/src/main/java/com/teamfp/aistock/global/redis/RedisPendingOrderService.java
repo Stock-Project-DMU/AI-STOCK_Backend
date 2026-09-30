@@ -1,8 +1,10 @@
 package com.teamfp.aistock.global.redis;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.springframework.data.redis.connection.RedisConnection;
@@ -162,25 +164,53 @@ public class RedisPendingOrderService {
      * Redis List는 값으로 원소를 찾아 지우는 구조라, orderId가 일치하는 항목의
      * 원본 JSON 문자열을 찾아서 {@code LREM}으로 정확히 그 한 건만 제거한다.
      *
+     * <p>실제로 한 건을 지웠는지를 반환한다 — 호출 측이 이 값이 true일 때만 미체결 주문 종목
+     * 구독(StockSubscriptionManager.decreaseOrderSubscription)을 줄여야, 체결과 취소가 같은
+     * 주문을 두고 경합해 둘 다 제거를 시도해도 구독 참조 카운트가 두 번 줄지 않는다.</p>
+     *
      * @param stockCode 종목코드
      * @param orderId   제거할 주문의 ID
+     * @return 대기 리스트에서 실제로 제거했으면 true, 이미 없었으면 false
      */
-    public void removePendingOrder(String stockCode, Long orderId) {
+    public boolean removePendingOrder(String stockCode, Long orderId) {
         List<String> jsonList = redisTemplate.opsForList().range(PENDING_KEY + stockCode, 0, -1);
         if (jsonList == null) {
-            return;
+            return false;
         }
         try {
             for (String json : jsonList) {
                 PendingOrderDto order = objectMapper.readValue(json, PendingOrderDto.class);
                 if (order.getOrderId().equals(orderId)) {
                     // count=1: 혹시 동일한 JSON 값이 여러 개 있어도 한 건만 제거
-                    redisTemplate.opsForList().remove(PENDING_KEY + stockCode, 1, json);
-                    break;
+                    Long removed = redisTemplate.opsForList().remove(PENDING_KEY + stockCode, 1, json);
+                    return removed != null && removed > 0;
                 }
             }
         } catch (JacksonException e) {
             throw new CustomException(ErrorCode.REDIS_SERIALIZATION_ERROR, e);
         }
+        return false;
+    }
+
+    /**
+     * 종목코드별 미체결 주문 건수를 반환한다. 서버 기동 시 initPendingOrders()로 재적재된 대기
+     * 리스트를 기준으로 StockSubscriptionManager가 미체결 주문 종목 구독을 복원하는 데 쓴다.
+     * initPendingOrders()와 같은 이유로 KEYS 대신 SCAN으로 키를 순회한다.
+     *
+     * @return 종목코드 → 미체결 주문 건수(0건인 종목은 포함하지 않음)
+     */
+    public Map<String, Long> countPendingOrdersByStockCode() {
+        Map<String, Long> counts = new HashMap<>();
+        try (Cursor<byte[]> cursor = redisTemplate.execute((RedisConnection connection) ->
+                connection.scan(ScanOptions.scanOptions().match(PENDING_KEY + "*").count(100).build()))) {
+            while (cursor.hasNext()) {
+                String key = new String(cursor.next());
+                Long size = redisTemplate.opsForList().size(key);
+                if (size != null && size > 0) {
+                    counts.put(key.substring(PENDING_KEY.length()), size);
+                }
+            }
+        }
+        return counts;
     }
 }

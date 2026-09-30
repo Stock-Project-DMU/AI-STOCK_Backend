@@ -91,11 +91,13 @@ class OrderExecutionIntegrationTest {
                 .build());
 
         // 2) 신규 종목 지정가 매수를 위해 stockName 조회용 현재가 캐시를 시딩한다
-        //    (createLimitOrder는 미보유 종목이면 stock:price 캐시에서 종목명을 가져온다)
+        //    (createLimitOrder는 미보유 종목이면 stock:price 캐시에서 종목명을 가져온다).
+        //    접수 직후 즉시 체결 확인(tryImmediateExecution)이 이 현재가를 쓰므로, tick 체결 경로를
+        //    검증하려고 지정가(70,000)보다 높은 72,000원으로 둬 접수 시점에는 체결되지 않게 한다.
         redisStockCacheService.saveStockPrice(stockCode, StockPriceDto.builder()
                 .stockCode(stockCode)
                 .stockName("통합테스트종목")
-                .currentPrice(70_000L)
+                .currentPrice(72_000L)
                 .build());
 
         System.out.println("========================================");
@@ -159,5 +161,47 @@ class OrderExecutionIntegrationTest {
                 .stream()
                 .anyMatch(n -> n.getContent().contains("체결되었습니다"));
         assertThat(hasExecutionNotification).isTrue();
+    }
+
+    @Test
+    void 지정가_매수_주문이_접수_시점_현재가가_조건을_만족하면_tick_없이_즉시_체결된다() throws InterruptedException {
+        long uniqueSuffix = System.currentTimeMillis();
+        String stockCode = "I" + Long.toString(uniqueSuffix, 36).toUpperCase();
+
+        User user = userRepository.save(User.builder()
+                .loginId("order-immediate-test-user-" + uniqueSuffix)
+                .name("즉시체결테스트유저")
+                .role(Role.USER)
+                .isActive(true)
+                .build());
+        Account account = accountRepository.save(Account.builder()
+                .user(user)
+                .accountName("즉시체결테스트계좌")
+                .accountNumber("IE" + (uniqueSuffix % 10_000_000L))
+                .openedAt(LocalDate.now())
+                .baseBalance(1_000_000L)
+                .balance(1_000_000L)
+                .build());
+
+        // 현재가 68,000원 ≤ 지정가 70,000원 → 매수 조건 충족
+        redisStockCacheService.saveStockPrice(stockCode, StockPriceDto.builder()
+                .stockCode(stockCode)
+                .stockName("즉시체결테스트종목")
+                .currentPrice(68_000L)
+                .build());
+
+        CreateOrderRequest request = new CreateOrderRequest(account.getAccountId(), stockCode, OrderType.BUY, 10, PriceType.LIMIT, 70_000L);
+        CreateOrderResponse response = orderService.createLimitOrder(user.getUserId(), request);
+
+        // 즉시 체결은 커밋 직후 콜백의 별도 트랜잭션(REQUIRES_NEW)이라 짧게 대기 후 재조회한다.
+        Thread.sleep(300);
+
+        Order reloadedOrder = orderRepository.findById(response.orderId()).orElseThrow();
+        Account reloadedAccount = accountRepository.findById(account.getAccountId()).orElseThrow();
+        assertThat(reloadedOrder.getStatus()).isEqualTo(OrderStatus.EXECUTED);
+        assertThat(reloadedOrder.getExecPrice()).isEqualTo(68_000L);
+        assertThat(reloadedAccount.getFrozenBalance()).isEqualTo(0L);
+        assertThat(reloadedAccount.getBalance()).isEqualTo(320_000L); // 1,000,000 - 680,000 (70,000-68,000)*10 환급
+        assertThat(holdingRepository.findAllByAccountId(account.getAccountId())).hasSize(1);
     }
 }

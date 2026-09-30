@@ -34,6 +34,7 @@ import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.redis.RedisPendingOrderService;
 import com.teamfp.aistock.domain.stock.service.StockQuoteService;
+import com.teamfp.aistock.domain.stock.service.StockSubscriptionManager;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -59,6 +60,10 @@ public class OrderService {
     // 지정가 미체결 주문 대기 목록(pending:orders:{stockCode}) 관리도 같은 이유로
     // global/redis 서비스를 직접 주입받아 쓴다.
     private final RedisPendingOrderService redisPendingOrderService;
+    // 미체결 주문이 있는 종목은 상세페이지를 떠나도 tick을 계속 받도록 주문 한 건당 구독을 유지한다.
+    private final StockSubscriptionManager stockSubscriptionManager;
+    // 지정가 주문 접수 직후 즉시 체결 조건을 1회 확인할 때 tick 경로와 같은 체결 로직을 재사용한다.
+    private final OrderExecutionService orderExecutionService;
     // 주문 체결 시 알림 발송 — 도메인 간 직접 참조 대신 서비스 계층(NotificationService)을 통해 호출한다.
     private final NotificationService notificationService;
     // 잔고 변동 원장 기록(ADMIN_API_BACKEND_HANDOFF.md 4.3) — 매수/매도/취소 환불 시점에 record()를 호출한다.
@@ -171,7 +176,8 @@ public class OrderService {
     /**
      * 지정가 주문 — 매수는 주문금액(지정가 × 수량)을 balance에서 frozenBalance로 묶어두고,
      * 매도는 보유수량만 확인한 뒤 DB에 PENDING으로 등록하고 Redis pending:orders에 함께 올린다.
-     * 실제 체결은 여기서 하지 않는다 — 외부 시세 데이터 제공사 tick 수신 시 OrderExecutionService가 처리한다.
+     * 이 트랜잭션 안에서는 체결하지 않는다 — 커밋 직후 현재가로 체결 조건을 1회 확인하고
+     * (tryImmediateExecution), 그때 조건이 맞지 않으면 이후 tick 수신 시 OrderExecutionService가 처리한다.
      *
      * 이 메서드는 request.priceType()이 항상 LIMIT라고 전제한다 — MARKET/LIMIT 분기 책임은
      * createMarketOrder()와 마찬가지로 OrderController에 있다.
@@ -278,7 +284,21 @@ public class OrderService {
         // 부르면, 이후 이 메서드가 리턴되기 전 커밋 시점에 Account.version 낙관적 락 충돌 등으로
         // 트랜잭션 전체가 롤백되더라도 Redis 호출은 롤백 대상이 아니라서 DB에는 없는 주문이
         // Redis pending:orders에만 유령처럼 남는 문제를 막기 위함이다.
-        registerAfterCommit(() -> redisPendingOrderService.addPendingOrder(request.stockCode(), pendingOrderDto));
+        //
+        // 구독을 대기 리스트 추가보다 먼저 올린다 — 반대 순서면 추가 직후 들어온 tick이 이 주문을
+        // 체결·제거하며 구독을 먼저 줄인 뒤에 +1이 되어, 주문이 없는데 구독만 남는 누수가 생긴다.
+        // 커밋 뒤에는 즉시 체결 조건을 1회 확인한다(tryImmediateExecution) — 다음 tick까지
+        // 기다리지 않고, 이미 조건을 만족하는 주문(예: 현재가보다 높은 매수 지정가)은 바로 체결된다.
+        registerAfterCommit(() -> {
+            stockSubscriptionManager.increaseOrderSubscription(request.stockCode());
+            try {
+                redisPendingOrderService.addPendingOrder(request.stockCode(), pendingOrderDto);
+            } catch (RuntimeException e) {
+                stockSubscriptionManager.decreaseOrderSubscription(request.stockCode());
+                throw e;
+            }
+            tryImmediateExecution(request.stockCode());
+        });
         notificationService.notifyOrder(userId, order.getOrderId(), "지정가 주문 접수",
                 String.format("%s %s %d주를 %,d원에 주문했습니다. 체결을 기다리고 있습니다.",
                         stockName, request.orderType() == OrderType.BUY ? "매수" : "매도",
@@ -342,7 +362,7 @@ public class OrderService {
         // createLimitOrder()와 같은 이유로, 이 트랜잭션이 실제로 커밋된 뒤에만 Redis에서 지운다.
         // 여기서 바로 지우면 이후 커밋이 실패(롤백)할 때 DB에는 여전히 PENDING인 주문이 Redis
         // pending:orders에서만 사라져 다시는 체결 대상이 되지 못하는 문제가 생긴다.
-        registerAfterCommit(() -> redisPendingOrderService.removePendingOrder(order.getStockCode(), order.getOrderId()));
+        registerAfterCommit(() -> removePendingOrder(order));
     }
 
     /**
@@ -384,7 +404,7 @@ public class OrderService {
         notificationService.notifyOrder(account.getUser().getUserId(), order.getOrderId(), "관리자 주문 취소",
                 String.format("%s %s %d주 주문이 관리자에 의해 취소되었습니다. 사유: %s", order.getStockName(),
                         order.getOrderType() == OrderType.BUY ? "매수" : "매도", order.getQuantity(), reason));
-        registerAfterCommit(() -> redisPendingOrderService.removePendingOrder(order.getStockCode(), order.getOrderId()));
+        registerAfterCommit(() -> removePendingOrder(order));
 
         eventPublisher.publishEvent(new AdminOrderCancelledEvent(adminUserId, orderId, reason));
         log.info("관리자 주문 강제취소 - adminUserId={}, orderId={}, reason={}", adminUserId, orderId, reason);
@@ -417,7 +437,37 @@ public class OrderService {
             notificationService.notifyOrder(account.getUser().getUserId(), order.getOrderId(), "계좌 정지로 주문 취소",
                     String.format("%s %s %d주 주문이 계좌 정지로 취소되었습니다.", order.getStockName(),
                             order.getOrderType() == OrderType.BUY ? "매수" : "매도", order.getQuantity()));
-            registerAfterCommit(() -> redisPendingOrderService.removePendingOrder(order.getStockCode(), order.getOrderId()));
+            registerAfterCommit(() -> removePendingOrder(order));
+        }
+    }
+
+    /**
+     * 지정가 주문 접수 직후 현재가로 체결 조건을 1회 확인한다. 조건 판정·체결은 tick 경로와 같은
+     * OrderExecutionService.checkAndExecute()를 그대로 쓴다(매수: 현재가 ≤ 지정가, 매도: 현재가 ≥
+     * 지정가). 현재가는 시장가 주문과 같은 StockQuoteService로 얻는다.
+     *
+     * 주문은 이미 커밋된 뒤라, 여기서 시세 조회나 체결이 실패해도 예외를 밖으로 던지지 않는다 —
+     * 던지면 이미 접수된 주문의 API 응답이 실패로 보인다. 실패하면 로그만 남기고 다음 tick에 맡긴다.
+     */
+    private void tryImmediateExecution(String stockCode) {
+        try {
+            StockPriceDto priceDto = stockQuoteService.getStockPrice(stockCode);
+            if (priceDto == null || priceDto.getCurrentPrice() <= 0) {
+                return;
+            }
+            orderExecutionService.checkAndExecute(stockCode, priceDto.getCurrentPrice());
+        } catch (RuntimeException e) {
+            log.warn("지정가 주문 접수 직후 즉시 체결 확인 실패, 다음 tick에 체결을 맡김: stockCode={}", stockCode, e);
+        }
+    }
+
+    /**
+     * 취소된 주문을 대기 리스트에서 지우고, 실제로 지웠을 때만 미체결 주문 종목 구독을 줄인다 —
+     * 같은 주문을 체결 경로가 먼저 지웠다면 구독이 두 번 줄지 않게 하기 위함이다.
+     */
+    private void removePendingOrder(Order order) {
+        if (redisPendingOrderService.removePendingOrder(order.getStockCode(), order.getOrderId())) {
+            stockSubscriptionManager.decreaseOrderSubscription(order.getStockCode());
         }
     }
 

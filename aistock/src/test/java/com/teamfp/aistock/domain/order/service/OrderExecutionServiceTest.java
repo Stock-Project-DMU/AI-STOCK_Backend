@@ -17,6 +17,7 @@ import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.teamfp.aistock.domain.account.entity.Account;
+import com.teamfp.aistock.domain.account.entity.AccountTransactionType;
 import com.teamfp.aistock.domain.notification.service.NotificationService;
 import com.teamfp.aistock.domain.order.dto.PendingOrderDto;
 import com.teamfp.aistock.domain.order.entity.Holding;
@@ -63,6 +64,9 @@ class OrderExecutionServiceTest {
 
     @Mock
     private com.teamfp.aistock.domain.account.service.AccountTransactionService accountTransactionService;
+
+    @Mock
+    private com.teamfp.aistock.domain.stock.service.StockSubscriptionManager stockSubscriptionManager;
 
     @InjectMocks
     private OrderExecutionService orderExecutionService;
@@ -148,6 +152,9 @@ class OrderExecutionServiceTest {
             assertThat(order.getStatus()).isEqualTo(OrderStatus.EXECUTED);
             assertThat(order.getExecPrice()).isEqualTo(65_000L);
             verify(holdingRepository).save(any(Holding.class));
+            // 차액 환급분만 ORDER_REFUND 원장으로 남는다(환급 전 잔고 300,000원 기준)
+            verify(accountTransactionService).record(eq(account), eq(AccountTransactionType.ORDER_REFUND), eq(50_000L),
+                    eq(300_000L), any(), any(), any(), any());
 
             String expectedMessage = String.format("%s %s %d주가 %,d원에 체결되었습니다.", "삼성전자", "매수", 10, 65_000L);
             verify(notificationService).notifyOrder(eq(USER_ID), org.mockito.ArgumentMatchers.isNull(), eq("주문 체결"), eq(expectedMessage));
@@ -196,7 +203,7 @@ class OrderExecutionServiceTest {
     class ExecuteSell {
 
         @Test
-        @DisplayName("보유수량이 충분하면 정상 체결되고 잔고가 늘어난다")
+        @DisplayName("보유수량이 충분하면 지정가보다 높은 현재가로 체결되고 잔고가 늘어난다")
         void success() {
             Order order = pendingOrder(OrderType.SELL, 60_000L, 5);
             when(orderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
@@ -210,9 +217,11 @@ class OrderExecutionServiceTest {
                     .build();
             when(holdingRepository.findByAccountIdAndStockCode(any(), anyString())).thenReturn(Optional.of(holding));
 
+            // 지정가 60,000원인데 현재가 61,000원에 체결 → 더 비싸게 팔린다
             orderExecutionService.execute(pendingOrderDto(1L, OrderType.SELL, 60_000L, 5), 61_000L);
 
             assertThat(account.getBalance()).isEqualTo(1_305_000L); // 1,000,000 + 61,000*5
+            assertThat(order.getExecPrice()).isEqualTo(61_000L);
             assertThat(holding.getQuantity()).isEqualTo(5);
             assertThat(order.getStatus()).isEqualTo(OrderStatus.EXECUTED);
             verify(holdingRepository, never()).delete(any());
@@ -276,6 +285,23 @@ class OrderExecutionServiceTest {
             verify(redisPendingOrderService).removePendingOrder(STOCK_CODE, 1L);
             verify(redisPendingOrderService, never()).removePendingOrder(STOCK_CODE, 2L);
             verify(redisPendingOrderService).removePendingOrder(STOCK_CODE, 3L);
+        }
+
+        @Test
+        @DisplayName("체결된 주문을 대기 리스트에서 실제로 지웠을 때만 미체결 주문 종목 구독을 줄인다")
+        void decreasesOrderSubscription_OnlyWhenRemovedFromRedis() {
+            PendingOrderDto first = pendingOrderDto(1L, OrderType.BUY, 70_000L, 1);
+            PendingOrderDto second = pendingOrderDto(2L, OrderType.BUY, 70_000L, 1);
+            when(redisPendingOrderService.getPendingOrders(STOCK_CODE)).thenReturn(List.of(first, second));
+            when(orderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(pendingOrder(OrderType.BUY, 70_000L, 1)));
+            when(orderRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(pendingOrder(OrderType.BUY, 70_000L, 1)));
+            // 1번은 이 tick이 처음 지웠고, 2번은 사용자 취소가 먼저 지운 상황을 재현한다.
+            when(redisPendingOrderService.removePendingOrder(STOCK_CODE, 1L)).thenReturn(true);
+            when(redisPendingOrderService.removePendingOrder(STOCK_CODE, 2L)).thenReturn(false);
+
+            orderExecutionService.checkAndExecute(STOCK_CODE, 65_000L);
+
+            verify(stockSubscriptionManager, org.mockito.Mockito.times(1)).decreaseOrderSubscription(STOCK_CODE);
         }
 
         @Test

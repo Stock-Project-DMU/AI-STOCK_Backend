@@ -9,14 +9,17 @@ import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Component;
 
+import com.teamfp.aistock.global.redis.RedisPendingOrderService;
 import com.teamfp.aistock.infra.marketdata.MarketDataWebSocketClient;
+
+import jakarta.annotation.PostConstruct;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 종목별 외부 시세 데이터 제공사 실시간 구독 여부를 관심종목(watchlist)/상세페이지 조회(viewing) 두 출처를
- * 합산한 참조 카운트로 관리한다. 참조 카운트가 0→1이 되는 시점에만 실제로 구독하고,
+ * 종목별 외부 시세 데이터 제공사 실시간 구독 여부를 관심종목(watchlist)/상세페이지 조회(viewing)/
+ * 미체결 지정가 주문(order) 세 출처를 합산한 참조 카운트로 관리한다. 참조 카운트가 0→1이 되는 시점에만 실제로 구독하고,
  * 1→0이 되는 시점에만 구독을 해제한다 — 여러 유저가 같은 종목을 동시에 보고/관심등록해도
  * 중복 구독하지 않기 위함이다.
  *
@@ -25,7 +28,12 @@ import lombok.extern.slf4j.Slf4j;
  *
  * MarketDataWebSocketClient는 market-data.mode=real일 때만 빈으로 존재하므로 Optional로 주입받는다 — mock
  * 모드(Optional.empty())에서는 카운터만 갱신하고 실제 subscribe()/unsubscribe() 호출은
- * debug 로그만 남기고 건너뛴다(KNOWN_ISSUES.md 3번 참고).
+ * debug 로그만 남기고 건너뛴다(KNOWN_ISSUES.md 3번 참고). mock 모드에서도 이 카운트는
+ * MockMarketDataGenerator가 폴링할 종목을 정하는 데 그대로 쓰이므로 세 출처 모두 똑같이 적용된다.
+ *
+ * 미체결 주문(order) 출처는 "상세페이지를 떠나도 체결 tick이 끊기지 않게" 하기 위한 것이다 —
+ * 주문 한 건당 +1(increaseOrderSubscription), 그 주문이 pending:orders에서 실제로 제거될 때
+ * -1(decreaseOrderSubscription)이라, 카운트가 Redis 대기 리스트 건수와 항상 같게 유지된다.
  */
 @Slf4j
 @Component
@@ -37,6 +45,9 @@ public class StockSubscriptionManager {
     private static final int MAX_SUBSCRIBABLE_STOCK_COUNT = 512;
 
     private final Optional<MarketDataWebSocketClient> marketDataWebSocketClient;
+    // 생성자 주입으로 받아 RedisPendingOrderService.initPendingOrders()(@PostConstruct, DB PENDING
+    // 주문 재적재)가 이 빈의 restoreOrderSubscriptions()보다 먼저 끝나는 순서를 보장한다.
+    private final RedisPendingOrderService redisPendingOrderService;
 
     private final ConcurrentHashMap<String, AtomicInteger> subscriptionRefCounts = new ConcurrentHashMap<>();
 
@@ -54,6 +65,30 @@ public class StockSubscriptionManager {
 
     public void decreaseViewingSubscription(String stockCode) {
         decrease(stockCode);
+    }
+
+    /** 지정가 주문이 pending:orders에 올라갈 때 주문 한 건당 호출한다. */
+    public void increaseOrderSubscription(String stockCode) {
+        increase(stockCode);
+    }
+
+    /** 지정가 주문이 체결·취소되어 pending:orders에서 실제로 제거됐을 때 주문 한 건당 호출한다. */
+    public void decreaseOrderSubscription(String stockCode) {
+        decrease(stockCode);
+    }
+
+    /**
+     * 서버 기동 시 재적재된 미체결 주문 건수만큼 주문 구독을 복원한다. 서버 메모리의 카운트는
+     * 재시작 시 사라지므로, 복원하지 않으면 재시작 전에 걸어둔 지정가 주문은 누군가 그 종목
+     * 상세페이지를 열기 전까지 tick을 받지 못해 체결되지 않는다.
+     */
+    @PostConstruct
+    public void restoreOrderSubscriptions() {
+        redisPendingOrderService.countPendingOrdersByStockCode().forEach((stockCode, count) -> {
+            for (long i = 0; i < count; i++) {
+                increaseOrderSubscription(stockCode);
+            }
+        });
     }
 
     /**

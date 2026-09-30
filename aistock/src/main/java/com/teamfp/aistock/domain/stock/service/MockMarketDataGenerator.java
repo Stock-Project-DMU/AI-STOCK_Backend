@@ -31,12 +31,12 @@ import lombok.extern.slf4j.Slf4j;
  * (CLAUDE.md 4번, {@link MarketDataListener} 참고). 반대로 domain이 infra 클라이언트
  * ({@link LocalMarketDataReader})를 주입받아 쓰는 것은 정상적인 방향이다.</p>
  *
- * <p>20초마다 {@code market_data.json} 전체를 한 번만 읽어({@link LocalMarketDataReader#getAllCurrentPrices()}
+ * <p>5초마다 {@code market_data.json} 전체를 한 번만 읽어({@link LocalMarketDataReader#getAllCurrentPrices()}
  * 사용 — 구독 종목 수만큼 파일을 반복해서 열지 않기 위함) 지금 구독 중인 종목만 순회하며,
  * 직전에 브로드캐스트한 시점의 {@code updatedAt}과 다를 때만 {@link MarketDataListener}
  * 구현체({@code StockBroadcastService})에 tick/호가를 전달한다. generator.py의 폴링 주기(기본
- * 60초, {@code local-market-data-generator/.env}의 {@code POLL_INTERVAL_SECONDS})보다 짧게 잡아
- * 화면 반영 지연을 최대 20초로 따라잡는다.</p>
+ * 10초, {@code local-market-data-generator/.env}의 {@code POLL_INTERVAL_SECONDS})보다 짧게 잡아
+ * 화면 반영 지연을 최대 5초로 따라잡는다(실시간 시세 자동 갱신, 2026-09-30 20초→5초).</p>
  */
 @Slf4j
 @Component
@@ -44,7 +44,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class MockMarketDataGenerator {
 
-    private static final long POLL_INTERVAL_MILLIS = 20_000L;
+    private static final long POLL_INTERVAL_MILLIS = 5_000L;
 
     private final LocalMarketDataReader localMarketDataReader;
     private final StockSubscriptionManager stockSubscriptionManager;

@@ -65,7 +65,11 @@ public class UserWithdrawalService {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override public void afterCommit() {
                 redisTokenService.deleteRefreshToken(userId);
-                pendingOrders.forEach(order -> redisPendingOrderService.removePendingOrder(order.getStockCode(), order.getOrderId()));
+                pendingOrders.forEach(order -> {
+                    if (redisPendingOrderService.removePendingOrder(order.getStockCode(), order.getOrderId())) {
+                        stockSubscriptionManager.decreaseOrderSubscription(order.getStockCode());
+                    }
+                });
                 watchCodes.forEach(stockSubscriptionManager::decreaseWatchlistSubscription);
             }
         });
