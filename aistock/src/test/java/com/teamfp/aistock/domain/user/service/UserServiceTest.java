@@ -70,6 +70,7 @@ class UserServiceTest {
         userService = new UserService(userRepository, investmentProfileRepository, objectMapper, passwordEncoder, redisTokenService);
 
         user = User.builder()
+                .userId(USER_ID)
                 .loginId("tester")
                 .password("encoded-old-password")
                 .name("테스터")
@@ -216,6 +217,29 @@ class UserServiceTest {
     @Nested
     @DisplayName("투자성향 설문 저장")
     class SaveSurvey {
+
+        @Test
+        @DisplayName("4번 문항의 중복 선택을 모두 저장하고 대표 답은 가장 높은 위험 경험으로 계산한다")
+        void savesMultipleExperienceAnswers() {
+            when(investmentProfileRepository.findByUserId(USER_ID)).thenReturn(Optional.empty());
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+
+            userService.saveSurvey(USER_ID, new SurveyRequest(List.of(1, 2, 3, 1, 4, 5, 3, 3), List.of(1, 3, 5)));
+
+            org.mockito.ArgumentCaptor<InvestmentProfile> captor = org.mockito.ArgumentCaptor.forClass(InvestmentProfile.class);
+            verify(investmentProfileRepository).save(captor.capture());
+            assertThat(captor.getValue().getSurveyAnswers()).contains("\"experienceAnswers\":[1,3,5]");
+        }
+
+        @Test
+        @DisplayName("4번 문항 대표 답과 중복 선택 목록이 다르면 거부한다")
+        void rejectsInconsistentExperienceAnswers() {
+            assertThatThrownBy(() -> userService.saveSurvey(USER_ID,
+                    new SurveyRequest(List.of(1, 2, 3, 3, 4, 5, 3, 3), List.of(1, 3))))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(error -> ((CustomException) error).getErrorCode())
+                    .isEqualTo(ErrorCode.INVALID_INPUT);
+        }
 
         // 투자성향·자금성향·투자레벨 전부 answers만으로 서버가 계산한다(SurveyTendencyEvaluator,
         // SurveyLevelEvaluator). [1,2,3,1,4,5,3,3] → 투자성향 5(공격투자형 — 4번 문항이

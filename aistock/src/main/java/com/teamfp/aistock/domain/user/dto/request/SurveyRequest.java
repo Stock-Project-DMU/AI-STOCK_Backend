@@ -11,6 +11,10 @@ import jakarta.validation.constraints.NotEmpty;
 public record SurveyRequest(
 
         @NotEmpty(message = "설문 응답은 필수입니다.")
-        List<Integer> answers
+        List<Integer> answers,
+        List<Integer> experienceAnswers
 ) {
+    public SurveyRequest(List<Integer> answers) {
+        this(answers, null);
+    }
 }
