@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.teamfp.aistock.domain.account.entity.Account;
@@ -21,6 +22,7 @@ import com.teamfp.aistock.domain.order.entity.OrderStatus;
 import com.teamfp.aistock.domain.order.entity.OrderType;
 import com.teamfp.aistock.domain.order.repository.HoldingRepository;
 import com.teamfp.aistock.domain.order.repository.OrderRepository;
+import com.teamfp.aistock.domain.stock.service.StockSubscriptionManager;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.redis.RedisPendingOrderService;
@@ -45,6 +47,8 @@ public class OrderExecutionService {
     private final HoldingRepository holdingRepository;
     private final RedisPendingOrderService redisPendingOrderService;
     private final HoldingSettlementService holdingSettlementService;
+    // 주문이 대기 리스트에서 빠질 때 미체결 주문 종목 구독(주문 접수 시 +1)을 함께 줄인다.
+    private final StockSubscriptionManager stockSubscriptionManager;
     // 지정가 주문 체결 시 알림 발송 — 도메인 간 직접 참조 대신 서비스 계층을 통해 호출한다.
     private final NotificationService notificationService;
     // 잔고 변동 원장 기록(ADMIN_API_BACKEND_HANDOFF.md 4.3).
@@ -78,7 +82,7 @@ public class OrderExecutionService {
 
             try {
                 self.execute(pendingOrder, currentPrice);
-                redisPendingOrderService.removePendingOrder(stockCode, pendingOrder.getOrderId());
+                removePendingOrder(stockCode, pendingOrder.getOrderId());
             } catch (RuntimeException e) {
                 if (isRetryableConflict(e)) {
                     // 같은 주문을 두고 다른 트랜잭션(중복 체결 시도, 사용자의 취소 요청)과 경합해
@@ -97,9 +101,19 @@ public class OrderExecutionService {
                     // 지키려면 반드시 여기서도 흡수해야 한다. 대기 목록에 계속 남겨두면 매 tick마다
                     // 똑같은 실패를 반복하므로 제거한다.
                     log.error("지정가 체결 실패, 대기 목록에서 제거: orderId={}", pendingOrder.getOrderId(), e);
-                    redisPendingOrderService.removePendingOrder(stockCode, pendingOrder.getOrderId());
+                    removePendingOrder(stockCode, pendingOrder.getOrderId());
                 }
             }
+        }
+    }
+
+    /**
+     * 대기 리스트에서 실제로 제거했을 때만 미체결 주문 종목 구독을 줄인다 — 같은 주문을 사용자
+     * 취소가 먼저 지웠다면 false가 돌아와 구독 카운트가 두 번 줄지 않는다.
+     */
+    private void removePendingOrder(String stockCode, Long orderId) {
+        if (redisPendingOrderService.removePendingOrder(stockCode, orderId)) {
+            stockSubscriptionManager.decreaseOrderSubscription(stockCode);
         }
     }
 
@@ -139,7 +153,9 @@ public class OrderExecutionService {
     }
 
     /**
-     * 주문 한 건을 실제 체결가(currentPrice)로 체결한다.
+     * 주문 한 건을 실제 체결가(currentPrice)로 체결한다. 실제 거래소와 같이 체결 조건(매수: 현재가 ≤
+     * 지정가, 매도: 현재가 ≥ 지정가)은 지정가 기준으로 checkAndExecute()가 판정하고, 체결 가격은
+     * 조건을 만족시킨 현재가다 — 매수는 지정가보다 싸게, 매도는 지정가보다 비싸게 체결될 수 있다.
      *
      * 이미 다른 트랜잭션이 먼저 처리해 상태가 PENDING이 아니게 됐다면(체결 완료 또는 취소) 아무 것도
      * 하지 않고 조용히 리턴한다 — checkAndExecute()가 낙관적 락 충돌 이후 재시도할 때 이 메서드가
@@ -152,8 +168,14 @@ public class OrderExecutionService {
      * 행을 findByOrderIdAndUserIdForUpdate로 잠그므로(WHERE 절만 다를 뿐 같은 Order 행에
      * PESSIMISTIC_WRITE), 두 트랜잭션은 매수/매도 무관하게 항상
      * 순서대로만 처리되고 나중에 락을 얻는 쪽은 먼저 처리된 최신 status를 보게 된다.
+     *
+     * REQUIRES_NEW인 이유: OrderService.createLimitOrder()가 주문 커밋 직후(afterCommit 콜백)
+     * checkAndExecute()로 즉시 체결을 1회 시도하는데, afterCommit 시점에는 이미 커밋된 원래
+     * 트랜잭션의 리소스가 아직 바인딩돼 있어 REQUIRED로는 그 트랜잭션에 참여해 버린다(Spring
+     * TransactionSynchronization.afterCommit Javadoc). tick 경로처럼 바깥 트랜잭션이 없을 때는
+     * REQUIRED와 동작이 같다.
      */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void execute(PendingOrderDto pendingOrder, long currentPrice) {
         Order order = orderRepository.findByIdForUpdate(pendingOrder.getOrderId())
                 .orElseThrow(() -> new CustomException(ErrorCode.ORDER_NOT_FOUND));
