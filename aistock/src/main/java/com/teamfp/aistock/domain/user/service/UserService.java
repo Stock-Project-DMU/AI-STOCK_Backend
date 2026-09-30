@@ -14,6 +14,7 @@ import com.teamfp.aistock.domain.user.dto.response.UserInfoResponse;
 import com.teamfp.aistock.domain.user.entity.InvestmentProfile;
 import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.repository.InvestmentProfileRepository;
+import com.teamfp.aistock.domain.user.repository.SocialAccountRepository;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
@@ -29,6 +30,7 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final InvestmentProfileRepository investmentProfileRepository;
+    private final SocialAccountRepository socialAccountRepository;
     private final ObjectMapper objectMapper;
     private final PasswordEncoder passwordEncoder;
     private final RedisTokenService redisTokenService;
@@ -44,7 +46,7 @@ public class UserService {
 
     @Transactional(readOnly = true)
     public UserInfoResponse getMyInfo(Long userId) {
-        return UserInfoResponse.from(findUser(userId));
+        return toUserInfo(findUser(userId));
     }
 
     /**
@@ -72,7 +74,7 @@ public class UserService {
         }
         user.updateInfo(request.name(), request.email());
         if (request.birthdate() != null) user.updateBirthdate(request.birthdate());
-        return UserInfoResponse.from(user);
+        return toUserInfo(user);
     }
 
     // investment_profile.uq_user_profile — 같은 유저의 설문 최초 제출이 동시에 두 건 이상
@@ -122,6 +124,13 @@ public class UserService {
         // SurveyLevelEvaluator.evaluate()가 answers의 문항 개수·선택지 범위를 검증하므로,
         // 아래 SurveyTendencyEvaluator 호출들은 이 검증을 통과한 뒤에만 실행되어야 한다(순서 유지).
         var investmentLevel = SurveyLevelEvaluator.evaluate(request.answers());
+        var experienceAnswers = request.experienceAnswers();
+        if (experienceAnswers != null && (experienceAnswers.isEmpty()
+                || experienceAnswers.stream().anyMatch(answer -> answer == null || answer < 1 || answer > 5)
+                || experienceAnswers.stream().distinct().count() != experienceAnswers.size()
+                || experienceAnswers.stream().mapToInt(Integer::intValue).min().orElseThrow() != request.answers().get(3))) {
+            throw new CustomException(ErrorCode.INVALID_INPUT);
+        }
         int investmentTendency = SurveyTendencyEvaluator.evaluateInvestmentTendency(request.answers());
         int fundTendency = SurveyTendencyEvaluator.evaluateFundTendency(request.answers());
         // RedisStockCacheService의 다른 ObjectMapper 사용처와 동일하게, 직렬화 실패를 raw
@@ -129,7 +138,9 @@ public class UserService {
         // 거의 발생하지 않지만, 프로젝트 전체의 예외 처리 관례와 일관성을 맞춘다).
         String surveyAnswersJson;
         try {
-            surveyAnswersJson = objectMapper.writeValueAsString(request.answers());
+            surveyAnswersJson = objectMapper.writeValueAsString(experienceAnswers == null
+                    ? request.answers()
+                    : java.util.Map.of("answers", request.answers(), "experienceAnswers", experienceAnswers));
         } catch (JacksonException e) {
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, e);
         }
@@ -204,5 +215,11 @@ public class UserService {
     private User findUser(Long userId) {
         return userRepository.findById(userId)
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+    }
+
+    private UserInfoResponse toUserInfo(User user) {
+        var provider = socialAccountRepository.findFirstByUser_UserIdOrderBySocialIdAsc(user.getUserId())
+                .map(account -> account.getProvider()).orElse(null);
+        return UserInfoResponse.from(user, provider);
     }
 }

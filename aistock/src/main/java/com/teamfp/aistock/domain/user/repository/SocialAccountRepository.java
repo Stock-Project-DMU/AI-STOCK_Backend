@@ -14,6 +14,8 @@ public interface SocialAccountRepository extends JpaRepository<SocialAccount, Lo
 
     Optional<SocialAccount> findByProviderAndProviderId(SocialProvider provider, String providerId);
 
+    Optional<SocialAccount> findFirstByUser_UserIdOrderBySocialIdAsc(Long userId);
+
     @Modifying
     @Query("delete from SocialAccount s where s.user.userId = :userId")
     void deleteByUserId(@Param("userId") Long userId);

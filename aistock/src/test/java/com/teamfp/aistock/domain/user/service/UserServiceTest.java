@@ -22,6 +22,9 @@ import com.teamfp.aistock.domain.user.entity.InvestmentProfile;
 import com.teamfp.aistock.domain.user.entity.Role;
 import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.repository.InvestmentProfileRepository;
+import com.teamfp.aistock.domain.user.repository.SocialAccountRepository;
+import com.teamfp.aistock.domain.user.entity.SocialAccount;
+import com.teamfp.aistock.domain.user.entity.SocialProvider;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
@@ -53,6 +56,9 @@ class UserServiceTest {
     private InvestmentProfileRepository investmentProfileRepository;
 
     @Mock
+    private SocialAccountRepository socialAccountRepository;
+
+    @Mock
     private PasswordEncoder passwordEncoder;
 
     @Mock
@@ -67,9 +73,10 @@ class UserServiceTest {
     @BeforeEach
     void setUp() {
         ObjectMapper objectMapper = JsonMapper.builder().build();
-        userService = new UserService(userRepository, investmentProfileRepository, objectMapper, passwordEncoder, redisTokenService);
+        userService = new UserService(userRepository, investmentProfileRepository, socialAccountRepository, objectMapper, passwordEncoder, redisTokenService);
 
         user = User.builder()
+                .userId(USER_ID)
                 .loginId("tester")
                 .password("encoded-old-password")
                 .name("테스터")
@@ -77,6 +84,16 @@ class UserServiceTest {
                 .role(Role.USER)
                 .isActive(true)
                 .build();
+    }
+
+    @Test
+    @DisplayName("내 정보에 연결된 소셜 로그인 제공자를 포함한다")
+    void getMyInfoIncludesSocialProvider() {
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+        when(socialAccountRepository.findFirstByUser_UserIdOrderBySocialIdAsc(USER_ID))
+                .thenReturn(Optional.of(SocialAccount.builder().user(user).provider(SocialProvider.NAVER).providerId("naver-id").build()));
+
+        assertThat(userService.getMyInfo(USER_ID).socialProvider()).isEqualTo(SocialProvider.NAVER);
     }
 
     @Test
@@ -216,6 +233,29 @@ class UserServiceTest {
     @Nested
     @DisplayName("투자성향 설문 저장")
     class SaveSurvey {
+
+        @Test
+        @DisplayName("4번 문항의 중복 선택을 모두 저장하고 대표 답은 가장 높은 위험 경험으로 계산한다")
+        void savesMultipleExperienceAnswers() {
+            when(investmentProfileRepository.findByUserId(USER_ID)).thenReturn(Optional.empty());
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+
+            userService.saveSurvey(USER_ID, new SurveyRequest(List.of(1, 2, 3, 1, 4, 5, 3, 3), List.of(1, 3, 5)));
+
+            org.mockito.ArgumentCaptor<InvestmentProfile> captor = org.mockito.ArgumentCaptor.forClass(InvestmentProfile.class);
+            verify(investmentProfileRepository).save(captor.capture());
+            assertThat(captor.getValue().getSurveyAnswers()).contains("\"experienceAnswers\":[1,3,5]");
+        }
+
+        @Test
+        @DisplayName("4번 문항 대표 답과 중복 선택 목록이 다르면 거부한다")
+        void rejectsInconsistentExperienceAnswers() {
+            assertThatThrownBy(() -> userService.saveSurvey(USER_ID,
+                    new SurveyRequest(List.of(1, 2, 3, 3, 4, 5, 3, 3), List.of(1, 3))))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(error -> ((CustomException) error).getErrorCode())
+                    .isEqualTo(ErrorCode.INVALID_INPUT);
+        }
 
         // 투자성향·자금성향·투자레벨 전부 answers만으로 서버가 계산한다(SurveyTendencyEvaluator,
         // SurveyLevelEvaluator). [1,2,3,1,4,5,3,3] → 투자성향 5(공격투자형 — 4번 문항이
