@@ -10,6 +10,7 @@ public record NotificationResponse(
         NotificationType type,
         String title,
         String content,
+        Long relatedOrderId,
         boolean isRead,
         LocalDateTime createdAt
 ) {
@@ -20,6 +21,7 @@ public record NotificationResponse(
                 notification.getType(),
                 notification.getTitle(),
                 notification.getContent(),
+                notification.getRelatedOrderId(),
                 notification.isRead(),
                 notification.getCreatedAt()
         );

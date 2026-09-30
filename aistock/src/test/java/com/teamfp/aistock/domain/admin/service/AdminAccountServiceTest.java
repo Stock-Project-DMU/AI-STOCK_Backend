@@ -24,6 +24,8 @@ import com.teamfp.aistock.domain.account.service.AccountTransactionService;
 import com.teamfp.aistock.domain.admin.dto.request.AdminAccountAdjustmentRequest;
 import com.teamfp.aistock.domain.admin.dto.request.AdminAccountStatusRequest;
 import com.teamfp.aistock.domain.admin.dto.response.AdminAccountDetailResponse;
+import com.teamfp.aistock.domain.notification.entity.NotificationType;
+import com.teamfp.aistock.domain.notification.service.NotificationService;
 import com.teamfp.aistock.domain.order.service.OrderService;
 import com.teamfp.aistock.domain.user.entity.Role;
 import com.teamfp.aistock.domain.user.entity.User;
@@ -52,6 +54,8 @@ class AdminAccountServiceTest {
 
     @Mock
     private AuditLogService auditLogService;
+    @Mock
+    private NotificationService notificationService;
 
     private AdminAccountService adminAccountService;
 
@@ -62,7 +66,7 @@ class AdminAccountServiceTest {
 
     @BeforeEach
     void setUp() {
-        adminAccountService = new AdminAccountService(accountRepository, orderService, accountTransactionService, auditLogService);
+        adminAccountService = new AdminAccountService(accountRepository, orderService, accountTransactionService, auditLogService, notificationService);
 
         User user = User.builder()
                 .loginId("tester")
@@ -119,6 +123,8 @@ class AdminAccountServiceTest {
         assertThat(result.status()).isEqualTo(AccountStatus.SUSPENDED);
         assertThat(account.getStatus()).isEqualTo(AccountStatus.SUSPENDED);
         verify(orderService).cancelAllPendingOrdersForSuspension(account);
+        verify(notificationService).notify(1L, NotificationType.ACCOUNT, "계좌 거래 정지",
+                "계좌A 계좌의 거래 상태가 변경되었습니다. 사유: 사유");
     }
 
     @Test
@@ -134,6 +140,8 @@ class AdminAccountServiceTest {
         assertThat(result.status()).isEqualTo(AccountStatus.ACTIVE);
         assertThat(account.getStatus()).isEqualTo(AccountStatus.ACTIVE);
         verify(orderService, never()).cancelAllPendingOrdersForSuspension(account);
+        verify(notificationService).notify(1L, NotificationType.ACCOUNT, "계좌 거래 재개",
+                "계좌A 계좌의 거래 상태가 변경되었습니다. 사유: 사유");
     }
 
     @Test
@@ -173,6 +181,8 @@ class AdminAccountServiceTest {
         assertThat(result.balance()).isEqualTo(1_500_000L);
         verify(accountTransactionService).record(account, AccountTransactionType.ADMIN_CHARGE, 500_000L, 1_000_000L,
                 null, null, ADMIN_ID, "이벤트 보상 지급");
+        verify(notificationService).notify(1L, NotificationType.ACCOUNT, "관리자 잔고 증액",
+                "계좌A 계좌 잔고가 500,000원 조정되었습니다. 사유: 이벤트 보상 지급");
     }
 
     @Test
@@ -186,6 +196,8 @@ class AdminAccountServiceTest {
         assertThat(result.balance()).isEqualTo(700_000L);
         verify(accountTransactionService).record(account, AccountTransactionType.ADMIN_DEDUCTION, -300_000L, 1_000_000L,
                 null, null, ADMIN_ID, "이상 거래 회수");
+        verify(notificationService).notify(1L, NotificationType.ACCOUNT, "관리자 잔고 감액",
+                "계좌A 계좌 잔고가 300,000원 조정되었습니다. 사유: 이상 거래 회수");
     }
 
     @Test

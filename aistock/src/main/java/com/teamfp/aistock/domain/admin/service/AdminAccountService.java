@@ -14,6 +14,8 @@ import com.teamfp.aistock.domain.account.service.AccountTransactionService;
 import com.teamfp.aistock.domain.admin.dto.request.AdminAccountAdjustmentRequest;
 import com.teamfp.aistock.domain.admin.dto.request.AdminAccountStatusRequest;
 import com.teamfp.aistock.domain.admin.dto.response.AdminAccountDetailResponse;
+import com.teamfp.aistock.domain.notification.entity.NotificationType;
+import com.teamfp.aistock.domain.notification.service.NotificationService;
 import com.teamfp.aistock.domain.order.service.OrderService;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
@@ -41,6 +43,7 @@ public class AdminAccountService {
     private final OrderService orderService;
     private final AccountTransactionService accountTransactionService;
     private final AuditLogService auditLogService;
+    private final NotificationService notificationService;
 
     @Transactional(readOnly = true)
     public AdminAccountDetailResponse getAccountDetail(Long accountId) {
@@ -75,6 +78,11 @@ public class AdminAccountService {
         }
         auditLogService.record(adminUserId, AuditLogService.ACTION_ACCOUNT_STATUS_CHANGE, AuditLogService.TARGET_ACCOUNT,
                 accountId, beforeStatus.name(), account.getStatus().name(), request.reason());
+        if (beforeStatus != account.getStatus()) {
+            String title = account.getStatus() == AccountStatus.SUSPENDED ? "계좌 거래 정지" : "계좌 거래 재개";
+            notificationService.notify(account.getUser().getUserId(), NotificationType.ACCOUNT, title,
+                    String.format("%s 계좌의 거래 상태가 변경되었습니다. 사유: %s", account.getAccountName(), request.reason()));
+        }
         return AdminAccountDetailResponse.from(account);
     }
 
@@ -130,6 +138,11 @@ public class AdminAccountService {
 
         auditLogService.record(adminUserId, AuditLogService.ACTION_ACCOUNT_ADJUSTMENT, AuditLogService.TARGET_ACCOUNT,
                 accountId, String.valueOf(balanceBefore), String.valueOf(account.getBalance()), request.reason());
+
+        String title = request.type() == AccountTransactionType.ADMIN_CHARGE ? "관리자 잔고 증액" : "관리자 잔고 감액";
+        notificationService.notify(account.getUser().getUserId(), NotificationType.ACCOUNT, title,
+                String.format("%s 계좌 잔고가 %,d원 조정되었습니다. 사유: %s", account.getAccountName(),
+                        request.amount(), request.reason()));
 
         return AdminAccountDetailResponse.from(account);
     }

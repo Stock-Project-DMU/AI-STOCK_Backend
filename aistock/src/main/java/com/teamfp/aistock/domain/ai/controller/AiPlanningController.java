@@ -18,6 +18,7 @@ import com.teamfp.aistock.domain.ai.dto.request.AiPlanningSessionTitleRequest;
 import com.teamfp.aistock.domain.ai.dto.response.AiChatResponse;
 import com.teamfp.aistock.domain.ai.dto.response.AiPlanningSessionResponse;
 import com.teamfp.aistock.domain.ai.service.AiPlanningService;
+import com.teamfp.aistock.domain.user.service.UserService;
 import com.teamfp.aistock.global.response.ApiResponse;
 import com.teamfp.aistock.global.util.SecurityUtil;
 
@@ -30,10 +31,12 @@ import lombok.RequiredArgsConstructor;
 public class AiPlanningController {
 
     private final AiPlanningService aiPlanningService;
+    private final UserService userService;
 
     @PostMapping("/sessions")
     public ResponseEntity<ApiResponse<AiPlanningSessionResponse>> createSession() {
         Long userId = SecurityUtil.getCurrentUserId();
+        userService.requireCompletedSurvey(userId);
         AiPlanningSessionResponse response = aiPlanningService.createSession(userId);
         return ResponseEntity
                 .status(HttpStatus.CREATED)
@@ -74,6 +77,7 @@ public class AiPlanningController {
             @Valid @RequestBody AiChatRequest request
     ) {
         Long userId = SecurityUtil.getCurrentUserId();
+        userService.requireCompletedSurvey(userId);
         AiChatResponse response = aiPlanningService.sendMessage(userId, sessionId, request);
         return ResponseEntity
                 .status(HttpStatus.CREATED)

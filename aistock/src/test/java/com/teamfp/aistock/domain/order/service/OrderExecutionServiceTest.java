@@ -17,7 +17,6 @@ import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.teamfp.aistock.domain.account.entity.Account;
-import com.teamfp.aistock.domain.notification.entity.NotificationType;
 import com.teamfp.aistock.domain.notification.service.NotificationService;
 import com.teamfp.aistock.domain.order.dto.PendingOrderDto;
 import com.teamfp.aistock.domain.order.entity.Holding;
@@ -151,7 +150,7 @@ class OrderExecutionServiceTest {
             verify(holdingRepository).save(any(Holding.class));
 
             String expectedMessage = String.format("%s %s %d주가 %,d원에 체결되었습니다.", "삼성전자", "매수", 10, 65_000L);
-            verify(notificationService).notify(eq(USER_ID), eq(NotificationType.ORDER), eq("주문 체결"), eq(expectedMessage));
+            verify(notificationService).notifyOrder(eq(USER_ID), org.mockito.ArgumentMatchers.isNull(), eq("주문 체결"), eq(expectedMessage));
         }
 
         @Test
@@ -188,7 +187,7 @@ class OrderExecutionServiceTest {
             orderExecutionService.execute(pendingOrderDto(1L, OrderType.BUY, 70_000L, 10), 65_000L);
 
             verify(holdingRepository, never()).findByAccountIdAndStockCode(any(), anyString());
-            verify(notificationService, never()).notify(any(), any(), any(), any());
+            verify(notificationService, never()).notifyOrder(any(), any(), any(), any());
         }
     }
 
@@ -219,7 +218,7 @@ class OrderExecutionServiceTest {
             verify(holdingRepository, never()).delete(any());
 
             String expectedMessage = String.format("%s %s %d주가 %,d원에 체결되었습니다.", "삼성전자", "매도", 5, 61_000L);
-            verify(notificationService).notify(eq(USER_ID), eq(NotificationType.ORDER), eq("주문 체결"), eq(expectedMessage));
+            verify(notificationService).notifyOrder(eq(USER_ID), org.mockito.ArgumentMatchers.isNull(), eq("주문 체결"), eq(expectedMessage));
         }
 
         @Test
@@ -242,7 +241,8 @@ class OrderExecutionServiceTest {
             assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
             assertThat(account.getBalance()).isEqualTo(1_000_000L); // 잔고 변화 없음
             assertThat(holding.getQuantity()).isEqualTo(2); // 보유수량도 그대로
-            verify(notificationService, never()).notify(any(), any(), any(), any());
+            verify(notificationService).notifyOrder(USER_ID, null, "주문 자동 취소",
+                    "삼성전자 매도 5주 주문이 보유 수량 부족으로 취소되었습니다.");
         }
     }
 

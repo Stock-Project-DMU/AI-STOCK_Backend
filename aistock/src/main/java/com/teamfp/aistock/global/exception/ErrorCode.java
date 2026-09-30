@@ -35,6 +35,7 @@ public enum ErrorCode {
 
     // 403 Forbidden
     ACCESS_DENIED(HttpStatus.FORBIDDEN, "ACCESS_DENIED", "접근 권한이 없습니다."),
+    SURVEY_REQUIRED(HttpStatus.FORBIDDEN, "SURVEY_REQUIRED", "AI 상담을 이용하려면 투자 성향 설문을 완료해 주세요."),
 
     // 404 Not Found
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다."),
