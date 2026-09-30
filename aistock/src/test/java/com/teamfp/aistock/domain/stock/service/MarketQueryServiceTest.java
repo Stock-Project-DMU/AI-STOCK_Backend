@@ -4,9 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -20,6 +22,9 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.infra.dart.DartApiClient;
+import com.teamfp.aistock.infra.dart.dto.DartFinancialRequest;
+import com.teamfp.aistock.infra.dart.dto.DartFinancialResponse;
+import com.teamfp.aistock.infra.dart.dto.ListedStock;
 import com.teamfp.aistock.infra.marketdata.HighItemApiClient;
 import com.teamfp.aistock.infra.marketdata.IndustryApiClient;
 import com.teamfp.aistock.infra.marketdata.InvestInfoApiClient;
@@ -48,6 +53,34 @@ class MarketQueryServiceTest {
 
     private List<RankingItemDto> ranking(String stockCode) {
         return List.of(RankingItemDto.builder().rank(1).stockCode(stockCode).build());
+    }
+
+    @Test
+    @DisplayName("종목 추천은 상장 종목명과 코드를 반환한다")
+    void suggestStocks_returnsListedMatches() {
+        when(dartApiClient.searchListedStocks("삼성", 8))
+                .thenReturn(List.of(new ListedStock("005930", "삼성전자")));
+
+        assertThat(marketQueryService.suggestStocks("삼성"))
+                .singleElement()
+                .satisfies(stock -> {
+                    assertThat(stock.stockCode()).isEqualTo("005930");
+                    assertThat(stock.stockName()).isEqualTo("삼성전자");
+                });
+    }
+
+    @Test
+    @DisplayName("재무 조회는 LS 현재가 호출 없이 DART 종목코드로 회사 코드를 찾는다")
+    void getResearch_finance_doesNotDependOnMarketQuote() {
+        String corpCode = "00126380";
+        int year = java.time.LocalDate.now().getYear() - 1;
+        DartFinancialRequest request = new DartFinancialRequest(corpCode, year);
+        DartFinancialResponse financials = new DartFinancialResponse(corpCode, year, 1L, null, null, null, null, null);
+        when(dartApiClient.resolveCorpCodeByStockCode("005935")).thenReturn(Optional.of(corpCode));
+        when(dartApiClient.getFinancials(request)).thenReturn(financials);
+
+        assertThat(marketQueryService.getResearch("005935", "finance")).isSameAs(financials);
+        verifyNoInteractions(marketDataApiClient);
     }
 
     @Test

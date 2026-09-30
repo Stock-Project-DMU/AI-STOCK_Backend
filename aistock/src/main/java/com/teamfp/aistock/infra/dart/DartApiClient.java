@@ -3,6 +3,7 @@ package com.teamfp.aistock.infra.dart;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.time.LocalDate;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,9 +27,11 @@ import org.xml.sax.SAXException;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.teamfp.aistock.global.exception.CustomException;
+import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.util.ExternalApiInvoker;
 import com.teamfp.aistock.infra.dart.dto.DartFinancialRequest;
 import com.teamfp.aistock.infra.dart.dto.DartFinancialResponse;
+import com.teamfp.aistock.infra.dart.dto.ListedStock;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -66,6 +69,8 @@ public class DartApiClient {
     private static final String FS_DIV_CONSOLIDATED = "CFS";
     private static final String FS_DIV_INDIVIDUAL = "OFS";
     private static final String SUCCESS_STATUS = "000";
+    private static final String NO_DATA_STATUS = "013";
+    private static final String RATE_LIMIT_STATUS = "020";
 
     private static final String ACCOUNT_REVENUE = "매출액";
     private static final String ACCOUNT_OPERATING_PROFIT = "영업이익";
@@ -102,6 +107,7 @@ public class DartApiClient {
     // 채운다 — AI 상담의 get_current_price 도구가 외부 시세 데이터 제공사 실시간 시세 캐시(Redis
     // stock:price:{stockCode})를 조회할 stockCode를 여기서 얻는다.
     private volatile Map<String, String> stockCodeByName;
+    private volatile Map<String, String> corpCodeByStockCode;
 
     // 2026-08-13 추가 — corpCodeByName/stockCodeByName과 동일한 데이터를 정규화된 키(대소문자
     // 무시 + "주식회사"/"(주)" 등 법인 접미사 제거)로도 인덱싱해둔 보조 캐시. "LG"/"lg"/
@@ -515,15 +521,29 @@ public class DartApiClient {
                         .body(GenericDartListResponse.class),
                 "DART 공시 조회 실패 - endpoint: {}, corpCode: {}", endpoint, corpCode);
 
-        if (response == null || !SUCCESS_STATUS.equals(response.status()) || response.list() == null) {
+        if (response == null) {
+            throw new CustomException(ErrorCode.EXTERNAL_API_ERROR);
+        }
+        if (NO_DATA_STATUS.equals(response.status())) {
             return List.of();
         }
+        requireSuccessfulStatus(response.status(), response.message());
+        if (response.list() == null) return List.of();
         return response.list().size() > MAX_DISCLOSURE_ITEMS
                 ? response.list().subList(0, MAX_DISCLOSURE_ITEMS)
                 : response.list();
     }
 
     private record GenericDartListResponse(String status, String message, List<Map<String, Object>> list) {
+    }
+
+    private void requireSuccessfulStatus(String status, String message) {
+        if (SUCCESS_STATUS.equals(status)) return;
+        log.warn("DART API 응답 오류 - status: {}, message: {}", status, message);
+        if (RATE_LIMIT_STATUS.equals(status)) {
+            throw new CustomException(ErrorCode.DART_RATE_LIMIT_EXCEEDED);
+        }
+        throw new CustomException(ErrorCode.EXTERNAL_API_ERROR);
     }
 
     // 실제 데이터를 하나도 못 찾으면(공시 자체가 없는 경우) null을 반환해 호출자가 "다음 보고서
@@ -562,11 +582,14 @@ public class DartApiClient {
                     .retrieve()
                     .body(DartApiResponse.class);
 
-            if (response == null || !SUCCESS_STATUS.equals(response.status()) || response.list() == null) {
-                log.warn("DART 재무제표 조회 실패 또는 데이터 없음 - corpCode: {}, reportCode: {}, fsDiv: {}, status: {}",
-                        corpCode, reportCode, fsDiv, response != null ? response.status() : null);
+            if (response == null) {
+                throw new CustomException(ErrorCode.EXTERNAL_API_ERROR);
+            }
+            if (NO_DATA_STATUS.equals(response.status())) {
                 return List.<DartAccountItem>of();
             }
+            requireSuccessfulStatus(response.status(), response.message());
+            if (response.list() == null) return List.<DartAccountItem>of();
 
             return response.list();
         }, "DART API 호출 실패 - corpCode: {}, reportCode: {}, fsDiv: {}", corpCode, reportCode, fsDiv);
@@ -624,6 +647,19 @@ public class DartApiClient {
         return resolveWithFallbacks(trimmed, normalizedCorpCodeCache());
     }
 
+    /** DART의 상장 종목코드로 회사 코드를 찾는다. 우선주가 목록에 없으면 같은 발행사의 보통주 코드를 사용한다. */
+    public Optional<String> resolveCorpCodeByStockCode(String stockCode) {
+        if (stockCode == null || !stockCode.matches("[0-9]{6}")) return Optional.empty();
+        Map<String, String> codes = corpCodeByStockCodeCache();
+        String exact = codes.get(stockCode);
+        if (exact != null) return Optional.of(exact);
+        char last = stockCode.charAt(5);
+        if (last == '5' || last == '7' || last == '8' || last == '9') {
+            return Optional.ofNullable(codes.get(stockCode.substring(0, 5) + "0"));
+        }
+        return Optional.empty();
+    }
+
     /**
      * 회사명(예: "삼성전자")으로 KRX 종목코드(stock_code)를 찾는다. AI 재무설계 상담의
      * get_current_price 도구가 외부 시세 데이터 제공사 실시간 시세 캐시(Redis stock:price:{stockCode})를
@@ -641,6 +677,33 @@ public class DartApiClient {
             return Optional.of(exact);
         }
         return resolveWithFallbacks(trimmed, normalizedStockCodeCache());
+    }
+
+    public List<ListedStock> searchListedStocks(String query, int limit) {
+        if (query == null || query.isBlank() || limit <= 0) {
+            return List.of();
+        }
+        String needle = normalizeForMatch(query.trim());
+        if (needle.isEmpty()) {
+            return List.of();
+        }
+        return stockCodeCache().entrySet().stream()
+                .filter(entry -> entry.getValue().startsWith(needle)
+                        || normalizeForMatch(entry.getKey()).contains(needle))
+                .sorted(Comparator
+                        .comparingInt((Map.Entry<String, String> entry) -> searchMatchRank(entry, needle))
+                        .thenComparingInt(entry -> normalizeForMatch(entry.getKey()).length())
+                        .thenComparing(Map.Entry::getKey))
+                .limit(Math.min(limit, 20))
+                .map(entry -> new ListedStock(entry.getValue(), entry.getKey()))
+                .toList();
+    }
+
+    private int searchMatchRank(Map.Entry<String, String> entry, String needle) {
+        String name = normalizeForMatch(entry.getKey());
+        if (entry.getValue().equals(needle) || name.equals(needle)) return 0;
+        if (entry.getValue().startsWith(needle) || name.startsWith(needle)) return 1;
+        return 2;
     }
 
     // 정확 일치가 실패했을 때 시도하는 두 단계 폴백 — (1) 대소문자·법인 접미사 무시한 정규화
@@ -714,6 +777,13 @@ public class DartApiClient {
         return stockCodeByName != null ? stockCodeByName : Map.of();
     }
 
+    private Map<String, String> corpCodeByStockCodeCache() {
+        Map<String, String> cache = corpCodeByStockCode;
+        if (cache != null) return cache;
+        ensureCorpCodeMapsLoaded();
+        return corpCodeByStockCode != null ? corpCodeByStockCode : Map.of();
+    }
+
     private Map<String, String> normalizedCorpCodeCache() {
         Map<String, String> cache = normalizedCorpCodeByName;
         if (cache != null) {
@@ -740,19 +810,21 @@ public class DartApiClient {
         if (loaded == null) {
             return;
         }
-        corpCodeByName = loaded.corpCodeByName();
         stockCodeByName = loaded.stockCodeByName();
+        corpCodeByStockCode = loaded.corpCodeByStockCode();
         // putIfAbsent로 채운다 — 원본 맵과 동일하게, 정규화 후 이름이 겹치는 경우 먼저 들어온
         // (상장사 우선 순서로 채워진) 항목이 이긴다.
         Map<String, String> normalizedCorp = new HashMap<>();
-        corpCodeByName.forEach((name, code) -> normalizedCorp.putIfAbsent(normalizeForMatch(name), code));
+        loaded.corpCodeByName().forEach((name, code) -> normalizedCorp.putIfAbsent(normalizeForMatch(name), code));
         Map<String, String> normalizedStock = new HashMap<>();
         stockCodeByName.forEach((name, code) -> normalizedStock.putIfAbsent(normalizeForMatch(name), code));
         normalizedCorpCodeByName = normalizedCorp;
         normalizedStockCodeByName = normalizedStock;
+        corpCodeByName = loaded.corpCodeByName();
     }
 
-    private record CorpCodeMaps(Map<String, String> corpCodeByName, Map<String, String> stockCodeByName) {
+    private record CorpCodeMaps(Map<String, String> corpCodeByName, Map<String, String> stockCodeByName,
+                                Map<String, String> corpCodeByStockCode) {
     }
 
     // corpCode.xml을 내려받아 (회사명→corp_code)와 (회사명→stock_code) 두 맵으로 함께 파싱한다.
@@ -785,6 +857,7 @@ public class DartApiClient {
 
         Map<String, String> corpCodes = new HashMap<>();
         Map<String, String> stockCodes = new HashMap<>();
+        Map<String, String> corpCodesByStockCode = new HashMap<>();
         try (ZipInputStream zipStream = new ZipInputStream(new ByteArrayInputStream(zipBytes))) {
             ZipEntry entry;
             while ((entry = zipStream.getNextEntry()) != null) {
@@ -797,16 +870,17 @@ public class DartApiClient {
                 // 버그). 그래서 이 항목의 내용만 별도 바이트 배열로 통째로 읽어서, zipStream과
                 // 무관한 새 스트림으로 파싱한다 — zipStream은 다음 반복을 위해 열린 채로 둔다.
                 byte[] entryBytes = zipStream.readAllBytes();
-                parseCorpCodeXml(entryBytes, corpCodes, stockCodes);
+                parseCorpCodeXml(entryBytes, corpCodes, stockCodes, corpCodesByStockCode);
             }
         } catch (IOException e) {
             log.error("DART 고유번호 목록 압축 해제 실패", e);
             return null;
         }
-        return new CorpCodeMaps(corpCodes, stockCodes);
+        return new CorpCodeMaps(corpCodes, stockCodes, corpCodesByStockCode);
     }
 
-    private void parseCorpCodeXml(byte[] xmlBytes, Map<String, String> corpCodes, Map<String, String> stockCodes) {
+    private void parseCorpCodeXml(byte[] xmlBytes, Map<String, String> corpCodes, Map<String, String> stockCodes,
+                                  Map<String, String> corpCodesByStockCode) {
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
             // XXE(외부 엔티티 주입) 방지 — DART 응답이라도 원칙적으로 신뢰하지 않고 막아둔다.
@@ -817,15 +891,16 @@ public class DartApiClient {
             NodeList items = document.getElementsByTagName("list");
             // 상장사를 먼저 채워 넣고, 비상장사는 이름이 아직 캐시에 없을 때만 추가한다 —
             // 이렇게 하면 이름이 겹치는 경우 항상 상장사가 우선권을 가진다.
-            putCorpCodesByListedStatus(items, corpCodes, stockCodes, true);
-            putCorpCodesByListedStatus(items, corpCodes, stockCodes, false);
+            putCorpCodesByListedStatus(items, corpCodes, stockCodes, corpCodesByStockCode, true);
+            putCorpCodesByListedStatus(items, corpCodes, stockCodes, corpCodesByStockCode, false);
         } catch (IOException | ParserConfigurationException | SAXException e) {
             log.error("DART 고유번호 목록 XML 파싱 실패", e);
         }
     }
 
     private void putCorpCodesByListedStatus(NodeList items, Map<String, String> corpCodes,
-                                             Map<String, String> stockCodes, boolean onlyListed) {
+                                             Map<String, String> stockCodes, Map<String, String> corpCodesByStockCode,
+                                             boolean onlyListed) {
         for (int i = 0; i < items.getLength(); i++) {
             Element item = (Element) items.item(i);
             String corpCode = textOf(item, "corp_code");
@@ -838,6 +913,7 @@ public class DartApiClient {
             corpCodes.putIfAbsent(corpName, corpCode);
             if (isListed) {
                 stockCodes.putIfAbsent(corpName, stockCode);
+                corpCodesByStockCode.putIfAbsent(stockCode, corpCode);
             }
         }
     }

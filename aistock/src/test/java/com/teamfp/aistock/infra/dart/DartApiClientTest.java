@@ -1,6 +1,7 @@
 package com.teamfp.aistock.infra.dart;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.queryParam;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
@@ -10,6 +11,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -28,6 +30,9 @@ import org.springframework.web.client.RestClient;
 
 import com.teamfp.aistock.infra.dart.dto.DartFinancialRequest;
 import com.teamfp.aistock.infra.dart.dto.DartFinancialResponse;
+import com.teamfp.aistock.infra.dart.dto.ListedStock;
+import com.teamfp.aistock.global.exception.CustomException;
+import com.teamfp.aistock.global.exception.ErrorCode;
 
 /**
  * DartApiClient 단위 테스트. RestClient.Builder를 MockRestServiceServer에 바인딩해 실제
@@ -516,6 +521,62 @@ class DartApiClientTest {
         }
     }
 
+    @Test
+    @DisplayName("상장 종목 추천은 이름 일부와 코드 접두어를 찾고 요청한 개수만 반환한다")
+    void searchListedStocks_matchesNameAndCodeWithinLimit() throws IOException {
+        mockServer.expect(requestTo(Matchers.startsWith(CORP_CODE_URL)))
+                .andRespond(withSuccess(sampleCorpCodeZip(), MediaType.APPLICATION_OCTET_STREAM));
+
+        assertThat(dartApiClient.searchListedStocks("삼성", 8))
+                .extracting(ListedStock::stockCode)
+                .containsExactly("005930", "005935");
+        assertThat(dartApiClient.searchListedStocks("005", 1))
+                .extracting(ListedStock::stockCode)
+                .containsExactly("005930");
+        assertThat(dartApiClient.searchListedStocks("비상장", 8)).isEmpty();
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("DART 종목코드로 회사를 찾고, 등록되지 않은 우선주는 보통주 회사 코드로 연결한다")
+    void resolveCorpCodeByStockCode_handlesPreferredStock() throws IOException {
+        mockServer.expect(requestTo(Matchers.startsWith(CORP_CODE_URL)))
+                .andRespond(withSuccess(sampleCorpCodeZip(), MediaType.APPLICATION_OCTET_STREAM));
+
+        assertThat(dartApiClient.resolveCorpCodeByStockCode("005930")).contains(CORP_CODE);
+        assertThat(dartApiClient.resolveCorpCodeByStockCode("005935")).contains("00126381");
+        ReflectionTestUtils.setField(dartApiClient, "corpCodeByStockCode", Map.of("005930", CORP_CODE));
+        assertThat(dartApiClient.resolveCorpCodeByStockCode("005935")).contains(CORP_CODE);
+        assertThat(dartApiClient.resolveCorpCodeByStockCode("123455")).isEmpty();
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("DART 재무 조회 제한 020은 자료 없음으로 처리하지 않는다")
+    void financialRateLimit_isReported() {
+        mockServer.expect(requestTo(Matchers.startsWith(API_URL)))
+                .andRespond(withSuccess("{\"status\":\"020\",\"message\":\"요청 제한\"}", MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> dartApiClient.getFinancials(new DartFinancialRequest(CORP_CODE, 2025)))
+                .isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException) e).getErrorCode())
+                .isEqualTo(ErrorCode.DART_RATE_LIMIT_EXCEEDED);
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("DART 공시 조회 제한 020은 빈 배당 목록으로 처리하지 않는다")
+    void disclosureRateLimit_isReported() {
+        mockServer.expect(requestTo(Matchers.startsWith("http://test-dart/alotMatter.json")))
+                .andRespond(withSuccess("{\"status\":\"020\",\"message\":\"요청 제한\"}", MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> dartApiClient.getDisclosureInfo(CORP_CODE, "배당사항"))
+                .isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException) e).getErrorCode())
+                .isEqualTo(ErrorCode.DART_RATE_LIMIT_EXCEEDED);
+        mockServer.verify();
+    }
+
     private String fullAccountsJson() {
         return """
                 {"status":"000","message":"정상","list":[
@@ -544,6 +605,12 @@ class DartApiClientTest {
                         <corp_code>00999999</corp_code>
                         <corp_name>비상장회사</corp_name>
                         <stock_code></stock_code>
+                        <modify_date>20260101</modify_date>
+                    </list>
+                    <list>
+                        <corp_code>00126381</corp_code>
+                        <corp_name>삼성전자우</corp_name>
+                        <stock_code>005935</stock_code>
                         <modify_date>20260101</modify_date>
                     </list>
                     <list>

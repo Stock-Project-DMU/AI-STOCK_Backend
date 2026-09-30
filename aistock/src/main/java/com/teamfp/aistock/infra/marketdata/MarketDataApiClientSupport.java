@@ -21,6 +21,7 @@ abstract class MarketDataApiClientSupport {
 
     protected final RestClient restClient;
     private final MarketDataQuoteCache quoteCache = new MarketDataQuoteCache(java.time.Clock.systemUTC());
+    private final Object[] requestLocks = java.util.stream.IntStream.range(0, 64).mapToObj(i -> new Object()).toArray();
     private record QueryKey(String url, String tr, Map<String, Object> body, Map<String, String> headers) {}
 
     protected MarketDataApiClientSupport(RestClient.Builder restClientBuilder) {
@@ -42,26 +43,28 @@ abstract class MarketDataApiClientSupport {
         long ttl = switch (trCd) {
             case "t1102", "t1511", "t1901" -> 2_000;
             case "t1452", "t1463", "t1441", "t1444" -> 10_000;
-            case "t1305" -> 60_000;
+            case "t1305", "t3401" -> 60_000;
             default -> 0;
         };
         QueryKey key = new QueryKey(url, trCd, requestBody, extraHeaders);
-        Map<String, Object> cached = ttl > 0 ? quoteCache.get(key) : null;
-        if (cached != null) return cached;
-        Map<String, Object> result = invokeMarketData(() -> {
-            RestClient.RequestBodySpec spec = restClient.post()
-                    .uri(url)
-                    .header("Authorization", "Bearer " + token)
-                    .header("tr_cd", trCd)
-                    .header("tr_cont", "N");
-            extraHeaders.forEach(spec::header);
-            return spec.contentType(MediaType.APPLICATION_JSON)
-                    .body(requestBody)
-                    .retrieve()
-                    .body(new ParameterizedTypeReference<Map<String, Object>>() { });
-        }, errorLabel);
-        quoteCache.put(key, result, ttl);
-        return result;
+        synchronized (requestLocks[Math.floorMod(key.hashCode(), requestLocks.length)]) {
+            Map<String, Object> cached = ttl > 0 ? quoteCache.get(key) : null;
+            if (cached != null) return cached;
+            Map<String, Object> result = MarketDataRequestPacer.INSTANCE.call(trCd, () -> invokeMarketData(() -> {
+                RestClient.RequestBodySpec spec = restClient.post()
+                        .uri(url)
+                        .header("Authorization", "Bearer " + token)
+                        .header("tr_cd", trCd)
+                        .header("tr_cont", "N");
+                extraHeaders.forEach(spec::header);
+                return spec.contentType(MediaType.APPLICATION_JSON)
+                        .body(requestBody)
+                        .retrieve()
+                        .body(new ParameterizedTypeReference<Map<String, Object>>() { });
+            }, errorLabel));
+            quoteCache.put(key, result, ttl);
+            return result;
+        }
     }
 
     /**

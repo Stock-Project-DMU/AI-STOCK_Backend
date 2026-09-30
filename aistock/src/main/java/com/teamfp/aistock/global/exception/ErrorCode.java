@@ -64,6 +64,7 @@ public enum ErrorCode {
 
     // 429 Too Many Requests
     GEMINI_RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "GEMINI_RATE_LIMIT_EXCEEDED", "AI 서비스 요청 제한을 초과했습니다."),
+    DART_RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "DART_RATE_LIMIT_EXCEEDED", "공시 데이터 요청 제한을 초과했습니다. 잠시 후 다시 시도해 주세요."),
 
     // 500 Internal Server Error
     REDIS_SERIALIZATION_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "REDIS_SERIALIZATION_ERROR", "Redis 데이터 직렬화 에러가 발생했습니다."),
