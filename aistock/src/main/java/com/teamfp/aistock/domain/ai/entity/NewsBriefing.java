@@ -2,6 +2,7 @@ package com.teamfp.aistock.domain.ai.entity;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
@@ -54,6 +55,10 @@ public class NewsBriefing {
     @Column(name = "outlet_domain", length = 50, nullable = false)
     private String outletDomain;
 
+    // Existing briefings keep null because their historical delivery time cannot be reconstructed.
+    @Column(name = "briefing_time")
+    private LocalTime briefingTime;
+
     @Column(name = "briefing_date", nullable = false)
     private LocalDate briefingDate;
 
@@ -74,9 +79,10 @@ public class NewsBriefing {
     private LocalDateTime createdAt;
 
     @Builder
-    private NewsBriefing(User user, String outletDomain, LocalDate briefingDate, String content, String sourceLinksJson) {
+    private NewsBriefing(User user, String outletDomain, LocalTime briefingTime, LocalDate briefingDate, String content, String sourceLinksJson) {
         this.user = user;
         this.outletDomain = outletDomain;
+        this.briefingTime = briefingTime;
         this.briefingDate = briefingDate;
         this.content = content;
         this.sourceLinksJson = sourceLinksJson;

@@ -2,6 +2,7 @@ package com.teamfp.aistock.domain.ai.dto.response;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 
 import com.teamfp.aistock.domain.ai.dto.NewsSourceLinkDto;
@@ -14,11 +15,12 @@ import com.teamfp.aistock.global.util.NewsRelevanceMatcher;
  * (2026-08-24 사용자 요청). source_links JSON 컬럼 파싱은 AiNewsService(SimulationService의
  * scenario_data 파싱과 동일한 패턴)가 미리 해서 넘겨준다 — DTO는 이미 파싱된 값만 담는다.
  */
-public record NewsBriefingResponse(String outletDomain, String outletName, LocalDate briefingDate, String content,
+public record NewsBriefingResponse(String outletDomain, String outletName, LocalTime deliveryTime, LocalDate briefingDate, String content,
                                     List<NewsSourceLinkDto> sources, LocalDateTime createdAt) {
 
     public static NewsBriefingResponse from(NewsBriefing briefing, List<NewsSourceLinkDto> sources) {
         String outletName = NewsRelevanceMatcher.OUTLET_NAMES.getOrDefault(briefing.getOutletDomain(), "확인된 매체");
-        return new NewsBriefingResponse(briefing.getOutletDomain(), outletName, briefing.getBriefingDate(), briefing.getContent(), sources, briefing.getCreatedAt());
+        return new NewsBriefingResponse(briefing.getOutletDomain(), outletName, briefing.getBriefingTime(),
+                briefing.getBriefingDate(), briefing.getContent(), sources, briefing.getCreatedAt());
     }
 }

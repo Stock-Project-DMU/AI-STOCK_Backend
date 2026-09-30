@@ -172,6 +172,7 @@ class AiNewsServiceTest {
             var captor = org.mockito.ArgumentCaptor.forClass(NewsBriefing.class);
             verify(newsBriefingRepository).save(captor.capture());
             assertThat(captor.getValue().getContent()).contains("시황 관련 기사를 찾지 못했어요");
+            assertThat(captor.getValue().getBriefingTime()).isEqualTo(LocalTime.of(7, 0));
             assertThat(captor.getValue().getSourceLinksJson()).isEqualTo("[]");
             verify(notificationService, never()).notify(anyLong(), any(), anyString(), anyString());
         }

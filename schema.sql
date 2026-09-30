@@ -1,5 +1,6 @@
 -- =====================================================
--- AI STOCK MySQL Schema (최종본 v15)
+-- AI STOCK MySQL Schema (최종본 v16)
+-- v16: 생성 당시 브리핑 시각 보존, 설정 조합별 뉴스 채팅 세션/메시지 추가.
 -- 변경사항 v14 → v15:
 --   1. news_briefing_settings.briefing_hour(TINYINT, 0~23시) → briefing_time(TIME, 시:분:초)로 변경
 --      (2026-09-24 사용자 요청 — 브리핑 생성 시각을 시 단위가 아니라 분·초 단위까지
@@ -684,6 +685,7 @@ CREATE TABLE news_briefings (
     briefing_id    BIGINT          NOT NULL AUTO_INCREMENT,
     user_id        BIGINT          NOT NULL,
     outlet_domain  VARCHAR(50)     NOT NULL,
+    briefing_time  TIME            NULL,                 -- 생성 당시 설정; 기존 행은 알 수 없어 NULL
     briefing_date  DATE            NOT NULL,
     content        TEXT            NOT NULL,             -- Gemini 요약 본문
     source_links   JSON            NOT NULL,             -- 요약 근거 기사 [{title,link,outlet}, ...] (원문 이동용)
@@ -692,6 +694,34 @@ CREATE TABLE news_briefings (
     UNIQUE KEY uq_news_briefing_user_date (user_id, briefing_date),
     INDEX idx_news_briefing_user (user_id, briefing_date),
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 뉴스사·수신 시간 조합별 채팅 기록. 동일 설정을 다시 선택하면 같은 세션을 연다.
+CREATE TABLE news_chat_sessions (
+    session_id     BIGINT      NOT NULL AUTO_INCREMENT,
+    user_id        BIGINT      NOT NULL,
+    setting_key    VARCHAR(80) NOT NULL,
+    outlet_domain  VARCHAR(50) NULL,
+    delivery_time  TIME        NULL,
+    created_at     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (session_id),
+    UNIQUE KEY uq_news_chat_user_setting (user_id, setting_key),
+    INDEX idx_news_chat_user_updated (user_id, updated_at),
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE news_chat_messages (
+    message_id   BIGINT      NOT NULL AUTO_INCREMENT,
+    session_id   BIGINT      NOT NULL,
+    role         VARCHAR(10) NOT NULL,
+    content      TEXT        NOT NULL,
+    sources_json JSON        NOT NULL,
+    searched_at  VARCHAR(40) NULL,
+    created_at   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (message_id),
+    INDEX idx_news_chat_message_session (session_id, message_id),
+    FOREIGN KEY (session_id) REFERENCES news_chat_sessions(session_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- =====================================================
@@ -834,6 +864,7 @@ CREATE TABLE audit_logs (
   users 1:N  → inquiries (답변자 기준, answered_by — nullable)
   users 1:1  → news_briefing_settings (v12)
   users 1:N  → news_briefings (v12)
+  users 1:N  → news_chat_sessions (v16; sessions 1:N → news_chat_messages)
   users 1:N  → charge_requests (decided_by 기준, nullable — v13)
   accounts 1:N → holdings
   accounts 1:N → orders

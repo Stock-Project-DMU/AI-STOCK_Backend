@@ -50,6 +50,7 @@ public enum ErrorCode {
     AI_SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "AI_SESSION_NOT_FOUND", "AI 상담 세션을 찾을 수 없습니다."),
     SIMULATION_NOT_FOUND(HttpStatus.NOT_FOUND, "SIMULATION_NOT_FOUND", "시뮬레이션을 찾을 수 없습니다."),
     NEWS_BRIEFING_NOT_FOUND(HttpStatus.NOT_FOUND, "NEWS_BRIEFING_NOT_FOUND", "아직 생성된 브리핑이 없습니다."),
+    NEWS_CHAT_SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "NEWS_CHAT_SESSION_NOT_FOUND", "뉴스 채팅을 찾을 수 없습니다."),
 
     // 409 Conflict
     DUPLICATE_LOGIN_ID(HttpStatus.CONFLICT, "DUPLICATE_LOGIN_ID", "이미 존재하는 아이디입니다."),
@@ -70,6 +71,7 @@ public enum ErrorCode {
     REDIS_SERIALIZATION_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "REDIS_SERIALIZATION_ERROR", "Redis 데이터 직렬화 에러가 발생했습니다."),
     SCENARIO_DATA_PARSE_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "SCENARIO_DATA_PARSE_ERROR", "시나리오 데이터 파싱 중 오류가 발생했습니다."),
     NEWS_SOURCE_DATA_PARSE_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "NEWS_SOURCE_DATA_PARSE_ERROR", "뉴스 브리핑 근거 기사 데이터 파싱 중 오류가 발생했습니다."),
+    NEWS_CHAT_DATA_PARSE_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "NEWS_CHAT_DATA_PARSE_ERROR", "뉴스 채팅 데이터를 읽지 못했습니다."),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_SERVER_ERROR", "서버 내부 에러가 발생했습니다."),
 
     // 502 Bad Gateway
