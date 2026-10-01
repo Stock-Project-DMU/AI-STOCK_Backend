@@ -307,6 +307,7 @@ AWS Parameter Store에서 민감한 설정값(JWT_SECRET, DB 자격증명, `ADMI
 | `MarketDataWebSocketClient` | `connect()`, `subscribe(String stockCode)`, `unsubscribe(String stockCode)`, `disconnect()` |
 | `MarketDataWebSocketHandler` | `handleMessage(String rawMessage)`, `onTickReceived(TickData tickData)`, `onHogaReceived(HogaData hogaData)` |
 | `MarketDataReconnectService` | `scheduleReconnect()`, `reconnectWithBackoff()` |
+| `MarketDataStartupService` | `connectAfterStartup()` — real 모드에서만 생성하고 `ApplicationReadyEvent` 이후 최초 WebSocket 연결을 예약 |
 | `MarketDataListener` (v9 추가) | `onTickReceived(TickData tickData)`, `onHogaReceived(HogaData hogaData)` — infra는 domain을 직접 참조하지 않으므로(CLAUDE.md 4번), `MarketDataWebSocketHandler`가 파싱한 시세를 domain에 넘기기 위한 콜백 인터페이스. 4주차 `feature/stock-price`의 `StockBroadcastService`가 이를 구현해 스프링 빈으로 등록하면 자동으로 연결된다. |
 | `TickData` (dto) | `stockCode`, `stockName`, `currentPrice`, `changeRate`, `changeAmount`(v14 추가), `volume`, `tradedAt` — `stockName`은 외부 시세 데이터 실시간 체결 응답에 종목명 필드 자체가 없어 파싱 시 항상 `null`로 둔다(아래 참고). `changeAmount`는 외부 시세 데이터 원본 `change` 필드(전일대비, 항상 부호 없는 절대값)를 그대로 옮긴 것 — 부호 없음에 주의, 부호를 반영한 최종 등락 금액은 4주차 `feature/stock-price`의 `StockBroadcastService`가 `changeRate` 부호를 적용해 `StockPriceDto.changeAmount`로 변환할 때 붙인다 |
 | `HogaData` (dto) | `stockCode`, `askPrices`(List), `askVolumes`(List), `bidPrices`(List), `bidVolumes`(List) |

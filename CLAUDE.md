@@ -234,7 +234,8 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
   때문에 `REQUIRES_NEW`). 미체결 주문이 있는 종목은 `StockSubscriptionManager`의 주문 구독
   (`increaseOrderSubscription`/`decreaseOrderSubscription`)으로 체결·취소될 때까지 real/mock 모두
   구독을 유지한다(fix/realtime-trade-fix, 2026-09-30).
-- **서버 시작 순서**: `@PostConstruct`로 DB PENDING 주문 Redis 재적재 완료 후 외부 시세 데이터 WebSocket 연결
+- **서버 시작 순서**: `@PostConstruct`로 DB PENDING 주문을 Redis에 재적재하고 구독 카운트를 복원한 뒤,
+  `ApplicationReadyEvent`에서 real 모드 WebSocket의 최초 연결을 예약한다. 연결 전 등록한 종목은 연결 시 재구독한다.
 - **외부 시세 데이터 재연결**: 지수 백오프 (1→2→4→최대 30초)
 - **외부 시세 데이터 REST 장애 처리**: `infra/marketdata`의 REST 클라이언트는 제공사 호출(토큰 발급 포함)이
   네트워크 오류·HTTP 오류로 실패하면 `CustomException(ErrorCode.MARKET_DATA_UNAVAILABLE)`(503)을 던진다

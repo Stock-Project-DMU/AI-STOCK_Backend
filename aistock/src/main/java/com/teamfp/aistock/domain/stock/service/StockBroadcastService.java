@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.springframework.context.annotation.Lazy;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
@@ -18,8 +19,6 @@ import com.teamfp.aistock.infra.marketdata.MarketDataListener;
 import com.teamfp.aistock.infra.marketdata.dto.HogaData;
 import com.teamfp.aistock.infra.marketdata.dto.TickData;
 
-import lombok.RequiredArgsConstructor;
-
 /**
  * 외부 시세 데이터 제공사 실시간 체결/호가를 수신해 Redis 캐싱 + STOMP 브로드캐스팅으로 동시에 처리한다
  * (CLAUDE.md 8번 아키텍처). tick 자체의 Throttle(200ms)은 MarketDataWebSocketHandler/AsyncConfig
@@ -27,7 +26,6 @@ import lombok.RequiredArgsConstructor;
  * 호가는 별도 스트림이라 각각 독립적인 200ms 창을 둔다.
  */
 @Service
-@RequiredArgsConstructor
 public class StockBroadcastService implements MarketDataListener {
 
     private static final long THROTTLE_INTERVAL_MILLIS = 200L;
@@ -41,7 +39,17 @@ public class StockBroadcastService implements MarketDataListener {
     // 낙관적 락으로 체결"). OrderExecutionService 자체는 tick 수신 경로를 모르고 호출만
     // 기다리는 구조라(OrderExecutionService 클래스 상단 Javadoc 참고), 실제 tick 파이프라인인
     // 여기서 종목코드·체결가를 넘겨 호출해야 지정가 주문이 실제로 체결된다.
+    // real 모드의 WebSocket 핸들러가 이 리스너를 먼저 생성할 때 주문 서비스까지 즉시 만들면
+    // OrderExecutionService → StockSubscriptionManager → WebSocketClient 순환이 생긴다.
     private final OrderExecutionService orderExecutionService;
+
+    public StockBroadcastService(RedisStockCacheService redisStockCacheService, StockNameResolver stockNameResolver,
+                                 SimpMessagingTemplate messagingTemplate, @Lazy OrderExecutionService orderExecutionService) {
+        this.redisStockCacheService = redisStockCacheService;
+        this.stockNameResolver = stockNameResolver;
+        this.messagingTemplate = messagingTemplate;
+        this.orderExecutionService = orderExecutionService;
+    }
 
     private final ConcurrentHashMap<String, Long> lastTickProcessedAt = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> lastHogaProcessedAt = new ConcurrentHashMap<>();

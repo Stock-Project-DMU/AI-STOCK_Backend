@@ -31,14 +31,12 @@ import com.teamfp.aistock.infra.marketdata.dto.MarketDataTokenResponse;
 /**
  * 외부 시세 데이터 제공사 실시간시세 WebSocket 연결/구독을 담당하는 infra 클라이언트.
  *
- * 서버 시작 시 자동으로 connect()를 호출하지 않는다 — CLAUDE.md의 "서버 시작 순서: DB PENDING
- * 주문 Redis 재적재 완료 후 외부 시세 데이터 WebSocket 연결" 규칙에 따라 connect() 호출 시점은 그 재적재를
- * 담당하는 컴포넌트(추후 order 도메인 쪽 구현)가 결정해야 하므로, 이 클래스가 임의로
- * {@code @PostConstruct}로 먼저 연결해버리면 안 된다.
+ * 이 클래스는 생성 중에 connect()를 호출하지 않는다. DB PENDING 주문과 구독 카운트가
+ * 복원된 뒤 {@link MarketDataStartupService}가 최초 연결을 예약한다.
  *
  * {@code market-data.mode=real}일 때만 빈으로 생성된다. CI/테스트 환경 및 외부 시세 데이터 실연동이 필요 없는
  * 로컬 개발(market-data.mode=mock, application-dev.yml 기본값)에서는 이 빈 자체가 생성되지 않으므로
- * MARKET_DATA_APP_KEY/MARKET_DATA_APP_SECRET 환경변수가 없어도 컨텍스트 로딩이 실패하지 않는다.
+ * LS_APP_KEY/LS_APP_SECRET 환경변수가 없어도 컨텍스트 로딩이 실패하지 않는다.
  */
 @Component
 @ConditionalOnProperty(name = "market-data.mode", havingValue = "real")
@@ -108,12 +106,16 @@ public class MarketDataWebSocketClient {
 
     public void subscribe(String stockCode) {
         subscribedStockCodes.add(stockCode);
-        sendRealtimeRegistration(stockCode, TR_TYPE_REGISTER);
+        if (session != null && session.isOpen()) {
+            sendRealtimeRegistration(stockCode, TR_TYPE_REGISTER);
+        }
     }
 
     public void unsubscribe(String stockCode) {
         subscribedStockCodes.remove(stockCode);
-        sendRealtimeRegistration(stockCode, TR_TYPE_UNREGISTER);
+        if (session != null && session.isOpen()) {
+            sendRealtimeRegistration(stockCode, TR_TYPE_UNREGISTER);
+        }
     }
 
     public void disconnect() {
