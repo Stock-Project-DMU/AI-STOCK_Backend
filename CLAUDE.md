@@ -258,7 +258,9 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
     5종). 상승/하락 순위는 real 모드에서 t1441을 코스피+코스닥 전체·당일 조건으로 호출하고, mock
     모드에서는 상승 종목만/하락 종목만 걸러 정렬한다(상승·하락 순위 전체 시장 기준, #13, 2026-09-30). 전종목이 아니라
     `LocalMarketDataReader.getAllCurrentPrices()`(stocks.json에 등록된 종목만, 2026-09-21 기준
-    105개)를 정렬해 상위 10개만 뽑는 근사치다. 같은 클래스의 나머지 3개
+    105개)를 정렬해 상위 10개만 뽑는 근사치다. 단 홈 주요 종목은 `GET /api/market/rankings?all=true`로
+    `(int mockLimit)` 오버로드를 호출해 10개 제한 없이 등록 종목 전체를 한 번에 받아 화면에서 15개씩
+    무한 스크롤로 보여준다(real 모드는 `all=true`여도 최대 10개, 2026-10-01). 같은 클래스의 나머지 3개
     (`getSurgingVolumeVsYesterday()`/시간외 2종)는 mock 대상이 아니다.
   - `IndustryApiClient.getCurrentPrice(marketName)` — 지수(코스피/코스닥). 실지수는 전종목 시가총액
     가중평균이라 105개 mock 종목으로 재현 불가능해, 고정 베이스값(`MOCK_BASE_INDEX_VALUE`)을 같은

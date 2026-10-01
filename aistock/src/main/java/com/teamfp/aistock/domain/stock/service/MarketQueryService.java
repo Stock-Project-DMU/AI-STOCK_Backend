@@ -69,8 +69,21 @@ public class MarketQueryService {
             default -> throw new CustomException(ErrorCode.INVALID_INPUT);
         };
     }
-    public List<RankingItemDto> getRankings(String sort) {
+    // isAll=true는 홈 주요 종목 무한 스크롤용 — mock 모드에서 상위 10건 제한 없이 stocks.json 전체 종목을
+    // 한 번에 반환한다(real 모드는 그대로 최대 10건). false면 기존과 동일하게 상위 10건.
+    public List<RankingItemDto> getRankings(String sort, boolean isAll) {
         requireMarketConfigured();
+        if (isAll) {
+            int mockLimit = Integer.MAX_VALUE;
+            return switch (sort) {
+                case "volume" -> highItemApiClient.getTopVolume(mockLimit);
+                case "value" -> highItemApiClient.getTopTradingValue(mockLimit);
+                case "rise", "change" -> highItemApiClient.getTopPriceChangeRate(mockLimit);
+                case "fall" -> highItemApiClient.getTopPriceDeclineRate(mockLimit);
+                case "market-cap" -> highItemApiClient.getTopMarketCap(mockLimit);
+                default -> throw new CustomException(ErrorCode.INVALID_INPUT);
+            };
+        }
         return switch (sort) {
             case "volume" -> highItemApiClient.getTopVolume();
             case "value" -> highItemApiClient.getTopTradingValue();

@@ -59,12 +59,25 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
 
     /** 등락율상위(t1441) — 코스피+코스닥 전체 시장의 당일 상승률 상위 종목. */
     public List<RankingItemDto> getTopPriceChangeRate() {
-        return priceChangeRateRanking(true);
+        return getTopPriceChangeRate(MAX_RANKING_ITEMS);
+    }
+
+    /**
+     * mockLimit은 mock 모드에서만 반환 건수를 정한다 — 홈 주요 종목이 stocks.json 전체를 받아
+     * 화면에서 무한 스크롤로 보여주기 위함이다. real 모드는 기존과 같이 최대 {@value #MAX_RANKING_ITEMS}건이다.
+     * 아래 4개 순위 메서드의 (int mockLimit) 오버로드도 같은 규칙이다.
+     */
+    public List<RankingItemDto> getTopPriceChangeRate(int mockLimit) {
+        return priceChangeRateRanking(true, mockLimit);
     }
 
     /** 등락율상위(t1441) — 코스피+코스닥 전체 시장의 당일 하락률 상위 종목. */
     public List<RankingItemDto> getTopPriceDeclineRate() {
-        return priceChangeRateRanking(false);
+        return getTopPriceDeclineRate(MAX_RANKING_ITEMS);
+    }
+
+    public List<RankingItemDto> getTopPriceDeclineRate(int mockLimit) {
+        return priceChangeRateRanking(false, mockLimit);
     }
 
     /**
@@ -73,12 +86,12 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
      * 아니었다 — 전체 시장(0)·당일(0) 기준으로 고정하고 상승/하락만 gubun2로 나눈다(#13, 2026-09-30).
      * mock 모드도 같은 의미로 맞춰 상승 순위엔 상승 종목만, 하락 순위엔 하락 종목만 담는다.
      */
-    private List<RankingItemDto> priceChangeRateRanking(boolean rising) {
+    private List<RankingItemDto> priceChangeRateRanking(boolean rising, int mockLimit) {
         if (localMarketDataReader.isPresent()) {
             Comparator<CurrentPriceDetailDto> byChangeRate = Comparator.comparingDouble(CurrentPriceDetailDto::getChangeRate);
             return mockRanking(
                     dto -> rising ? dto.getChangeRate() > 0 : dto.getChangeRate() < 0,
-                    rising ? byChangeRate.reversed() : byChangeRate, null);
+                    rising ? byChangeRate.reversed() : byChangeRate, null, mockLimit);
         }
         Map<String, Object> inBlock = Map.of(
                 "gubun1", "0", "gubun2", rising ? "0" : "1", "gubun3", "0",
@@ -95,12 +108,17 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
 
     /** 시가총액상위(t1444) — 코스피+코스닥 전체(upcode="001") 시가총액 상위. */
     public List<RankingItemDto> getTopMarketCap() {
+        return getTopMarketCap(MAX_RANKING_ITEMS);
+    }
+
+    public List<RankingItemDto> getTopMarketCap(int mockLimit) {
         if (localMarketDataReader.isPresent()) {
             Map<String, CurrentPriceDetailDto> all = localMarketDataReader.get().getAllCurrentPrices();
             long totalMarketCap = all.values().stream().mapToLong(this::marketCap).sum();
             return mockRanking(Comparator.comparingLong(this::marketCap).reversed(),
                     dto -> totalMarketCap <= 0 ? "시가총액 비중 0.00%"
-                            : "시가총액 비중 %.2f%%".formatted(marketCap(dto) * 100.0 / totalMarketCap));
+                            : "시가총액 비중 %.2f%%".formatted(marketCap(dto) * 100.0 / totalMarketCap),
+                    mockLimit);
         }
         Map<String, Object> inBlock = Map.of("upcode", "001", "idx", 0);
         return callAndParse("t1444", "t1444OutBlock1", inBlock, row -> RankingItemDto.builder()
@@ -116,8 +134,12 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
 
     /** 거래량상위(t1452) — 오늘(jnilgubun="1") 누적 거래량 상위. */
     public List<RankingItemDto> getTopVolume() {
+        return getTopVolume(MAX_RANKING_ITEMS);
+    }
+
+    public List<RankingItemDto> getTopVolume(int mockLimit) {
         if (localMarketDataReader.isPresent()) {
-            return mockRanking(Comparator.comparingLong(CurrentPriceDetailDto::getVolume).reversed(), null);
+            return mockRanking(Comparator.comparingLong(CurrentPriceDetailDto::getVolume).reversed(), null, mockLimit);
         }
         Map<String, Object> inBlock = Map.of(
                 "gubun", "1", "jnilgubun", "1", "sdiff", 0, "ediff", 0,
@@ -134,9 +156,13 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
 
     /** 거래대금상위(t1463) — 오늘(jnilgubun="1") 누적 거래대금 상위. */
     public List<RankingItemDto> getTopTradingValue() {
+        return getTopTradingValue(MAX_RANKING_ITEMS);
+    }
+
+    public List<RankingItemDto> getTopTradingValue(int mockLimit) {
         if (localMarketDataReader.isPresent()) {
             return mockRanking(Comparator.comparingLong(this::tradingValue).reversed(),
-                    dto -> "거래대금 약 %d백만원".formatted(tradingValue(dto) / 1_000_000));
+                    dto -> "거래대금 약 %d백만원".formatted(tradingValue(dto) / 1_000_000), mockLimit);
         }
         Map<String, Object> inBlock = Map.of(
                 "gubun", "1", "jnilgubun", "1", "jc_num", 0, "sprice", 0, "eprice", 0,
@@ -155,26 +181,28 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
     /**
      * market-data.mode=mock 전용 순위 산출 — LocalMarketDataReader가 제공하는 종목 전체
      * 스냅샷(getAllCurrentPrices(), local-market-data-generator가 t1102로 수집한 실제 값)을
-     * comparator로 정렬해 상위 {@value #MAX_RANKING_ITEMS}개만 뽑는다. real 모드의 각 TR과
+     * comparator로 정렬해 상위 mockLimit개(기본 {@value #MAX_RANKING_ITEMS}개)만 뽑는다. real 모드의 각 TR과
      * 달리 mock 데이터는 시장 전체가 아니라 stocks.json에 등록된 종목(2026-09-21 기준 105개)
      * 범위 안에서만 순위를 매긴다는 한계가 있다 — 로컬 개발용 근사치임을 extraInfoFn이 없는
      * 경우 별도로 표기하지 않는다(순위 mock 지원 추가, 2026-09-21).
      */
     private List<RankingItemDto> mockRanking(
             Comparator<CurrentPriceDetailDto> comparator,
-            java.util.function.Function<CurrentPriceDetailDto, String> extraInfoFn) {
-        return mockRanking(dto -> true, comparator, extraInfoFn);
+            java.util.function.Function<CurrentPriceDetailDto, String> extraInfoFn,
+            int mockLimit) {
+        return mockRanking(dto -> true, comparator, extraInfoFn, mockLimit);
     }
 
     private List<RankingItemDto> mockRanking(
             java.util.function.Predicate<CurrentPriceDetailDto> filter,
             Comparator<CurrentPriceDetailDto> comparator,
-            java.util.function.Function<CurrentPriceDetailDto, String> extraInfoFn) {
+            java.util.function.Function<CurrentPriceDetailDto, String> extraInfoFn,
+            int mockLimit) {
         Map<String, CurrentPriceDetailDto> all = localMarketDataReader.get().getAllCurrentPrices();
         List<RankingItemDto> items = new java.util.ArrayList<>();
         int rank = 1;
         for (CurrentPriceDetailDto dto : all.values().stream().filter(filter).sorted(comparator).toList()) {
-            if (rank > MAX_RANKING_ITEMS) {
+            if (rank > mockLimit) {
                 break;
             }
             items.add(RankingItemDto.builder()
