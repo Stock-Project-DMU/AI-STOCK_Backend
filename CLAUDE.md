@@ -237,6 +237,9 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
 - **서버 시작 순서**: `@PostConstruct`로 DB PENDING 주문을 Redis에 재적재하고 구독 카운트를 복원한 뒤,
   `ApplicationReadyEvent`에서 real 모드 WebSocket의 최초 연결을 예약한다. 연결 전 등록한 종목은 연결 시 재구독한다.
 - **외부 시세 데이터 재연결**: 지수 백오프 (1→2→4→최대 30초)
+- **실전·모의 서버 불일치**: WebSocket 구독 응답 `10001`은 같은 설정으로 재시도해도 해결되지 않으므로
+  연결을 끊고 재연결을 중지한다. API 키 종류와 `MARKET_DATA_WEBSOCKET_URL`(실전 9443/모의 29443)을
+  맞춘 뒤 서버를 다시 시작한다.
 - **외부 시세 데이터 REST 장애 처리**: `infra/marketdata`의 REST 클라이언트는 제공사 호출(토큰 발급 포함)이
   네트워크 오류·HTTP 오류로 실패하면 `CustomException(ErrorCode.MARKET_DATA_UNAVAILABLE)`(503)을 던진다
   (`MarketDataApiClientSupport.invokeMarketData()`). 빈 목록/`Optional.empty()`는 "제공사가 정상 응답했지만
