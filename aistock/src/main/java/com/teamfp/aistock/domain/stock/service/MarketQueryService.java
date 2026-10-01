@@ -100,6 +100,14 @@ public class MarketQueryService {
         if (months < 1 || months > 60) throw new CustomException(ErrorCode.INVALID_INPUT);
         return marketDataApiClient.getHistoricalPrices(stockCode, months);
     }
+    // 종목 상세 차트용 — dwmcode(1=일봉/2=주봉/3=월봉)를 그대로 써서 count건(1~60)을 조회한다.
+    // getHistory(months)는 months가 오면 월봉으로 바뀌어 일·주 탭에 쓸 수 없어 분리했다.
+    public List<HistoricalPriceDto> getChartHistory(String stockCode, int dwmcode, int count) {
+        requireMarketConfigured();
+        validateCode(stockCode);
+        if (dwmcode < 1 || dwmcode > 3 || count < 1 || count > 60) throw new CustomException(ErrorCode.INVALID_INPUT);
+        return marketDataApiClient.getChartPrices(stockCode, dwmcode, count);
+    }
     public CurrentPriceDetailDto getDetail(String stockCode) {
         requireMarketConfigured();
         validateCode(stockCode);

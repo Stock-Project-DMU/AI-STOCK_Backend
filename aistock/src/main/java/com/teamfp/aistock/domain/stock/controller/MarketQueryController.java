@@ -31,7 +31,10 @@ public class MarketQueryController {
             @RequestParam(name = "all", defaultValue = "false") boolean isAll) {
         return ApiResponse.success(marketQueryService.getRankings(sort, isAll));
     }
-    @GetMapping("/stocks/{stockCode}/history") public ApiResponse<List<HistoricalPriceDto>> getHistory(@PathVariable String stockCode, @RequestParam(defaultValue = "12") int months) {
+    // dwmcode가 있으면 차트용(1=일봉/2=주봉/3=월봉, count 기본 60), 없으면 기존 months 동작 그대로.
+    @GetMapping("/stocks/{stockCode}/history") public ApiResponse<List<HistoricalPriceDto>> getHistory(@PathVariable String stockCode, @RequestParam(defaultValue = "12") int months,
+            @RequestParam(required = false) Integer dwmcode, @RequestParam(defaultValue = "60") int count) {
+        if (dwmcode != null) return ApiResponse.success(marketQueryService.getChartHistory(stockCode, dwmcode, count));
         return ApiResponse.success(marketQueryService.getHistory(stockCode, months));
     }
     @GetMapping("/stocks/{stockCode}/detail") public ApiResponse<CurrentPriceDetailDto> getDetail(@PathVariable String stockCode) {

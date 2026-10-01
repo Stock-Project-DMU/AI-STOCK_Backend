@@ -144,7 +144,10 @@ public class MarketDataApiClient extends MarketDataApiClientSupport {
     // 동일한 상한, CLAUDE.md 팀 합의)으로 맞춰 월봉 24개까지 허용한다.
     private static final int MAX_PERIOD_MONTHS = 24;
     private static final int DWMCODE_DAY = 1;
+    private static final int DWMCODE_WEEK = 2;
     private static final int DWMCODE_MONTH = 3;
+    // 종목 상세 차트(getChartPrices) 한 번에 받는 최대 봉 수 — 일봉 60(약 3개월)/주봉 52(약 1년)/월봉 60(5년)을 모두 담는 상한.
+    private static final int MAX_CHART_ITEMS = 60;
 
     /** 관리종목(t1404)+투자경고/매매정지(t1405) 여부를 함께 확인한다(2026-08-11 추가). */
     public List<StockRiskFlagDto> getRiskFlags(String stockCode) {
@@ -302,6 +305,117 @@ public class MarketDataApiClient extends MarketDataApiClientSupport {
             date = longPeriod ? date.minusMonths(1) : date.minusDays(1);
         }
         return result;
+    }
+
+    /**
+     * 기간별주가(t1305) — 종목 상세 차트 전용(2026-10-01 추가). dwmcode(1=일봉/2=주봉/3=월봉)를 그대로 넘겨
+     * count건(최대 {@value #MAX_CHART_ITEMS})을 받는다. AI 상담용 {@link #getHistoricalPrices(String, Integer)}는
+     * months가 오면 월봉으로 바꾸는 규칙이라 차트 탭(일/주)에 그대로 쓰면 월봉이 와서, 차트는 이 메서드로 분리한다.
+     * 실측(2026-10-01, 005930): 일봉 60/주봉 52/월봉 60건 요청 시 요청 건수 그대로 반환, 주봉·월봉 날짜는 그 주·그 달의
+     * 마지막 거래일(진행 중인 주·달은 오늘).
+     */
+    public List<HistoricalPriceDto> getChartPrices(String stockCode, int dwmcode, int count) {
+        if (dwmcode != DWMCODE_DAY && dwmcode != DWMCODE_WEEK && dwmcode != DWMCODE_MONTH) {
+            throw new IllegalArgumentException("지원하지 않는 dwmcode: " + dwmcode);
+        }
+        int cnt = Math.max(1, Math.min(count, MAX_CHART_ITEMS));
+        if (localMarketDataReader.isPresent()) {
+            return mockChartPrices(stockCode, dwmcode, cnt);
+        }
+        String token = accessTokenProvider.issueAccessToken();
+        Map<String, Object> inBlock = new java.util.LinkedHashMap<>();
+        inBlock.put("shcode", stockCode);
+        inBlock.put("dwmcode", dwmcode);
+        inBlock.put("date", "");
+        inBlock.put("idx", 0);
+        inBlock.put("cnt", cnt);
+        Map<String, Object> requestBody = Map.of("t1305InBlock", inBlock);
+
+        Map<String, Object> response = call(marketDataUrl, "t1305", requestBody, token, "외부 시세 데이터 차트 기간별주가 조회 실패");
+
+        if (response == null || !(response.get("t1305OutBlock1") instanceof List)) {
+            return List.of();
+        }
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> outBlock = (List<Map<String, Object>>) response.get("t1305OutBlock1");
+        return outBlock.stream()
+                .limit(cnt)
+                .map(row -> HistoricalPriceDto.builder()
+                        .date(stringOf(row.get("date")))
+                        .open(parseLong(row.get("open")))
+                        .high(parseLong(row.get("high")))
+                        .low(parseLong(row.get("low")))
+                        .close(parseLong(row.get("close")))
+                        .changeRate(parseDoubleOrZero(row.get("diff")))
+                        .volume(parseLong(row.get("volume")))
+                        .marketCap(parseLong(row.get("marketcap")))
+                        .foreignNetBuy(parseLong(row.get("fpvolume")))
+                        .individualNetBuy(parseLong(row.get("ppvolume")))
+                        .build())
+                .toList();
+    }
+
+    /**
+     * market-data.mode=mock 전용 차트 합성 시계열 — {@link #mockHistoricalPrices}와 같은 규칙(종목코드 시드 고정,
+     * 가장 최근 봉 종가 = mock 현재가, 실제 과거 시세 아님)으로 만들되, 봉 간격만 dwmcode에 맞춘다.
+     * 일봉은 평일만(주말이면 직전 금요일부터), 주봉은 1주 간격, 월봉은 1개월 간격으로 과거로 거슬러 올라간다.
+     */
+    private List<HistoricalPriceDto> mockChartPrices(String stockCode, int dwmcode, int cnt) {
+        Optional<CurrentPriceDetailDto> currentOpt = localMarketDataReader.get().getCurrentPrice(stockCode);
+        if (currentOpt.isEmpty()) {
+            return List.of();
+        }
+        CurrentPriceDetailDto current = currentOpt.get();
+        java.util.Random random = new java.util.Random(stockCode.hashCode());
+        java.time.LocalDate date = java.time.LocalDate.now();
+        if (dwmcode == DWMCODE_DAY) {
+            date = previousWeekdayOrSame(date);
+        }
+
+        List<HistoricalPriceDto> result = new java.util.ArrayList<>();
+        long close = current.getCurrentPrice();
+        for (int i = 0; i < cnt; i++) {
+            double openRatio = 1 + (random.nextDouble() - 0.5) * 0.06;
+            long open = Math.max(1, Math.round(close * openRatio));
+            long high = Math.max(open, close) + Math.round(Math.max(open, close) * random.nextDouble() * 0.02);
+            long low = Math.max(1, Math.min(open, close) - Math.round(Math.min(open, close) * random.nextDouble() * 0.02));
+            long volume = Math.max(1, Math.round(current.getVolume() * (0.5 + random.nextDouble())));
+            double changeRate = open == 0 ? 0.0 : Math.round((close - open) * 10000.0 / open) / 100.0;
+            Long marketCap = current.getListingShares() != null ? close * current.getListingShares() * 1000 : null;
+            long foreignNetBuy = Math.round(volume * (random.nextDouble() - 0.5) * 0.4);
+            long individualNetBuy = Math.round(volume * (random.nextDouble() - 0.5) * 0.4);
+
+            result.add(HistoricalPriceDto.builder()
+                    .date(date.format(MOCK_HISTORY_DATE_FORMAT))
+                    .open(open)
+                    .high(high)
+                    .low(low)
+                    .close(close)
+                    .changeRate(changeRate)
+                    .volume(volume)
+                    .marketCap(marketCap)
+                    .foreignNetBuy(foreignNetBuy)
+                    .individualNetBuy(individualNetBuy)
+                    .build());
+
+            // 다음(과거) 봉의 종가 = 이번 봉의 시가로 이어 붙여 계단식 시계열을 만든다.
+            close = open;
+            date = switch (dwmcode) {
+                case DWMCODE_DAY -> previousWeekdayOrSame(date.minusDays(1));
+                case DWMCODE_WEEK -> date.minusWeeks(1);
+                default -> date.minusMonths(1);
+            };
+        }
+        return result;
+    }
+
+    /** 주말이면 직전 금요일로, 평일이면 그대로 돌려준다(mock 일봉이 장이 열리는 날만 갖도록). */
+    private static java.time.LocalDate previousWeekdayOrSame(java.time.LocalDate date) {
+        return switch (date.getDayOfWeek()) {
+            case SATURDAY -> date.minusDays(1);
+            case SUNDAY -> date.minusDays(2);
+            default -> date;
+        };
     }
 
     /** API용주식멀티현재가조회(t8407) — 최대 5종목까지 한번에 현재가 조회(2026-08-11 추가). */
