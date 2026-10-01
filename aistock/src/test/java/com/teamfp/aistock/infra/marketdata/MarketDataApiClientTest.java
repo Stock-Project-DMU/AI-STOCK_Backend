@@ -346,4 +346,107 @@ class MarketDataApiClientTest {
             verify(accessTokenProvider, never()).issueAccessToken();
         }
     }
+
+    @Nested
+    @DisplayName("종목 상세 차트 조회 (getChartPrices, t1305)")
+    class GetChartPrices {
+
+        @Mock
+        private LocalMarketDataReader localMarketDataReader;
+
+        private MarketDataApiClient mockModeClient() {
+            CurrentPriceDetailDto localResult = CurrentPriceDetailDto.builder()
+                    .stockCode(STOCK_CODE)
+                    .stockName("삼성전자(로컬)")
+                    .currentPrice(70000L)
+                    .volume(1_000_000L)
+                    .build();
+            when(localMarketDataReader.getCurrentPrice(STOCK_CODE)).thenReturn(Optional.of(localResult));
+            MarketDataApiClient mockModeClient =
+                    new MarketDataApiClient(accessTokenProvider, Optional.of(localMarketDataReader), RestClient.builder());
+            ReflectionTestUtils.setField(mockModeClient, "marketDataUrl", MARKET_DATA_URL);
+            return mockModeClient;
+        }
+
+        private java.time.LocalDate dateOf(HistoricalPriceDto dto) {
+            return java.time.LocalDate.parse(dto.getDate(), java.time.format.DateTimeFormatter.BASIC_ISO_DATE);
+        }
+
+        @Test
+        @DisplayName("real 모드는 dwmcode와 cnt를 그대로 t1305에 넘긴다(주봉 52건)")
+        void realMode_passesDwmcodeAndCountAsIs() {
+            when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+            mockServer.expect(requestTo(MARKET_DATA_URL))
+                    .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.t1305InBlock.dwmcode").value(2))
+                    .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.t1305InBlock.cnt").value(52))
+                    .andRespond(withSuccess("""
+                            {"t1305OutBlock1":[
+                              {"date":"20261001","open":100,"high":120,"low":90,"close":110,"diff":"1.5","volume":1000},
+                              {"date":"20260923","open":95,"high":105,"low":85,"close":100,"diff":"-0.5","volume":900}
+                            ]}""", MediaType.APPLICATION_JSON));
+
+            List<HistoricalPriceDto> result = client.getChartPrices(STOCK_CODE, 2, 52);
+
+            assertThat(result).extracting(HistoricalPriceDto::getDate).containsExactly("20261001", "20260923");
+            assertThat(result.get(0).getHigh()).isEqualTo(120L);
+            mockServer.verify();
+        }
+
+        @Test
+        @DisplayName("real 모드는 count가 60을 넘으면 60건으로 제한해 요청한다")
+        void realMode_capsCountAtSixty() {
+            when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+            mockServer.expect(requestTo(MARKET_DATA_URL))
+                    .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.t1305InBlock.dwmcode").value(1))
+                    .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.t1305InBlock.cnt").value(60))
+                    .andRespond(withSuccess("{\"t1305OutBlock1\":[]}", MediaType.APPLICATION_JSON));
+
+            assertThat(client.getChartPrices(STOCK_CODE, 1, 500)).isEmpty();
+            mockServer.verify();
+        }
+
+        @Test
+        @DisplayName("mock 일봉은 평일만 count건, 최신 봉 종가는 mock 현재가와 같다")
+        void mockMode_daily_weekdaysOnly() {
+            List<HistoricalPriceDto> result = mockModeClient().getChartPrices(STOCK_CODE, 1, 60);
+
+            assertThat(result).hasSize(60);
+            assertThat(result.get(0).getClose()).isEqualTo(70000L);
+            assertThat(result).extracting(this::dateOf).allSatisfy(date ->
+                    assertThat(date.getDayOfWeek()).isNotIn(java.time.DayOfWeek.SATURDAY, java.time.DayOfWeek.SUNDAY));
+            assertThat(result).extracting(this::dateOf).doesNotHaveDuplicates();
+            verify(accessTokenProvider, never()).issueAccessToken();
+        }
+
+        @Test
+        @DisplayName("mock 주봉은 1주 간격으로 count건을 만든다")
+        void mockMode_weekly_sevenDayInterval() {
+            List<HistoricalPriceDto> result = mockModeClient().getChartPrices(STOCK_CODE, 2, 52);
+
+            assertThat(result).hasSize(52);
+            for (int i = 1; i < result.size(); i++) {
+                assertThat(java.time.temporal.ChronoUnit.DAYS.between(dateOf(result.get(i)), dateOf(result.get(i - 1)))).isEqualTo(7);
+            }
+        }
+
+        @Test
+        @DisplayName("mock 월봉은 1개월 간격으로 count건을 만든다")
+        void mockMode_monthly_oneMonthInterval() {
+            List<HistoricalPriceDto> result = mockModeClient().getChartPrices(STOCK_CODE, 3, 60);
+
+            assertThat(result).hasSize(60);
+            for (int i = 1; i < result.size(); i++) {
+                assertThat(dateOf(result.get(i)).plusMonths(1).withDayOfMonth(1))
+                        .isEqualTo(dateOf(result.get(i - 1)).withDayOfMonth(1));
+            }
+        }
+
+        @Test
+        @DisplayName("지원하지 않는 dwmcode면 예외를 던지고 외부 시세 데이터 API를 호출하지 않는다")
+        void invalidDwmcode_throws() {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> client.getChartPrices(STOCK_CODE, 4, 10))
+                    .isInstanceOf(IllegalArgumentException.class);
+            verify(accessTokenProvider, never()).issueAccessToken();
+        }
+    }
 }
