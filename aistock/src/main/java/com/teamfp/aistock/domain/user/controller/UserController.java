@@ -34,7 +34,7 @@ public class UserController {
     private final com.teamfp.aistock.domain.user.service.UserWithdrawalService userWithdrawalService;
 
     @org.springframework.web.bind.annotation.DeleteMapping("/me")
-    public ApiResponse<Void> withdraw(@Valid @RequestBody PasswordVerifyRequest request) {
+    public ApiResponse<Void> withdraw(@Valid @RequestBody com.teamfp.aistock.domain.user.dto.request.UserWithdrawalRequest request) {
         userWithdrawalService.withdraw(SecurityUtil.getCurrentUserId(), request);
         return ApiResponse.success("탈퇴가 완료되었습니다.", null);
     }

@@ -1,7 +1,7 @@
 package com.teamfp.aistock.domain.user.service;
 import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
-import com.teamfp.aistock.domain.user.dto.request.PasswordVerifyRequest;
+import com.teamfp.aistock.domain.user.dto.request.UserWithdrawalRequest;
 import com.teamfp.aistock.domain.account.service.AccountService;
 import com.teamfp.aistock.domain.account.repository.AccountRepository;
 import com.teamfp.aistock.domain.account.dto.request.CreateAccountRequest;
@@ -33,7 +33,7 @@ class UserWithdrawalIntegrationTest {
         long beforeAccounts = accounts.count();
         accountService.createAccount(user.getUserId(), new CreateAccountRequest("롤백 테스트 계좌"));
         goals.saveAndFlush(GoalPlan.from(user.getUserId(), new GoalPlanRequest("house", 100_000, 5, 0, false)));
-        withdrawal.withdraw(user.getUserId(), new PasswordVerifyRequest("testpass123"));
+        withdrawal.withdraw(user.getUserId(), new UserWithdrawalRequest("testpass123", null));
         entityManager.clear();
         var deactivated = users.findById(user.getUserId()).orElseThrow();
         assertThat(deactivated.isActive()).isFalse();

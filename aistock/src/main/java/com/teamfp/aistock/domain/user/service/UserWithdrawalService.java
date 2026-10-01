@@ -1,6 +1,7 @@
 package com.teamfp.aistock.domain.user.service;
 
 import com.teamfp.aistock.domain.user.dto.request.PasswordVerifyRequest;
+import com.teamfp.aistock.domain.user.dto.request.UserWithdrawalRequest;
 import com.teamfp.aistock.domain.user.entity.*;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.domain.account.repository.AccountRepository;
@@ -29,10 +30,20 @@ public class UserWithdrawalService {
     private final EntityManager entityManager;
 
     @Transactional
-    public void withdraw(Long userId, PasswordVerifyRequest request) {
-        userService.verifyPassword(userId, request);
+    public void withdraw(Long userId, UserWithdrawalRequest request) {
         User user = userRepository.findByUserIdAndIsActiveTrue(userId)
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+        if (user.getLoginId() == null) {
+            if (user.getEmail() == null || request.email() == null || request.email().isBlank()
+                    || !user.getEmail().trim().equalsIgnoreCase(request.email().trim())) {
+                throw new CustomException(ErrorCode.INVALID_INPUT, "계정에 등록된 본인 이메일을 입력해 주세요.");
+            }
+        } else {
+            if (request.password() == null || request.password().isBlank()) {
+                throw new CustomException(ErrorCode.INVALID_INPUT, "비밀번호는 필수 입력 값입니다.");
+            }
+            userService.verifyPassword(userId, new PasswordVerifyRequest(request.password()));
+        }
         if (user.getRole() == Role.ADMIN && userRepository
                 .findAllByRoleAndStatusAndIsActiveTrueForUpdate(Role.ADMIN, UserStatus.ACTIVE).size() <= 1) {
             throw new CustomException(ErrorCode.LAST_ADMIN_SUSPEND_NOT_ALLOWED);
