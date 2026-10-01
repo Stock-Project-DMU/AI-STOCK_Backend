@@ -88,7 +88,7 @@ class MarketQueryServiceTest {
     void getRankings_rise_returnsWholeMarketRising() {
         when(highItemApiClient.getTopPriceChangeRate()).thenReturn(ranking("000001"));
 
-        List<RankingItemDto> result = marketQueryService.getRankings("rise");
+        List<RankingItemDto> result = marketQueryService.getRankings("rise", false);
 
         assertThat(result).extracting(RankingItemDto::getStockCode).containsExactly("000001");
         verify(highItemApiClient, never()).getTopMarketCap();
@@ -99,7 +99,7 @@ class MarketQueryServiceTest {
     void getRankings_fall_returnsWholeMarketFalling() {
         when(highItemApiClient.getTopPriceDeclineRate()).thenReturn(ranking("000002"));
 
-        List<RankingItemDto> result = marketQueryService.getRankings("fall");
+        List<RankingItemDto> result = marketQueryService.getRankings("fall", false);
 
         assertThat(result).extracting(RankingItemDto::getStockCode).containsExactly("000002");
         verify(highItemApiClient, never()).getTopPriceChangeRate();
@@ -110,7 +110,7 @@ class MarketQueryServiceTest {
     void getRankings_change_isRiseAlias() {
         when(highItemApiClient.getTopPriceChangeRate()).thenReturn(ranking("000001"));
 
-        List<RankingItemDto> result = marketQueryService.getRankings("change");
+        List<RankingItemDto> result = marketQueryService.getRankings("change", false);
 
         assertThat(result).extracting(RankingItemDto::getStockCode).containsExactly("000001");
     }
@@ -118,7 +118,38 @@ class MarketQueryServiceTest {
     @Test
     @DisplayName("지원하지 않는 sort 값이면 INVALID_INPUT을 던진다")
     void getRankings_unknownSort_throwsInvalidInput() {
-        assertThatThrownBy(() -> marketQueryService.getRankings("unknown"))
+        assertThatThrownBy(() -> marketQueryService.getRankings("unknown", false))
+                .isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException) e).getErrorCode())
+                .isEqualTo(ErrorCode.INVALID_INPUT);
+    }
+
+    @Test
+    @DisplayName("all=true면 홈 무한 스크롤용으로 건수 제한 없는 순위 메서드를 호출한다")
+    void getRankings_all_requestsUnlimitedRanking() {
+        when(highItemApiClient.getTopMarketCap(Integer.MAX_VALUE)).thenReturn(ranking("000003"));
+
+        List<RankingItemDto> result = marketQueryService.getRankings("market-cap", true);
+
+        assertThat(result).extracting(RankingItemDto::getStockCode).containsExactly("000003");
+        verify(highItemApiClient, never()).getTopMarketCap();
+    }
+
+    @Test
+    @DisplayName("all=false면 기존처럼 상위 10건 순위 메서드를 호출한다")
+    void getRankings_notAll_keepsDefaultRanking() {
+        when(highItemApiClient.getTopVolume()).thenReturn(ranking("000004"));
+
+        List<RankingItemDto> result = marketQueryService.getRankings("volume", false);
+
+        assertThat(result).extracting(RankingItemDto::getStockCode).containsExactly("000004");
+        verify(highItemApiClient, never()).getTopVolume(Integer.MAX_VALUE);
+    }
+
+    @Test
+    @DisplayName("all=true여도 지원하지 않는 sort 값이면 INVALID_INPUT을 던진다")
+    void getRankings_allWithUnknownSort_throwsInvalidInput() {
+        assertThatThrownBy(() -> marketQueryService.getRankings("unknown", true))
                 .isInstanceOf(CustomException.class)
                 .extracting(e -> ((CustomException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_INPUT);
