@@ -27,8 +27,9 @@ public class MarketQueryController {
     @GetMapping("/stocks/{stockCode}/research") public ApiResponse<Object> getResearch(@PathVariable String stockCode, @RequestParam String section) {
         return ApiResponse.success(marketQueryService.getResearch(stockCode, section));
     }
-    @GetMapping("/rankings") public ApiResponse<List<RankingItemDto>> getRankings(@RequestParam(defaultValue = "volume") String sort) {
-        return ApiResponse.success(marketQueryService.getRankings(sort));
+    @GetMapping("/rankings") public ApiResponse<List<RankingItemDto>> getRankings(@RequestParam(defaultValue = "volume") String sort,
+            @RequestParam(name = "all", defaultValue = "false") boolean isAll) {
+        return ApiResponse.success(marketQueryService.getRankings(sort, isAll));
     }
     @GetMapping("/stocks/{stockCode}/history") public ApiResponse<List<HistoricalPriceDto>> getHistory(@PathVariable String stockCode, @RequestParam(defaultValue = "12") int months) {
         return ApiResponse.success(marketQueryService.getHistory(stockCode, months));

@@ -300,5 +300,55 @@ class HighItemApiClientTest {
 
             assertThat(result).hasSize(10);
         }
+
+        @Test
+        @DisplayName("mockLimit을 넘기면 10건 제한 없이 mock 전체 종목을 순위대로 반환한다(홈 무한 스크롤용)")
+        void getTopVolume_withMockLimit_returnsAllItems() {
+            Map<String, CurrentPriceDetailDto> all = new java.util.HashMap<>();
+            for (int i = 1; i <= 15; i++) {
+                all.put("C%d".formatted(i), stock("C%d".formatted(i), "종목%d".formatted(i), 1000, i, 0.0));
+            }
+            when(localMarketDataReader.getAllCurrentPrices()).thenReturn(all);
+
+            List<RankingItemDto> result = mockModeClient.getTopVolume(Integer.MAX_VALUE);
+
+            assertThat(result).hasSize(15);
+            assertThat(result.get(0).getStockCode()).isEqualTo("C15");
+            assertThat(result.get(14).getRank()).isEqualTo(15);
+            verify(accessTokenProvider, never()).issueAccessToken();
+        }
+
+        @Test
+        @DisplayName("상승률상위에 mockLimit을 넘겨도 상승 종목만 반환한다")
+        void getTopPriceChangeRate_withMockLimit_keepsRisingFilter() {
+            Map<String, CurrentPriceDetailDto> all = new java.util.HashMap<>();
+            for (int i = 1; i <= 15; i++) {
+                all.put("C%d".formatted(i), stock("C%d".formatted(i), "종목%d".formatted(i), 1000, 100, i - 3));
+            }
+            when(localMarketDataReader.getAllCurrentPrices()).thenReturn(all);
+
+            List<RankingItemDto> result = mockModeClient.getTopPriceChangeRate(Integer.MAX_VALUE);
+
+            assertThat(result).hasSize(12);
+            assertThat(result).allSatisfy(item -> assertThat(item.getChangeRate()).isPositive());
+        }
+    }
+
+    @Test
+    @DisplayName("real 모드는 mockLimit을 넘겨도 기존처럼 최대 10건만 반환한다")
+    void realMode_ignoresMockLimit() {
+        when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+        StringBuilder rows = new StringBuilder();
+        for (int i = 1; i <= 15; i++) {
+            if (i > 1) rows.append(',');
+            rows.append("{\"hname\":\"종목%d\",\"shcode\":\"%06d\",\"price\":1000,\"change\":0,\"diff\":\"0.00\",\"volume\":%d}".formatted(i, i, i));
+        }
+        mockServer.expect(requestTo(HIGH_ITEM_URL))
+                .andRespond(withSuccess("{\"t1452OutBlock1\":[" + rows + "]}", MediaType.APPLICATION_JSON));
+
+        List<RankingItemDto> result = client.getTopVolume(Integer.MAX_VALUE);
+
+        assertThat(result).hasSize(10);
+        mockServer.verify();
     }
 }
