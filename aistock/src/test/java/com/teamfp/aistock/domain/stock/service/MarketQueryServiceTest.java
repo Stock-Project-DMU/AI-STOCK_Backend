@@ -154,4 +154,27 @@ class MarketQueryServiceTest {
                 .extracting(e -> ((CustomException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_INPUT);
     }
+
+    @Test
+    @DisplayName("차트 조회는 dwmcode·count를 그대로 차트 전용 메서드에 넘기고 AI 상담용 months 경로는 쓰지 않는다")
+    void getChartHistory_passesDwmcodeAndCount() {
+        List<com.teamfp.aistock.infra.marketdata.dto.HistoricalPriceDto> weekly =
+                List.of(com.teamfp.aistock.infra.marketdata.dto.HistoricalPriceDto.builder().date("20261001").build());
+        when(marketDataApiClient.getChartPrices("005930", 2, 52)).thenReturn(weekly);
+
+        assertThat(marketQueryService.getChartHistory("005930", 2, 52)).isSameAs(weekly);
+        verify(marketDataApiClient, never()).getHistoricalPrices(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    @DisplayName("차트 조회의 dwmcode가 1~3 밖이거나 count가 1~60 밖이면 INVALID_INPUT을 던진다")
+    void getChartHistory_invalidInput_throws() {
+        for (int[] invalid : new int[][] {{0, 60}, {4, 60}, {1, 0}, {1, 61}}) {
+            assertThatThrownBy(() -> marketQueryService.getChartHistory("005930", invalid[0], invalid[1]))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.INVALID_INPUT);
+        }
+        verifyNoInteractions(marketDataApiClient);
+    }
 }

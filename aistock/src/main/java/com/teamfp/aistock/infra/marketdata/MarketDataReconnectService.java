@@ -53,7 +53,7 @@ public class MarketDataReconnectService {
             currentDelayMs = INITIAL_DELAY_MS;
             log.info("외부 시세 데이터 WebSocket 재연결 성공");
         } catch (MarketDataAuthenticationException e) {
-            log.error("외부 시세 데이터 WebSocket 재연결 실패 - 인증 실패로 의심됨 (MARKET_DATA_APP_KEY/MARKET_DATA_APP_SECRET 확인 필요): {}",
+            log.error("외부 시세 데이터 WebSocket 연결 실패 - 인증 실패로 의심됨 (LS_APP_KEY/LS_APP_SECRET 또는 MARKET_DATA_APP_KEY/MARKET_DATA_APP_SECRET 확인 필요): {}",
                     e.getMessage());
             rescheduleNextAttempt();
         } catch (Exception e) {
