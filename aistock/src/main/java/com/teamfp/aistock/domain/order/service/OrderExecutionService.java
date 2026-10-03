@@ -47,8 +47,6 @@ public class OrderExecutionService {
     private final HoldingRepository holdingRepository;
     private final RedisPendingOrderService redisPendingOrderService;
     private final HoldingSettlementService holdingSettlementService;
-    // 주문이 대기 리스트에서 빠질 때 미체결 주문 종목 구독(주문 접수 시 +1)을 함께 줄인다.
-    private final StockSubscriptionManager stockSubscriptionManager;
     // 지정가 주문 체결 시 알림 발송 — 도메인 간 직접 참조 대신 서비스 계층을 통해 호출한다.
     private final NotificationService notificationService;
     // 잔고 변동 원장 기록(ADMIN_API_BACKEND_HANDOFF.md 4.3).
@@ -63,6 +61,13 @@ public class OrderExecutionService {
     @Autowired
     @Lazy
     private OrderExecutionService self;
+
+    // 주문이 대기 리스트에서 빠질 때 미체결 주문 종목 구독(주문 접수 시 +1)을 함께 줄인다.
+    // StockSubscriptionManager → MarketDataWebSocketClient → MarketDataWebSocketHandler
+    // → StockBroadcastService → OrderExecutionService로 순환 참조가 생기므로 @Lazy 프록시로 주입한다.
+    @Autowired
+    @Lazy
+    private StockSubscriptionManager stockSubscriptionManager;
 
     /**
      * 특정 종목의 체결 tick을 받을 때마다 호출된다. Redis pending:orders:{stockCode}에 쌓인
