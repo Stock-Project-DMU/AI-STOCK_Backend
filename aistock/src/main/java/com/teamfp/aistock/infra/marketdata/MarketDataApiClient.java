@@ -58,6 +58,8 @@ public class MarketDataApiClient extends MarketDataApiClientSupport {
 
     private static final String CURRENT_PRICE_TR_CD = "t1102";
     private static final String OUT_BLOCK_KEY = "t1102OutBlock";
+    // t8407 한 번에 조회할 수 있는 최대 종목 수(제공사 스펙 nrec 최대 50).
+    private static final int MAX_MULTI_STOCK_CODES = 50;
 
     private final MarketDataAccessTokenProvider accessTokenProvider;
     private final Optional<LocalMarketDataReader> localMarketDataReader;
@@ -424,10 +426,33 @@ public class MarketDataApiClient extends MarketDataApiClientSupport {
             return List.of();
         }
         List<String> limited = stockCodes.size() > 5 ? stockCodes.subList(0, 5) : stockCodes;
+        return requestMultiStockPrices(limited);
+    }
+
+    /**
+     * t8407을 한 번에 최대 {@value #MAX_MULTI_STOCK_CODES}종목씩 나눠 호출해 전체 종목의 현재가를 합쳐 반환한다.
+     * {@link #getMultiStockPrices}(AI 상담 도구용, 최대 5종목)와 달리 등록 종목 전체(2026-10-02 기준 105개 →
+     * 3회 호출)를 대상으로 순위를 매기는 {@code HighItemApiClient}의 real 모드 전체 순위 전용이다.
+     * 응답에 없는 종목은 결과에서 빠진다(빈 목록은 "정상 응답이지만 데이터 없음"). real 모드 전용 —
+     * mock 모드에서는 호출부가 {@code LocalMarketDataReader}를 쓰므로 이 메서드를 부르지 않는다.
+     */
+    public List<MultiStockPriceDto> getMultiStockPricesInBatches(List<String> stockCodes) {
+        if (stockCodes == null || stockCodes.isEmpty()) {
+            return List.of();
+        }
+        List<MultiStockPriceDto> prices = new java.util.ArrayList<>();
+        for (int from = 0; from < stockCodes.size(); from += MAX_MULTI_STOCK_CODES) {
+            int to = Math.min(from + MAX_MULTI_STOCK_CODES, stockCodes.size());
+            prices.addAll(requestMultiStockPrices(stockCodes.subList(from, to)));
+        }
+        return prices;
+    }
+
+    private List<MultiStockPriceDto> requestMultiStockPrices(List<String> stockCodes) {
         String token = accessTokenProvider.issueAccessToken();
-        String concatenatedCodes = String.join("", limited);
+        String concatenatedCodes = String.join("", stockCodes);
         Map<String, Object> requestBody = Map.of("t8407InBlock",
-                Map.of("nrec", limited.size(), "shcode", concatenatedCodes));
+                Map.of("nrec", stockCodes.size(), "shcode", concatenatedCodes));
 
         Map<String, Object> response = call(marketDataUrl, "t8407", requestBody, token, "외부 시세 데이터 멀티종목현재가 조회 실패");
 
@@ -444,6 +469,7 @@ public class MarketDataApiClient extends MarketDataApiClientSupport {
                         .changeAmount(signedLong(row.get("change"), row.get("sign")))
                         .changeRate(parseDoubleOrZero(row.get("diff")))
                         .volume(parseLong(row.get("volume")))
+                        .tradingValue(parseLong(row.get("value")))
                         .build())
                 .toList();
     }

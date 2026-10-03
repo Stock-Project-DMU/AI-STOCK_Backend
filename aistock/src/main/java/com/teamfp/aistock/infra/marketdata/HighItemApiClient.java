@@ -10,7 +10,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
+import com.teamfp.aistock.infra.marketdata.dto.MultiStockPriceDto;
 import com.teamfp.aistock.infra.marketdata.dto.RankingItemDto;
+import com.teamfp.aistock.infra.marketdata.dto.RegisteredStockDto;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -38,12 +40,22 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
 
     private static final int MAX_RANKING_ITEMS = 10;
 
+    /**
+     * 순위 5종의 {@code (int limit)} 오버로드에 넘기면 "등록 종목 전체"를 뜻한다 — 홈 주요 종목 무한 스크롤과
+     * 시뮬레이션 리밸런싱 후보({@code MarketQueryService.getRankings(sort, true)})가 쓴다.
+     */
+    public static final int ALL_REGISTERED_STOCKS = Integer.MAX_VALUE;
+
     private final MarketDataAccessTokenProvider accessTokenProvider;
     // market-data.mode=mock일 때만 존재. getTopPriceChangeRate/getTopPriceDeclineRate/getTopMarketCap/
     // getTopVolume/getTopTradingValue 5개(=MarketQueryService.getRankings()가 실제로 노출하는 종류)만
     // mock 분기를 탄다 — 나머지 3개(급증/시간외 2종)는 AI 상담 도구 전용이라 이번 mock 지원
     // 범위 밖이다(순위 mock 지원 추가, 2026-09-21).
     private final Optional<LocalMarketDataReader> localMarketDataReader;
+    // real 모드에서 limit이 MAX_RANKING_ITEMS를 넘을 때(=등록 종목 전체 요청) 순위 TR 대신 쓰는 경로 —
+    // 등록 종목 목록(RegisteredStockReader)의 종목코드로 t8407 현재가를 받아 직접 정렬한다(2026-10-02).
+    private final RegisteredStockReader registeredStockReader;
+    private final MarketDataApiClient marketDataApiClient;
 
     @Value("${market-data.high-item-url}")
     private String highItemUrl;
@@ -51,10 +63,14 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
     public HighItemApiClient(
             MarketDataAccessTokenProvider accessTokenProvider,
             Optional<LocalMarketDataReader> localMarketDataReader,
+            RegisteredStockReader registeredStockReader,
+            MarketDataApiClient marketDataApiClient,
             @org.springframework.beans.factory.annotation.Qualifier("marketDataRestClientBuilder") RestClient.Builder restClientBuilder) {
         super(restClientBuilder);
         this.accessTokenProvider = accessTokenProvider;
         this.localMarketDataReader = localMarketDataReader;
+        this.registeredStockReader = registeredStockReader;
+        this.marketDataApiClient = marketDataApiClient;
     }
 
     /** 등락율상위(t1441) — 코스피+코스닥 전체 시장의 당일 상승률 상위 종목. */
@@ -63,12 +79,17 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
     }
 
     /**
-     * mockLimit은 mock 모드에서만 반환 건수를 정한다 — 홈 주요 종목이 stocks.json 전체를 받아
-     * 화면에서 무한 스크롤로 보여주기 위함이다. real 모드는 기존과 같이 최대 {@value #MAX_RANKING_ITEMS}건이다.
-     * 아래 4개 순위 메서드의 (int mockLimit) 오버로드도 같은 규칙이다.
+     * limit은 반환 건수 상한이다. 아래 4개 순위 메서드의 {@code (int limit)} 오버로드도 같은 규칙이다.
+     * <ul>
+     *   <li>mock 모드: 등록 종목(market_data.json) 범위에서 정렬해 상위 limit개.</li>
+     *   <li>real 모드, limit ≤ {@value #MAX_RANKING_ITEMS}: 기존 순위 TR(시장 전체 기준) 상위 limit개.</li>
+     *   <li>real 모드, limit &gt; {@value #MAX_RANKING_ITEMS}(예: {@link #ALL_REGISTERED_STOCKS}): 순위 TR은 최대
+     *       {@value #MAX_RANKING_ITEMS}건만 주므로, 등록 종목 전체의 t8407 현재가를 받아 mock과 같은 기준으로
+     *       정렬한다 — 홈 주요 종목 무한 스크롤이 real(배포) 환경에서도 mock과 같은 105개를 받게 하기 위함(2026-10-02).</li>
+     * </ul>
      */
-    public List<RankingItemDto> getTopPriceChangeRate(int mockLimit) {
-        return priceChangeRateRanking(true, mockLimit);
+    public List<RankingItemDto> getTopPriceChangeRate(int limit) {
+        return priceChangeRateRanking(true, limit);
     }
 
     /** 등락율상위(t1441) — 코스피+코스닥 전체 시장의 당일 하락률 상위 종목. */
@@ -76,22 +97,28 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
         return getTopPriceDeclineRate(MAX_RANKING_ITEMS);
     }
 
-    public List<RankingItemDto> getTopPriceDeclineRate(int mockLimit) {
-        return priceChangeRateRanking(false, mockLimit);
+    public List<RankingItemDto> getTopPriceDeclineRate(int limit) {
+        return priceChangeRateRanking(false, limit);
     }
 
     /**
      * t1441 InBlock: gubun1(0:전체/1:코스피/2:코스닥), gubun2(0:상승률/1:하락률/2:보합),
      * gubun3(0:당일/1:전일). 이전에는 "1","2","1"(코스피만·보합·전일)로 호출하고 있어 상승 순위가
      * 아니었다 — 전체 시장(0)·당일(0) 기준으로 고정하고 상승/하락만 gubun2로 나눈다(#13, 2026-09-30).
-     * mock 모드도 같은 의미로 맞춰 상승 순위엔 상승 종목만, 하락 순위엔 하락 종목만 담는다.
+     * mock 모드·등록 종목 전체 순위도 같은 의미로 맞춰 상승 순위엔 상승 종목만, 하락 순위엔 하락 종목만 담는다.
      */
-    private List<RankingItemDto> priceChangeRateRanking(boolean rising, int mockLimit) {
+    private List<RankingItemDto> priceChangeRateRanking(boolean rising, int limit) {
         if (localMarketDataReader.isPresent()) {
             Comparator<CurrentPriceDetailDto> byChangeRate = Comparator.comparingDouble(CurrentPriceDetailDto::getChangeRate);
             return mockRanking(
                     dto -> rising ? dto.getChangeRate() > 0 : dto.getChangeRate() < 0,
-                    rising ? byChangeRate.reversed() : byChangeRate, null, mockLimit);
+                    rising ? byChangeRate.reversed() : byChangeRate, null, limit);
+        }
+        if (limit > MAX_RANKING_ITEMS) {
+            Comparator<MultiStockPriceDto> byChangeRate = Comparator.comparingDouble(dto -> orZero(dto.getChangeRate()));
+            return registeredStockRanking(
+                    dto -> rising ? orZero(dto.getChangeRate()) > 0 : orZero(dto.getChangeRate()) < 0,
+                    rising ? byChangeRate.reversed() : byChangeRate, null, limit);
         }
         Map<String, Object> inBlock = Map.of(
                 "gubun1", "0", "gubun2", rising ? "0" : "1", "gubun3", "0",
@@ -103,7 +130,7 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
                 .changeAmount(signedLong(row.get("change"), row.get("sign")))
                 .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
-                );
+                , limit);
     }
 
     /** 시가총액상위(t1444) — 코스피+코스닥 전체(upcode="001") 시가총액 상위. */
@@ -111,14 +138,27 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
         return getTopMarketCap(MAX_RANKING_ITEMS);
     }
 
-    public List<RankingItemDto> getTopMarketCap(int mockLimit) {
+    public List<RankingItemDto> getTopMarketCap(int limit) {
         if (localMarketDataReader.isPresent()) {
             Map<String, CurrentPriceDetailDto> all = localMarketDataReader.get().getAllCurrentPrices();
             long totalMarketCap = all.values().stream().mapToLong(this::marketCap).sum();
             return mockRanking(Comparator.comparingLong(this::marketCap).reversed(),
-                    dto -> totalMarketCap <= 0 ? "시가총액 비중 0.00%"
-                            : "시가총액 비중 %.2f%%".formatted(marketCap(dto) * 100.0 / totalMarketCap),
-                    mockLimit);
+                    dto -> marketCapShareInfo(marketCap(dto), totalMarketCap),
+                    limit);
+        }
+        if (limit > MAX_RANKING_ITEMS) {
+            // t8407에는 시가총액·상장주식수가 없어 등록 종목 목록의 상장주식수 스냅샷 × 실시간 현재가로 계산한다.
+            Map<String, Long> listingSharesByCode = registeredStockReader.getRegisteredStocks().stream()
+                    .filter(stock -> stock.listingShares() != null)
+                    .collect(java.util.stream.Collectors.toMap(
+                            RegisteredStockDto::stockCode, RegisteredStockDto::listingShares, (first, second) -> first));
+            java.util.function.ToLongFunction<MultiStockPriceDto> marketCapOf =
+                    dto -> orZero(dto.getPrice()) * listingSharesByCode.getOrDefault(dto.getStockCode(), 0L) * 1000;
+            return registeredStockRanking(dto -> true, Comparator.comparingLong(marketCapOf).reversed(),
+                    prices -> {
+                        long totalMarketCap = prices.stream().mapToLong(marketCapOf).sum();
+                        return dto -> marketCapShareInfo(marketCapOf.applyAsLong(dto), totalMarketCap);
+                    }, limit);
         }
         Map<String, Object> inBlock = Map.of("upcode", "001", "idx", 0);
         return callAndParse("t1444", "t1444OutBlock1", inBlock, row -> RankingItemDto.builder()
@@ -129,7 +169,7 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
                 .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
                 .extraInfo("시가총액 비중 %s%%".formatted(stringOf(row.get("rate"))))
-                );
+                , limit);
     }
 
     /** 거래량상위(t1452) — 오늘(jnilgubun="1") 누적 거래량 상위. */
@@ -137,9 +177,13 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
         return getTopVolume(MAX_RANKING_ITEMS);
     }
 
-    public List<RankingItemDto> getTopVolume(int mockLimit) {
+    public List<RankingItemDto> getTopVolume(int limit) {
         if (localMarketDataReader.isPresent()) {
-            return mockRanking(Comparator.comparingLong(CurrentPriceDetailDto::getVolume).reversed(), null, mockLimit);
+            return mockRanking(Comparator.comparingLong(CurrentPriceDetailDto::getVolume).reversed(), null, limit);
+        }
+        if (limit > MAX_RANKING_ITEMS) {
+            return registeredStockRanking(dto -> true,
+                    Comparator.comparingLong((MultiStockPriceDto dto) -> orZero(dto.getVolume())).reversed(), null, limit);
         }
         Map<String, Object> inBlock = Map.of(
                 "gubun", "1", "jnilgubun", "1", "sdiff", 0, "ediff", 0,
@@ -151,7 +195,7 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
                 .changeAmount(signedLong(row.get("change"), row.get("sign")))
                 .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
-                );
+                , limit);
     }
 
     /** 거래대금상위(t1463) — 오늘(jnilgubun="1") 누적 거래대금 상위. */
@@ -159,10 +203,16 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
         return getTopTradingValue(MAX_RANKING_ITEMS);
     }
 
-    public List<RankingItemDto> getTopTradingValue(int mockLimit) {
+    public List<RankingItemDto> getTopTradingValue(int limit) {
         if (localMarketDataReader.isPresent()) {
             return mockRanking(Comparator.comparingLong(this::tradingValue).reversed(),
-                    dto -> "거래대금 약 %d백만원".formatted(tradingValue(dto) / 1_000_000), mockLimit);
+                    dto -> "거래대금 약 %d백만원".formatted(tradingValue(dto) / 1_000_000), limit);
+        }
+        if (limit > MAX_RANKING_ITEMS) {
+            // t8407 value는 이미 백만원 단위의 실제 누적 거래대금이다(mock의 현재가×거래량 근사치와 다름).
+            return registeredStockRanking(dto -> true,
+                    Comparator.comparingLong((MultiStockPriceDto dto) -> orZero(dto.getTradingValue())).reversed(),
+                    prices -> dto -> "거래대금 %d백만원".formatted(orZero(dto.getTradingValue())), limit);
         }
         Map<String, Object> inBlock = Map.of(
                 "gubun", "1", "jnilgubun", "1", "jc_num", 0, "sprice", 0, "eprice", 0,
@@ -175,13 +225,13 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
                 .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
                 .extraInfo("거래대금 %s백만원".formatted(stringOf(row.get("value"))))
-                );
+                , limit);
     }
 
     /**
      * market-data.mode=mock 전용 순위 산출 — LocalMarketDataReader가 제공하는 종목 전체
      * 스냅샷(getAllCurrentPrices(), local-market-data-generator가 t1102로 수집한 실제 값)을
-     * comparator로 정렬해 상위 mockLimit개(기본 {@value #MAX_RANKING_ITEMS}개)만 뽑는다. real 모드의 각 TR과
+     * comparator로 정렬해 상위 limit개만 뽑는다. real 모드의 각 TR과
      * 달리 mock 데이터는 시장 전체가 아니라 stocks.json에 등록된 종목(2026-09-21 기준 105개)
      * 범위 안에서만 순위를 매긴다는 한계가 있다 — 로컬 개발용 근사치임을 extraInfoFn이 없는
      * 경우 별도로 표기하지 않는다(순위 mock 지원 추가, 2026-09-21).
@@ -189,20 +239,20 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
     private List<RankingItemDto> mockRanking(
             Comparator<CurrentPriceDetailDto> comparator,
             java.util.function.Function<CurrentPriceDetailDto, String> extraInfoFn,
-            int mockLimit) {
-        return mockRanking(dto -> true, comparator, extraInfoFn, mockLimit);
+            int limit) {
+        return mockRanking(dto -> true, comparator, extraInfoFn, limit);
     }
 
     private List<RankingItemDto> mockRanking(
             java.util.function.Predicate<CurrentPriceDetailDto> filter,
             Comparator<CurrentPriceDetailDto> comparator,
             java.util.function.Function<CurrentPriceDetailDto, String> extraInfoFn,
-            int mockLimit) {
+            int limit) {
         Map<String, CurrentPriceDetailDto> all = localMarketDataReader.get().getAllCurrentPrices();
         List<RankingItemDto> items = new java.util.ArrayList<>();
         int rank = 1;
         for (CurrentPriceDetailDto dto : all.values().stream().filter(filter).sorted(comparator).toList()) {
-            if (rank > mockLimit) {
+            if (rank > limit) {
                 break;
             }
             items.add(RankingItemDto.builder()
@@ -217,6 +267,62 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
                     .build());
         }
         return items;
+    }
+
+    /**
+     * real 모드 등록 종목 전체 순위 — 순위 TR은 시장 전체 상위 {@value #MAX_RANKING_ITEMS}건만 주므로,
+     * 등록 종목 목록(RegisteredStockReader)의 종목코드 전부를 t8407(50종목씩)로 조회해 mock과 같은
+     * 기준으로 정렬한다. mock과 마찬가지로 시장 전체가 아니라 등록 종목 범위 안의 순위다.
+     * extraInfoFactory는 조회된 전체 시세를 보고(예: 시가총액 비중의 분모) 종목별 부가 정보 함수를 만든다.
+     * 등록 종목 목록을 읽지 못했으면 t8407을 호출하지 않고 빈 목록을 반환한다.
+     */
+    private List<RankingItemDto> registeredStockRanking(
+            java.util.function.Predicate<MultiStockPriceDto> filter,
+            Comparator<MultiStockPriceDto> comparator,
+            java.util.function.Function<List<MultiStockPriceDto>, java.util.function.Function<MultiStockPriceDto, String>> extraInfoFactory,
+            int limit) {
+        List<String> stockCodes = registeredStockReader.getRegisteredStocks().stream()
+                .map(RegisteredStockDto::stockCode)
+                .toList();
+        if (stockCodes.isEmpty()) {
+            return List.of();
+        }
+        List<MultiStockPriceDto> prices = marketDataApiClient.getMultiStockPricesInBatches(stockCodes).stream()
+                .filter(dto -> dto.getPrice() != null && dto.getPrice() > 0)
+                .toList();
+        java.util.function.Function<MultiStockPriceDto, String> extraInfoFn =
+                extraInfoFactory != null ? extraInfoFactory.apply(prices) : null;
+        List<RankingItemDto> items = new java.util.ArrayList<>();
+        int rank = 1;
+        for (MultiStockPriceDto dto : prices.stream().filter(filter).sorted(comparator).toList()) {
+            if (rank > limit) {
+                break;
+            }
+            items.add(RankingItemDto.builder()
+                    .rank(rank++)
+                    .stockCode(dto.getStockCode())
+                    .stockName(dto.getStockName())
+                    .price(dto.getPrice())
+                    .changeAmount(dto.getChangeAmount())
+                    .changeRate(dto.getChangeRate())
+                    .volume(dto.getVolume())
+                    .extraInfo(extraInfoFn != null ? extraInfoFn.apply(dto) : null)
+                    .build());
+        }
+        return items;
+    }
+
+    private static String marketCapShareInfo(long marketCap, long totalMarketCap) {
+        return totalMarketCap <= 0 ? "시가총액 비중 0.00%"
+                : "시가총액 비중 %.2f%%".formatted(marketCap * 100.0 / totalMarketCap);
+    }
+
+    private static long orZero(Long value) {
+        return value != null ? value : 0L;
+    }
+
+    private static double orZero(Double value) {
+        return value != null ? value : 0.0;
     }
 
     /** 시가총액(원) = 현재가 × 상장주식수(천주 단위라 1000을 곱함). listingShares 없으면 0. */
@@ -243,7 +349,7 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
                 .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
                 .extraInfo("전일 동시각 대비 거래량 %s%% 증가".formatted(stringOf(row.get("voldiff"))))
-                );
+                , MAX_RANKING_ITEMS);
     }
 
     /**
@@ -259,7 +365,7 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
                 .changeAmount(signedLong(row.get("change"), row.get("sign")))
                 .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
-                );
+                , MAX_RANKING_ITEMS);
     }
 
     /**
@@ -275,13 +381,14 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
                 .changeAmount(signedLong(row.get("change"), row.get("sign")))
                 .changeRate(parseDoubleOrZero(row.get("diff")))
                 .volume(parseLong(row.get("volume")))
-                );
+                , MAX_RANKING_ITEMS);
     }
 
     @SuppressWarnings("unchecked")
     private List<RankingItemDto> callAndParse(
             String trCd, String outBlockKey, Map<String, Object> inBlock,
-            java.util.function.Function<Map<String, Object>, RankingItemDto.RankingItemDtoBuilder> rowMapper) {
+            java.util.function.Function<Map<String, Object>, RankingItemDto.RankingItemDtoBuilder> rowMapper,
+            int limit) {
         String token = accessTokenProvider.issueAccessToken();
         Map<String, Object> requestBody = Map.of(trCd + "InBlock", inBlock);
 
@@ -301,7 +408,8 @@ public class HighItemApiClient extends MarketDataApiClientSupport {
         int rank = 1;
         for (Map<String, Object> row : outBlock) {
             items.add(rowMapper.apply(row).rank(rank++).build());
-            if (items.size() >= MAX_RANKING_ITEMS) {
+            // 순위 TR 경로는 limit과 무관하게 최대 MAX_RANKING_ITEMS건(그 이상은 registeredStockRanking 경로).
+            if (items.size() >= Math.min(limit, MAX_RANKING_ITEMS)) {
                 break;
             }
         }
