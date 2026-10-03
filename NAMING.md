@@ -52,7 +52,7 @@
 | `Watchlist` | `watchlistId`, `user`, `stockCode`, `stockName`, `addedAt` |
 | `AiPlanningSession` | `sessionId`, `user`, `title`, `status`, `createdAt`, `updatedAt` |
 | `AiPlanningMessage` | `messageId`, `session`, `role`, `content`, `promptTokens`, `createdAt` |
-| `Simulation` | `simulationId`, `user`, `stockCode`, `stockName`, `targetAmount`, `investmentAmount`, `targetMonths`, `scenarioData`, `bestReachDate`, `baseReachDate`, `worstReachDate`, `dartData`, `newsData`, `createdAt` |
+| `Simulation` | `simulationId`, `user`, `goalText`, `targetAmount`, `periodMonths`, `startAmount`, `monthlyContribution`, `currentReachDate`, `rebalancedReachDate`, `projectionData`, `rebalanceReason`, `timeReductionExplanation`, `dartData`, `newsData`, `createdAt` (feature/goal-simulation-v2, 2026-10-01 구조 변경 — 8-11 참고) |
 | `RecentViewed` | `viewId`, `user`, `stockCode`, `stockName`, `viewedAt` |
 | `Notification` | `notiId`, `user`, `type`, `title`, `content`, `isRead`, `createdAt` |
 | `Inquiry` | `inquiryId`, `user`, `title`, `content`, `status`, `answer`, `answeredBy`, `answeredAt`, `createdAt`, `updatedAt` |
@@ -93,7 +93,7 @@
   (취소 시 `frozenBalance`→`balance` 복원), `Account.settleFrozenOrder(long frozenAmount, long actualAmount)`
   (체결 시 동결 해제 + 지정가와 실제 체결가 차액을 `balance`로 환급).
 - **가상캐시 충전 메서드 (feature/mypage-account 추가)**: `Account.chargeBalance(long chargeAmount)` —
-  유저 1명이 계좌를 최대 3개(성향별로 나눠 투자)까지 만들 수 있고, 계좌마다 초기 1000만원
+  유저 1명이 계좌를 1개(2026-10-01부터, 원래 최대 3개) 만들 수 있고, 계좌마다 초기 1000만원
   외에 최대 3회까지 고정 1000만원씩 추가 충전이 가능하다(금액 고정, 시점은 유저 자유 — 가입
   직후 3번 연속 써도 무방). `balance`에 `chargeAmount`를 더하고(덮어쓰기 아님) `chargeCount`를
   1 증가시키며, `baseBalance`도 같은 금액만큼 함께 올린다 — 그렇지 않으면 충전으로 늘어난
@@ -170,6 +170,12 @@
 | `OPTIMISTIC_LOCK_CONFLICT` | 409 |
 | `AI_SESSION_NOT_FOUND` | 404 (feature/ai-planning 추가 — 본인 소유가 아니거나 존재하지 않는 AI 상담 세션 조회/메시지 전송 시) |
 | `GEMINI_RATE_LIMIT_EXCEEDED` | 429 |
+| `GOAL_TEXT_PARSE_FAILED` | 400 (feature/goal-simulation-v2 추가 — Gemini가 목표 문장에서 목표 금액을 추출하지 못함. 재입력 안내는 입력 예시가 들어간 고정 문구) |
+| `GOAL_PERIOD_OUT_OF_RANGE` | 400 (feature/goal-simulation-v2 추가 — 추출한 목표 기한이 1~360개월 밖) |
+| `INVESTMENT_PROFILE_REQUIRED` | 403 (feature/goal-simulation-v2 추가 — 투자성향 설문 미완료 상태로 시뮬레이션 실행. 프론트는 설문 화면으로 안내) |
+| `SIMULATION_EXPIRED` | 404 (feature/goal-simulation-v2 추가 — Redis 임시 보관(30분)이 지난 결과를 저장하려 함) |
+| `SIMULATION_ALREADY_SAVED` | 409 (feature/goal-simulation-v2, 2026-10-03 추가 — 이미 저장한 결과를 다시 저장하려 함. 이전에는 `SIMULATION_EXPIRED`와 같은 응답이라 "보관 시간이 지났다"는 잘못된 안내가 나갔음) |
+| `REBALANCE_SUGGESTION_INVALID` | 502 (feature/goal-simulation-v2 추가 — Gemini 리밸런싱 추천이 재요청까지 `RebalancePlanValidator` 규칙을 어김) |
 | `REDIS_SERIALIZATION_ERROR` | 500 |
 | `EXTERNAL_API_ERROR` | 502 |
 | `INTERNAL_SERVER_ERROR` | 500 |
@@ -180,7 +186,7 @@
 | `STOCK_PRICE_NOT_AVAILABLE` | 503 (order-market 추가 — 종목은 존재하지만 `stock:price:{stockCode}` Redis 캐시가 TTL 만료 등으로 비어 있어 현재가 주문을 체결할 수 없는 경우. `STOCK_NOT_FOUND`(종목 자체가 없음)와 혼동하지 않도록 분리) |
 | `MARKET_DATA_UNAVAILABLE` | 503 (외부 장애와 빈 목록 구분 처리, #05, 2026-09-24 추가 — 외부 시세 데이터 제공사 REST 호출(토큰 발급 포함)이 네트워크 오류·HTTP 오류로 실패한 경우. `infra/marketdata`의 REST 클라이언트는 이 예외를 던지고, 빈 목록/`Optional.empty()`는 "제공사가 정상 응답했지만 데이터가 없음"만 뜻한다. `EXTERNAL_API_ERROR`(Gemini/DART/네이버 등 다른 외부 API)와 구분) |
 | `ORDER_ALREADY_PROCESSED` | 409 (order-limit 추가 — 이미 `EXECUTED`/`CANCELLED` 상태인 주문을 다시 취소(`DELETE /api/orders/{orderId}`)하려는 경우) |
-| `ACCOUNT_LIMIT_EXCEEDED` | 400 (mypage-account 추가 — 유저가 이미 계좌 3개를 보유한 상태에서 추가 개설을 시도하는 경우) |
+| `ACCOUNT_LIMIT_EXCEEDED` | 400 (2026-10-01부터 유저당 계좌 1개 — 메시지 "계좌는 1개만 만들 수 있습니다.". 원래 설명: mypage-account 추가 — 유저가 이미 계좌 3개를 보유한 상태에서 추가 개설을 시도하는 경우) |
 | `CHARGE_LIMIT_EXCEEDED` | 400 (mypage-account 추가 — 계좌의 `chargeCount`가 이미 3회에 도달한 상태에서 추가 충전을 시도하는 경우. 문의(inquiries) 기능으로 관리자에게 요청하도록 안내) |
 | `SELF_STATUS_CHANGE_NOT_ALLOWED` | 400 (feature/admin-user 코드리뷰 추가 — 관리자가 `PATCH /api/admin/users/{userId}/status`로 본인 계정을 SUSPENDED로 정지시키려는 경우) |
 | `LAST_ADMIN_SUSPEND_NOT_ALLOWED` | 400 (feature/admin-user 코드리뷰 추가 — 활성 상태인 ADMIN이 본인 하나만 남은 상태에서 그 ADMIN을 정지시키려는 경우. 관리자 전원이 `/api/admin/**`에서 잠기는 lockout을 막기 위함) |
@@ -342,6 +348,7 @@ redis-logic.md(수정본) 기준 확정된 이름 그대로 사용:
 | `RedisPendingOrderService` | `initPendingOrders`, `addPendingOrder`, `getPendingOrders`, `removePendingOrder`(fix/realtime-trade-fix부터 실제 제거 여부를 `boolean`으로 반환), `countPendingOrdersByStockCode`(종목코드→대기 건수, SCAN 사용 — `StockSubscriptionManager.restoreOrderSubscriptions()` 전용) |
 | `RedisRateLimiterService` | `isAllowed`, `increment`, `getRemainingDaily` — 2026-09-21부터 `SimulationService`만 사용(분당3/일일10). `AiPlanningService`(AI 재무설계사)는 사용자 요청으로 이 서비스 의존성 자체를 제거함(생성자 파라미터에서도 빠짐) |
 | `RedisOnlineStatusService` (v8 추가) | `clearOnlineStatus()`(서버 재시작 시 `@PostConstruct` 초기화, v9), `addOnline(Long userId)`, `removeOnline(Long userId)`, `countOnline()`, `isOnline(Long userId)` |
+| `RedisPendingSimulationService` (feature/goal-simulation-v2 추가, 2026-10-01) | `savePending(Long userId, String pendingSimulationId, String resultJson)`, `claimPending(Long userId, String pendingSimulationId)`(GET 후 같은 키를 `SAVED_MARKER`로 바꾸는 Lua 스크립트로 원자 처리, 남은 TTL 유지 — 같은 결과의 중복 저장을 막고, 두 번째 요청은 `SAVED_MARKER`를 받아 `SIMULATION_ALREADY_SAVED`로 구분. 로컬 Redis가 6.0 미만이라 GETDEL·SET KEEPTTL 미사용, 2026-10-03 `takePending`에서 변경), 상수 `SAVED_MARKER`(`"__SAVED__"`). 저장 트랜잭션이 롤백되면 `SimulationService`가 `savePending`으로 원래 결과를 되돌린다 — 키 `simulation:pending:{userId}:{pendingSimulationId}`(TTL 30분), 저장 버튼을 누르기 전 시뮬레이션 실행 결과 임시 보관. 8-11 참고 |
 | `RedisAiToolCacheService` (feature/ai-planning 추가) | `getCachedResult(Long sessionId, String toolKey)`, `cacheResult(Long sessionId, String toolKey, String result)` — 키 `ai:tool:{sessionId}:{toolKey}`(TTL 30분), AI 상담 세션 내 DART/외부 시세 데이터/네이버 도구 실행 결과 캐시(같은 조건 재조회 시 재사용). 8-9 참고 |
 
 > **`admin:online:users`를 Set → Hash로 변경 (v9, feature/admin-dashboard 코드리뷰 반영)**:
@@ -558,6 +565,9 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 | Request DTO | `CreateAccountRequest`(accountName), `WatchlistRequest`(stockCode), `RecentViewedRequest`(stockCode) |
 | Response DTO | `AccountInfoResponse`(accountId, accountName, accountNumber, balance, frozenBalance, baseBalance, chargeCount, `status`), `WatchlistResponse`(stockCode, stockName, addedAt), `RecentViewedResponse`(stockCode, stockName, viewedAt) |
 
+> **2026-10-01 변경(feature/goal-simulation-v2)**: 유저당 계좌는 1개(`AccountService.MAX_ACCOUNT_COUNT = 1`,
+> `accounts.uq_account_user`, `Account`의 `@UniqueConstraint(name = "uq_account_user")`). 아래는 최대 3개였던 시절의 설명이다.
+>
 > 유저 1명당 계좌 최대 3개(성향별로 나눠 투자 가능 — 예: "계좌 A"는 안정적으로, "계좌 B"는
 > 공격적으로), 계좌당 가상캐시 충전 최대 3회(1회당 고정 1000만원, 시점은 유저 자유 — 가입
 > 직후 연속으로 3번 다 써도 무방)라는 제약이 있다. `createAccount()`는 `accountRepository.
@@ -795,16 +805,18 @@ confirmedCurrentPrices`(`executeTool()`이 `aiToolTaskExecutor`로 동시 실행
 | 클라이언트 | 엔드포인트(`ls.*-url`) | 공개 메서드 → TR코드 |
 |---|---|---|
 | `MarketDataAccessTokenProvider` | `${market-data.token-url}` | `issueAccessToken()` — 아래 10개 클라이언트가 전부 공유하는 토큰 발급 전용 컴포넌트(WebSocket 쪽 `MarketDataWebSocketClient`는 이걸 안 쓰고 자체 토큰 발급 로직을 유지) |
-| `MarketDataApiClient` | `market-data-url` | `getCurrentPrice(String stockCode)`→t1102(`market-data.mode=mock`이면 `LocalMarketDataReader`로 대체, feature/ls-local-data 2026-08-30 추가 — 나머지 메서드 및 다른 9개 클라이언트는 그대로 항상 실제 외부 시세 데이터 API 호출), `getRiskFlags(String stockCode)`→t1404+t1405, `getPivotLevels(String stockCode)`→t1105, `getRecentHistoricalPrices(String stockCode)`/`getHistoricalPrices(String stockCode, Integer periodMonths)`→t1305(periodMonths 없으면 일봉 최근 5건, 있으면 월봉으로 전환해 최대 24개월=2년, 2026-08-13 추가 — open/high/low도 함께 파싱), `getChartPrices(String stockCode, int dwmcode, int count)`→t1305(종목 상세 차트 전용 — dwmcode 1=일봉/2=주봉/3=월봉을 그대로 전달, count 최대 `MAX_CHART_ITEMS`=60. mock 모드는 `mockChartPrices()`로 일봉은 평일만, 주봉은 1주 간격, 월봉은 1개월 간격 합성. AI 상담용 `getHistoricalPrices()`와 분리, 2026-10-01 추가), `getMultiStockPrices(List<String> stockCodes)`→t8407(최대 5종목), `getRecentCallAuctionPrices(String stockCode)`→t1486(최대 5건, 시간대 게이트는 호출부 책임) |
+| `MarketDataApiClient` | `market-data-url` | `getCurrentPrice(String stockCode)`→t1102(`market-data.mode=mock`이면 `LocalMarketDataReader`로 대체, feature/ls-local-data 2026-08-30 추가 — 나머지 메서드 및 다른 9개 클라이언트는 그대로 항상 실제 외부 시세 데이터 API 호출), `getRiskFlags(String stockCode)`→t1404+t1405, `getPivotLevels(String stockCode)`→t1105, `getRecentHistoricalPrices(String stockCode)`/`getHistoricalPrices(String stockCode, Integer periodMonths)`→t1305(periodMonths 없으면 일봉 최근 5건, 있으면 월봉으로 전환해 최대 24개월=2년, 2026-08-13 추가 — open/high/low도 함께 파싱), `getChartPrices(String stockCode, int dwmcode, int count)`→t1305(종목 상세 차트 전용 — dwmcode 1=일봉/2=주봉/3=월봉을 그대로 전달, count 최대 `MAX_CHART_ITEMS`=60. mock 모드는 `mockChartPrices()`로 일봉은 평일만, 주봉은 1주 간격, 월봉은 1개월 간격 합성. AI 상담용 `getHistoricalPrices()`와 분리, 2026-10-01 추가), `getMultiStockPrices(List<String> stockCodes)`→t8407(최대 5종목), `getMultiStockPricesInBatches(List<String> stockCodes)`→t8407(50종목씩 나눠 여러 번 호출 후 합침 — `HighItemApiClient`의 real 모드 등록 종목 전체 순위 전용, 상수 `MAX_MULTI_STOCK_CODES`=50, 2026-10-02 추가), `getRecentCallAuctionPrices(String stockCode)`→t1486(최대 5건, 시간대 게이트는 호출부 책임) |
 | `InvestorTrendApiClient` | `frgr-itt-url` | `getRecentTrend(String stockCode)`/`getTrend(String stockCode, Integer periodMonths)`→t1716(외인기관종목별동향, periodMonths 없으면 최근 10일·최대 5건, 있으면 최대 24개월=2년까지 일별 원본 그대로 반환해 호출부가 합계·최고/최저일 계산, 2026-08-13 추가) |
 | `InvestInfoApiClient` | `investinfo-url` | `getInvestmentOpinions(String stockCode)`→t3401(최대 5건), `getShareholderMeetingSchedule(String stockCode)`→t3202(`upgu=="09"` 필터, 최대 5건), `getFinancialRanking(String criteria)`→t3341(최대 10건), `getOverseasIndex(String kind, String symbol)`→t3521, `getRecentMarketLiquidityTrend()`/`getMarketLiquidityTrend(Integer periodMonths)`→t8428(periodMonths 없으면 최근 7일·최대 5건, 있으면 최대 24개월=2년, 2026-08-13 추가) |
-| `HighItemApiClient` | `high-item-url` | `getTopPriceChangeRate()`→t1441(전체 시장·당일 상승률), `getTopPriceDeclineRate()`→t1441(전체 시장·당일 하락률), `getTopMarketCap()`→t1444, `getTopVolume()`→t1452, `getTopTradingValue()`→t1463, `getSurgingVolumeVsYesterday()`→t1466, `getTopAfterHoursPriceChangeRate()`→t1481, `getTopAfterHoursVolume()`→t1482 (전부 `List<RankingItemDto>`, 최대 10건). 순위 5종(`getTopPriceChangeRate`/`getTopPriceDeclineRate`/`getTopMarketCap`/`getTopVolume`/`getTopTradingValue`)은 `(int mockLimit)` 오버로드가 있어 mock 모드에서만 반환 건수를 바꿀 수 있다(real 모드는 그대로 최대 10건, 홈 주요 종목 전체 표시용) |
+| `HighItemApiClient` | `high-item-url` | `getTopPriceChangeRate()`→t1441(전체 시장·당일 상승률), `getTopPriceDeclineRate()`→t1441(전체 시장·당일 하락률), `getTopMarketCap()`→t1444, `getTopVolume()`→t1452, `getTopTradingValue()`→t1463, `getSurgingVolumeVsYesterday()`→t1466, `getTopAfterHoursPriceChangeRate()`→t1481, `getTopAfterHoursVolume()`→t1482 (전부 `List<RankingItemDto>`, 최대 10건). 순위 5종(`getTopPriceChangeRate`/`getTopPriceDeclineRate`/`getTopMarketCap`/`getTopVolume`/`getTopTradingValue`)은 `(int limit)` 오버로드가 있다(2026-10-02 `mockLimit`에서 이름 변경). mock 모드는 등록 종목 범위 상위 limit건, real 모드는 limit ≤ 10이면 순위 TR 상위 limit건, limit > 10(상수 `ALL_REGISTERED_STOCKS`=`Integer.MAX_VALUE`, 홈 주요 종목·시뮬레이션 리밸런싱 후보용)이면 순위 TR 대신 `RegisteredStockReader`의 등록 종목 전체를 `MarketDataApiClient.getMultiStockPricesInBatches()`(t8407)로 받아 정렬한다(이전에는 real 모드만 최대 10건). 생성자 주입: `MarketDataAccessTokenProvider`, `Optional<LocalMarketDataReader>`, `RegisteredStockReader`, `MarketDataApiClient`, `RestClient.Builder` |
 | `SectorApiClient` | `sector-url` | `getThemeConstituentsByName(String themeName)`→t8425(테마명→코드 프로세스 수명 캐시) 후 t1537, `getThemesForStock(String stockCode)`→t1532, `getHotThemes()`→t1533 |
 | `EtfApiClient` | `etf-url` | `getCurrentPrice(String stockCode)`→t1901, `getConstituents(String stockCode)`→t1904(최대 10건) |
 | `ProgramApiClient` | `program-url` | `getTopProgramTradingStocks()`→t1636(최대 10건), `getMarketSnapshot()`→t1640(gubun=`11` 거래소 전체) |
 | `InvestorApiClient` | `investor-url` | `getInvestorTypeSummary()`→t1601, `getMarketComparison()`→t1615 |
 | `EtcApiClient` | `etc-url` | `getCollateralLoanEligibility(String stockCode)`→`CLNAQ00100`(예탁담보융자가능종목현황조회), `getMarginRequirement(String stockCode)`→t1411(증거금율별종목조회), `getMarginTradingTrend(String stockCode)`→t1921(신용거래동향, 최근 5일 — 외부 시세 데이터 API 자체에 기간 파라미터가 없어 확장 불가, 2026-08-13 전수조사로 확인), `getSecuritiesLendingTrend(String stockCode)`/`getSecuritiesLendingTrend(String stockCode, Integer periodMonths)`→t1941(종목별대차거래일간추이, periodMonths 없으면 최근 7일·최대 5건, 있으면 최대 24개월=2년, 2026-08-13 추가), `getNewListings()`/`getNewListings(Integer periodMonths)`→t1403(신규상장종목조회, periodMonths 없으면 최근 6개월·최대 10건, 있으면 최대 24개월=2년·최대 50건, 2026-08-13 추가), `getRecentShortSellingTrend(String stockCode)`/`getShortSellingTrend(String stockCode, Integer periodMonths)`→t1927(공매도일별추이, periodMonths 없으면 최근 7일·최대 5건, 있으면 최대 24개월=2년, 2026-08-13 추가), `getStockMasterInfo(String stockCode)`→t8436(주식종목조회API용) |
 | `IndustryApiClient` | `industry-url`(`/indtp/market-data`, 기존에 전혀 구현 안 돼 있던 업종 카테고리) | `getCurrentPrice(String marketName)`→t1511(업종현재가), `getRecentTrend(String marketName)`/`getTrend(String marketName, Integer periodMonths)`→t1514(업종기간별추이, periodMonths 없으면 일봉 최근 5건, 있으면 월봉(gubun2=3)으로 전환해 최대 24개월=2년, 2026-08-13 추가), `getExpectedIndex(String marketName, String callAuctionSession)`→t1485(예상지수, 시간대 게이트는 호출부 책임). `marketName`은 `코스피`→`001`/`코스닥`→`301`로 매핑 |
+
+**`RegisteredStockReader`(`infra/marketdata`, 2026-10-02 추가)** — 백엔드에 함께 배포되는 등록 종목 목록(classpath `aistock/src/main/resources/stocks.json`, 105개, local-market-data-generator의 `stocks.json`과 같은 종목 구성 + 시가총액 계산용 `listingShares`(천주) 스냅샷)을 기동 시 한 번 읽는다. 공개 메서드 `getRegisteredStocks()` → `List<RegisteredStockDto>`(파일 순서 유지). 파일이 없거나 깨져 있어도 예외 없이 빈 목록(서버 기동은 정상). mock/real 모드와 무관하게 항상 빈으로 등록되며, `HighItemApiClient`의 real 모드 등록 종목 전체 순위에서 종목 범위 기준으로 쓴다. 상수 `REGISTERED_STOCKS_RESOURCE`=`"stocks.json"`.
 
 **`LocalMarketDataReader`(`infra/marketdata`, feature/ls-local-data, 2026-08-30 추가, 2026-09-20 호가
 지원 추가, 2026-09-21 원격 URL 조회 지원 추가)** — `market-data.mode=mock`에서 외부 시세 데이터 실시간 시세·호가 대신
@@ -898,12 +910,13 @@ call(String url, String trCd, Map<String, Object> requestBody, String token, Str
 > 항상 빈 값이었다. `outBlock`의 `per`/`high52wdate`/`low52wdate`/`listing`/`exhratio`
 > 필드를 각각 연결했다(pbr은 ETF에 개념이 없는 필드라 계속 null).
 
-**`infra/marketdata/dto` 신규 DTO 26개** (기존 실시간 계열의 `TickData`/`HogaData`/`MarketDataTokenResponse`와는 별개)
+**`infra/marketdata/dto` 신규 DTO 27개** (기존 실시간 계열의 `TickData`/`HogaData`/`MarketDataTokenResponse`와는 별개)
 
 | DTO | 필드 |
 |---|---|
 | `CurrentPriceDetailDto` | stockCode, stockName, currentPrice, changeAmount, changeRate, volume, per, pbr, high52w, high52wDate, low52w, low52wDate, listingShares, foreignExhaustionRate, updatedAt |
-| `MultiStockPriceDto` | stockCode, stockName, price, changeAmount, changeRate, volume |
+| `MultiStockPriceDto` | stockCode, stockName, price, changeAmount, changeRate, volume, tradingValue(누적 거래대금 백만원, t8407 `value`, 2026-10-02 추가) |
+| `RegisteredStockDto` | (record) stockCode, stockName, market, listingShares — `RegisteredStockReader`가 읽은 등록 종목 한 건(2026-10-02 추가) |
 | `PivotLevelDto` | stockCode, pivot, resistance1, support1, resistance2, support2 |
 | `HistoricalPriceDto` | date, open, high, low(2026-08-13 추가 — 기간 내 최고가/최저가 계산용), close, changeRate, volume, marketCap, foreignNetBuy, individualNetBuy |
 | `CallAuctionPriceDto` | time, price, changeRate, expectedVolume |
@@ -1029,17 +1042,44 @@ call(String url, String trCd, Map<String, Object> requestBody, String token, Str
 > (`SimulationService.buildReachDateNotificationContent()`). `NotificationType.SIMULATION`의
 > 첫 실사용이다.
 
+> **feature/goal-simulation-v2(2026-10-01) — 전면 재작성.** 위 1·2차 PR 설명은 이전 구조(종목 1개 +
+> 가정한 투자 원금, Gemini가 best/base/worst 월 성장률 추정)의 기록이다. 새 구조는 "내 보유종목을 그대로
+> 유지했을 때(왼쪽 차트)"와 "투자성향에 맞게 리밸런싱했을 때(오른쪽 차트)"의 목표 도달 시점을 비교한다.
+> - 목표는 자유 문장(`goalText`)으로 받고 Gemini(JUDGE)가 `{targetAmount, periodMonths}`를 추출한다(기한은 선택).
+> - 시작 금액 = 보유종목 평가금액(`HoldingValuationService`) + 예수금(`balance + frozenBalance`), 월 추가 납입 입력.
+> - 성장률은 Gemini가 아니라 서버가 계산한다: 종목별 최근 3년(36개월) 월봉(`MarketQueryService.getChartHistory`,
+>   dwmcode=3, 37건) 복리 기준(기하평균) 월 수익률 × 0.7(음수면 그대로), 종목당 월 5% 상한, 예수금 0%, 비중 가중평균. 최대 30년(360개월).
+>   (2026-10-03 최종 테스트 반영: 산술평균 → 기하평균, 상한 추가 — 이전에는 SK하이닉스가 월 7.22%로 나오는 등 지나치게 낙관적이었음)
+> - 리밸런싱: 시가총액 순위 전체(`MarketQueryService.getRankings("market-cap", true)` — mock/real 모두 등록 종목 105개,
+>   real은 2026-10-02부터 t8407 현재가 × 상장주식수 스냅샷으로 정렬. 이전에는 real만 제공사 순위 10건) + 현재 보유종목을 후보로 Gemini(ANSWER)가 종목·비중·예수금 비중을 고르고,
+>   `RebalancePlanValidator`가 검증(목록 밖 제거, 1~10종목, 종목당 5~40%, 합 100% 정규화). 위반 시 사유를 붙여 1회 재요청.
+>   시세 이력(월 수익률)이 12개월 미만인 추천 종목은 빼고 그 비중을 예수금으로 옮긴다.
+> - 비중 변화 상위 5개 종목의 DART(연간+최근분기, `resolveCorpCodeByStockCode`)·네이버 뉴스를 병렬 조회해
+>   Gemini(ANSWER) 2차 호출로 리밸런싱 이유·단축 설명을 받는다(서버 계산 숫자만 인용하도록 지시).
+> - Gemini 호출은 실행 1회에 3번(목표 해석·리밸런싱·설명, 재요청 시 4번)이지만 `RedisRateLimiterService`는 1회로 센다.
+>   한도 확인(`isAllowed`)은 맨 앞에서 하고, 차감(`increment`)은 설문·계좌 확인과 목표 해석이 성공한 뒤에 한다 — 설문 미완료·목표 문장
+>   해석 실패는 한도에서 빼지 않는다(2026-10-03).
+> - 실행 결과는 DB에 바로 저장하지 않고 `RedisPendingSimulationService`에 30분 보관, 저장 버튼(`POST /api/simulations/saved`)을
+>   눌러야 `simulations`에 기록 + SIMULATION 알림(`"목표 도달 시뮬레이션을 저장했어요"`). 이전 구조의 self 프록시
+>   (`resolveStockName`)는 없어졌다 — `runSimulation()`은 DB에 쓰지 않고, 쓰기는 `saveSimulation()` 하나뿐이다.
+> - `/api/goal-plans`(GoalPlanService, AI 재무설계사 연동 대상)는 그대로 둔다. 프론트 화면만 이 API로 교체됐다.
+
 | 구분 | 이름 |
 |---|---|
 | Controller | `SimulationController` |
-| 엔드포인트 | `POST /api/simulations`, `GET /api/simulations`, `GET /api/simulations/{simulationId}` |
-| Service | `SimulationService` — `getMySimulations(Long userId)`, `getSimulation(Long userId, Long simulationId)`, `runSimulation(Long userId, SimulationRequest request)`. `resolveStockName(Long userId, String stockCode)`/`saveSimulation(...)`도 public인데, `AiPlanningService.loadHistory()`/`saveTurn()`과 동일하게 self-invocation으로 트랜잭션 경계를 나누기 위한 것 — 외부에서 호출할 일은 없다 |
-| Request DTO | `SimulationRequest`(stockCode, investmentAmount, targetAmount, targetMonths) — targetMonths는 1~12 (`@Min(1) @Max(12)`) |
-| Response DTO | `SimulationResponse`(simulationId, stockCode, stockName, investmentAmount, targetAmount, targetMonths, bestScenario, baseScenario, worstScenario, bestReachDate, baseReachDate, worstReachDate, createdAt) — 정적 팩토리 `of(Simulation, List<ScenarioPointDto> best, List<ScenarioPointDto> base, List<ScenarioPointDto> worst)` |
-| 내부 DTO | `ScenarioPointDto`(date: `LocalDate`, value: `long`) — 시나리오 곡선 한 포인트. `date`는 매월 1일로 정규화. `value`는 `investmentAmount` 복리 계산 결과인 포트폴리오 평가금액(원 단위, `Math.round()` 반올림)이며 종목 주당가(`price`)가 아니므로 필드명을 `price`가 아닌 `value`로 둔다(코드베이스 전역에서 `price`는 이미 "주당 시장가" 의미로 쓰이고 있어 혼동 방지). 위치는 `domain/stock/dto/StockPriceDto.java`와 동일하게 `domain/ai/dto/` 바로 아래. |
-| 내부 DTO | `ScenarioDataJson`(best: `List<ScenarioPointDto>`, base: `List<ScenarioPointDto>`, worst: `List<ScenarioPointDto>`) — `simulations.scenario_data` JSON 컬럼의 저장 형태를 그대로 미러링하는 Jackson 매핑 전용 record. `SimulationService`가 조회 시 이 타입으로 역직렬화한다. `domain/ai/dto/` |
-| 계산 엔진 | `ScenarioCalculator`(`domain/ai/service`, 정적 유틸리티 클래스 — Spring 빈 아님) — `public static ScenarioSetDto calculate(long investmentAmount, double bestMonthlyGrowthRate, double baseMonthlyGrowthRate, double worstMonthlyGrowthRate, long targetAmount, int targetMonths, LocalDate startDate)`. 순서: ① best/worst는 `[-0.08, 0.08]`, base는 `[-0.02, 0.02]`로 각각 clamp(상수 `MAX_MONTHLY_GROWTH_RATE_WIDE`/`MAX_MONTHLY_GROWTH_RATE_NARROW`) → ② clamp된 세 값을 원래 라벨과 무관하게 내림차순 정렬해 큰 값부터 best/base/worst로 재배정(넓은 clamp 폭 때문에 라벨 순서가 뒤집힐 수 있어 라벨을 신뢰하지 않음, best≥base≥worst 보장) → ③ 재배정된 값으로 각각 month 0~targetMonths 곡선 생성(`value = investmentAmount * (1+rate)^month`, 반올림) → ④ 곡선에서 `value >= targetAmount`를 처음 만족하는 date를 reachDate로 산출(`investmentAmount >= targetAmount`면 month 0, 못 도달하면 null). `startDate`는 순수 함수 보장을 위한 외부 주입 파라미터(내부에서 `LocalDate.now()` 호출 금지) — 호출 측(다음 PR의 `runSimulation`)이 `LocalDate.now()`를 넘긴다. |
-| 내부 DTO | `ScenarioSetDto`(bestPoints/basePoints/worstPoints: `List<ScenarioPointDto>`, bestReachDate/baseReachDate/worstReachDate: `LocalDate`) — `ScenarioCalculator.calculate()`의 반환 타입. `domain/ai/dto/` |
+| 엔드포인트 | `POST /api/simulations`(실행, Redis 보관), `POST /api/simulations/saved`(저장), `GET /api/simulations`(저장 목록 요약), `GET /api/simulations/{simulationId}`(저장 상세), `DELETE /api/simulations/{simulationId}`(삭제) |
+| Service | `SimulationService` — `runSimulation(Long userId, SimulationRequest request)`, `saveSimulation(Long userId, SaveSimulationRequest request)`, `getMySimulations(Long userId)`, `getSimulation(Long userId, Long simulationId)`, `deleteSimulation(Long userId, Long simulationId)`. Gemini 응답 파싱용 private record(`GoalExtraction`, `RebalanceSuggestion`, `RebalanceItem`, `SimulationExplanation`)와 `DartDataSnapshot`은 구현 세부사항 |
+| Request DTO | `SimulationRequest`(goalText — `@NotBlank @Size(max=200)`, monthlyContribution — `@Min(0) @Max(100_000_000)`), `SaveSimulationRequest`(pendingSimulationId — `@NotBlank`) |
+| Response DTO | `SimulationResponse`(simulationId, pendingSimulationId, goalText, targetAmount, periodMonths, startAmount, holdingsAmount, cashAmount, monthlyContribution, current, rebalanced, shortenedMonths, rebalanceReason, timeReductionExplanation, createdAt) — 실행 직후엔 simulationId=null·pendingSimulationId 있음, 저장/조회 결과는 반대. 정적 팩토리 `of(Simulation, ProjectionDataJson)` |
+| Response DTO | `SimulationSummaryResponse`(simulationId, goalText, targetAmount, periodMonths, currentReachDate, rebalancedReachDate, createdAt) — 저장 목록용 요약, 정적 팩토리 `from(Simulation)` |
+| 내부 DTO | `ScenarioPointDto`(date: `LocalDate`, value: `long`) — 곡선 한 포인트. date는 매월 1일, value는 포트폴리오 평가금액 총액(주당가 아님). `domain/ai/dto/` |
+| 내부 DTO | `PortfolioAllocationDto`(stockCode, stockName, weight(%), monthlyGrowthRate(소수)) — 포트폴리오 종목 1건. `domain/ai/dto/` |
+| 내부 DTO | `PortfolioProjectionDto`(monthlyGrowthRate, cashWeight, allocations, excludedStockNames, points, reachMonths, reachDate, achievableWithinPeriod) — 포트폴리오 하나의 예측(차트 1개). 30년 내 미도달이면 reachMonths/reachDate null, 기한 없으면 achievableWithinPeriod null. `domain/ai/dto/` |
+| 내부 DTO | `ProjectionDataJson`(holdingsAmount, cashAmount, current, rebalanced, shortenedMonths) — `simulations.projection_data` JSON 컬럼 미러링. shortenedMonths = 현재 도달 개월 − 리밸런싱 도달 개월(음수면 늦어짐, 한쪽이라도 미도달이면 null). `domain/ai/dto/` |
+| 내부 DTO | `PendingSimulationDto`(result: `SimulationResponse`, dartData, newsData) — Redis 임시 보관 값. `domain/ai/dto/` |
+| 계산 엔진 | `ScenarioCalculator`(`domain/ai/service`, 정적 유틸리티 — Spring 빈 아님) — 상수 `MAX_PROJECTION_MONTHS`(360), `HISTORY_MONTHS`(36), `MIN_HISTORY_MONTHS_FOR_REBALANCE`(12), `MAX_MONTHLY_GROWTH_RATE`(0.05, 2026-10-03 추가 — 종목별 월 성장률 상한), private `CONSERVATIVE_DISCOUNT_FACTOR`(0.7). 메서드 `countMonthlyReturns(List<Long>)`, `conservativeMonthlyRate(List<Long> monthlyClosesNewestFirst)`(기하평균 × 0.7(음수면 그대로), 월 5% 상한), `portfolioMonthlyRate(List<PortfolioAllocationDto>)`, `projectCurve(long startAmount, long monthlyContribution, double monthlyRate, int months, LocalDate startDate)`(매달 직전 금액×(1+성장률)+납입, 0 미만 금지), `findReachMonths(List<ScenarioPointDto>, long targetAmount)`, `displayMonths(Integer periodMonths, Integer currentReachMonths, Integer rebalancedReachMonths)`(두 차트 공통 표시 기간) |
+| 검증기 | `RebalancePlanValidator`(`domain/ai/service`, 정적 유틸리티) — 상수 `MAX_STOCK_COUNT`(10), `MIN_STOCK_WEIGHT`(5.0), `MAX_STOCK_WEIGHT`(40.0). `validate(double suggestedCashWeight, List<PortfolioAllocationDto> suggestedAllocations, Set<String> allowedStockCodes)` → `RebalancePlanValidator.Result`(valid, violation, cashWeight, allocations) |
+| 삭제됨 | `ScenarioSetDto`, `ScenarioDataJson`, `ScenarioCalculator.calculate(...)`, `SimulationService.resolveStockName(...)`(feature/goal-simulation-v2에서 제거) |
 
 ### 8-12. feature/notification
 
@@ -1659,9 +1699,9 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 
 - `MarketQueryService.getIndexes`, `getResearch`: GET `/api/market/indexes`, GET `/api/market/stocks/{stockCode}/research?section=finance|earnings|dividend|peers|analysts`. DART/외부 시세 데이터 실데이터로 조회, 자료가 없으면 빈 목록 또는 명시적 오류 응답.
 
-- `PlanningPreferences` / Repository / Service / Controller, `PlanningPreferencesRequest(savedBriefingDates, linkedBriefingDates, linkedGoalPlanIds)`: GET/PUT `/api/ai/planning/preferences`. 본인 브리핑 저장과 AI 자료 연동 설정. `getPreferences`, `savePreferences`, `describeConnections`, `updateSelections`. 사용자 소유권 검증, 목록 개수 제한, 낙관적 잠금 적용.
+- `PlanningPreferences` / Repository / Service / Controller, `PlanningPreferencesRequest(savedBriefingDates, linkedBriefingDates, linkedGoalPlanIds, linkedSimulationIds)`: GET/PUT `/api/ai/planning/preferences`. `linkedSimulationIds`(feature/goal-simulation-v2, 2026-10-03 추가)는 목표 도달 시뮬레이션에서 저장한 `simulations` ID — `goal_plans`와 ID가 겹칠 수 있어 `linkedGoalPlanIds`와 분리했고, 두 목록을 합쳐 목표 최대 2개(전체 5개). 예전 저장값에 없으면 빈 목록. `PlanningConnectionOptionsResponse(goals, simulations, briefings)` — `SimulationOption(simulationId, goalText, targetAmount, periodMonths, rebalancedReachDate, createdAt)` 추가. `PlanningPreferencesService`는 `SimulationRepository`를 주입받아 저장한 시뮬레이션을 목록·소유권 검증·AI 상담 맥락(`describeConnections` — 목표·도달 시점·리밸런싱 구성)에 쓴다. 본인 브리핑 저장과 AI 자료 연동 설정. `getPreferences`, `savePreferences`, `describeConnections`, `updateSelections`. 사용자 소유권 검증, 목록 개수 제한, 낙관적 잠금 적용.
 
-- `MarketQueryController`, `MarketQueryService`: GET `/api/market/rankings?sort=volume|value|rise|fall|market-cap` (`rise`/`fall`은 코스피+코스닥 전체 시장 기준 상승률/하락률 상위 10, `change`는 `rise`의 호환 별칭. `all=true`(기본 false)면 mock 모드에서 상위 10건 제한 없이 stocks.json 전체 종목을 반환 — 홈 주요 종목 무한 스크롤용, real 모드는 그대로 10건), GET `/api/market/stocks/{stockCode}/history?months=12`(`dwmcode`=1|2|3과 `count`(1~60, 기본 60)를 주면 months 대신 해당 봉 종류로 count건 조회 — 종목 상세 차트용, 없으면 기존 months 동작), GET `/api/market/stocks/{stockCode}/detail`, GET `/api/market/news?query=`. 기존 외부 시세 데이터/네이버 클라이언트 재사용. `getRankings(sort, isAll)`, `getHistory`, `getChartHistory(stockCode, dwmcode, count)`, `getDetail`, `getNews`.
+- `MarketQueryController`, `MarketQueryService`: GET `/api/market/rankings?sort=volume|value|rise|fall|market-cap` (`rise`/`fall`은 코스피+코스닥 전체 시장 기준 상승률/하락률 상위 10, `change`는 `rise`의 호환 별칭. `all=true`(기본 false)면 mock/real 모두 상위 10건 제한 없이 등록 종목(stocks.json) 전체 105개를 반환 — 홈 주요 종목 무한 스크롤·시뮬레이션 리밸런싱 후보용. real 모드는 2026-10-02부터 등록 종목의 t8407 현재가로 정렬, 이전에는 real만 10건), GET `/api/market/stocks/{stockCode}/history?months=12`(`dwmcode`=1|2|3과 `count`(1~60, 기본 60)를 주면 months 대신 해당 봉 종류로 count건 조회 — 종목 상세 차트용, 없으면 기존 months 동작), GET `/api/market/stocks/{stockCode}/detail`, GET `/api/market/news?query=`. 기존 외부 시세 데이터/네이버 클라이언트 재사용. `getRankings(sort, isAll)`, `getHistory`, `getChartHistory(stockCode, dwmcode, count)`, `getDetail`, `getNews`.
 - `AiNewsService.getBriefingHistory`, `getBriefing`, `NewsBriefingRepository.findTop100ByUserUserIdOrderByBriefingDateDesc`: GET `/api/ai/news/briefings`, GET `/api/ai/news/briefings/{date}`. 날짜별 본인 소유 브리핑만 조회.
 
 - `GoalPlan`, `GoalPlanRepository`, `GoalPlanService`, `GoalPlanController`, `GoalPlanRequest(goal, monthlyPayment, years, annualReturn, aggressive)`, `GoalPlanResponse(planId, settings, futureValue, aggressiveFutureValue, saved, createdAt)`.
