@@ -51,6 +51,8 @@ public class OrderExecutionService {
     private final NotificationService notificationService;
     // 잔고 변동 원장 기록(ADMIN_API_BACKEND_HANDOFF.md 4.3).
     private final AccountTransactionService accountTransactionService;
+    // 매도 거래 수수료 차감(시장가 매도 OrderService와 공용).
+    private final TradeFeeService tradeFeeService;
 
     // 주문이 대기 리스트에서 빠질 때 미체결 주문 종목 구독(주문 접수 시 +1)을 함께 줄인다.
     // 생성자 주입이면 real 모드에서 StockSubscriptionManager → MarketDataWebSocketClient →
@@ -209,6 +211,10 @@ public class OrderExecutionService {
         }
 
         order.execute(currentPrice);
+        if (order.getOrderType() == OrderType.SELL) {
+            // order.execute()가 Order.fee를 채운 뒤에 차감해야 잔고에서 빠진 수수료와 주문내역 수수료가 같다.
+            tradeFeeService.applySellFee(account, order);
+        }
 
         // pendingOrder.getUserId()를 쓴다 — order.getAccount().getUser()는 LAZY라 굳이
         // User를 추가로 로딩할 필요 없이 Redis 캐시(PendingOrderDto)에 이미 있는 userId를 그대로 쓴다.
@@ -239,7 +245,7 @@ public class OrderExecutionService {
         long refundAmount = frozenAmount - actualAmount;
         if (refundAmount > 0) {
             accountTransactionService.record(account, AccountTransactionType.ORDER_REFUND, refundAmount, balanceBefore,
-                    order.getOrderId(), null, null, "지정가 매수 체결 차액 환급(지정가-체결가)");
+                    order.getOrderId(), null, null, order.describeStockAndQuantity() + " 지정가 매수 체결 차액 환급");
         }
 
         holdingSettlementService.increaseOrCreate(account, order.getStockCode(), order.getStockName(), order.getQuantity(), currentPrice);
@@ -259,7 +265,8 @@ public class OrderExecutionService {
         long balanceBefore = account.getBalance();
         account.applySellOrder(sellAmount);
         accountTransactionService.record(account, AccountTransactionType.ORDER_SELL, sellAmount, balanceBefore,
-                order.getOrderId(), null, null, "지정가 매도 체결");
+                order.getOrderId(), null, null, order.describeStockAndQuantity() + " 지정가 매도");
+        // 매도 거래 수수료는 execute()에서 order.execute() 직후 TradeFeeService로 차감한다.
         return true;
     }
 }

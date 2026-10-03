@@ -25,9 +25,11 @@ public class RealizedReturnService {
                     position[0] += order.quantity();
                 } else {
                     if (position[0] < order.quantity()) throw new CustomException(ErrorCode.INVALID_INPUT);
-                    long profit = (order.execPrice() - position[1]) * order.quantity();
+                    // 매도 거래 수수료(Order.fee)를 빼야 계좌 잔고에 실제로 반영된 손익과 같아진다(코드리뷰 반영).
+                    long cost = position[1] * order.quantity();
+                    long profit = (order.execPrice() - position[1]) * order.quantity() - order.fee();
                     returns.add(new RealizedReturnResponse(order.orderId(), order.stockCode(), order.stockName(), order.quantity(),
-                            position[1], order.execPrice(), profit, position[1] == 0 ? 0 : (order.execPrice() - position[1]) * 100.0 / position[1], order.executedAt()));
+                            position[1], order.execPrice(), profit, cost == 0 ? 0 : profit * 100.0 / cost, order.executedAt()));
                     position[0] -= order.quantity();
                     if (position[0] == 0) position[1] = 0;
                 }

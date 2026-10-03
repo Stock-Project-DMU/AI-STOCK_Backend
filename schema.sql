@@ -1,5 +1,14 @@
 -- =====================================================
--- AI STOCK MySQL Schema (최종본 v16)
+-- AI STOCK MySQL Schema (최종본 v17)
+-- v17: 마이페이지 계좌 정보 보완(feature/mypage-improvement, 2026-10-01, mypage_account_migration.sql).
+--   1. accounts.interest_rate 추가 — 예치금 연이율(%) 0.50 고정, 매월 1일 balance 기준 이자 지급
+--      (AccountInterestJob). 이자는 baseBalance도 함께 올려 수익률에 잡히지 않는다.
+--   2. orders.fee 추가 — 매도 체결 거래 수수료(체결금액 × 0.1%, 원 단위 미만 버림). 매수는 수수료 없음.
+--   3. account_transactions.type ENUM에 'INTEREST', 'TRADE_FEE' 추가.
+--   4. accounts.account_number 형식 변경 — "110" + 랜덤 9자리 숫자(12자리, 숫자만 저장, 하이픈은 화면에서만).
+--   6. accounts.total_interest 추가 — 지급받은 예치금 이자 누계(원). 마이페이지 계좌 정보 "누적 이자" 표시용.
+--   5. accounts.charge_count 의미 변경 — 사용자가 관리자 승인 없이 직접 충전한 횟수(최대 3회, 금액 자유).
+--      3회를 다 쓴 계좌만 charge_requests로 관리자 승인 충전을 요청할 수 있다.
 -- v16: 생성 당시 브리핑 시각 보존, 설정 조합별 뉴스 채팅 세션/메시지 추가.
 -- 변경사항 v14 → v15:
 --   1. news_briefing_settings.briefing_hour(TINYINT, 0~23시) → briefing_time(TIME, 시:분:초)로 변경
@@ -324,12 +333,14 @@ CREATE TABLE accounts (
     account_id      BIGINT          NOT NULL AUTO_INCREMENT,
     user_id         BIGINT          NOT NULL,
     account_name    VARCHAR(50)     NOT NULL,                 -- v10 추가: 계좌 구분용 이름 (예: "계좌 A")
-    account_number  VARCHAR(20)     NOT NULL UNIQUE,
+    account_number  VARCHAR(20)     NOT NULL UNIQUE,         -- v17 변경: "110" + 랜덤 9자리 숫자(하이픈 없이 저장)
     opened_at       DATE            NOT NULL,
     base_balance BIGINT          NOT NULL DEFAULT 10000000, -- 지급/충전 누계 기준 (수익률 기준)
     balance         BIGINT          NOT NULL DEFAULT 10000000, -- 즉시 사용 가능한 현금 잔고
     frozen_balance  BIGINT          NOT NULL DEFAULT 0,        -- 지정가 주문 예약 잠금 금액
-    charge_count    TINYINT         NOT NULL DEFAULT 0,        -- v10 추가: 가상캐시 충전 횟수 (3회까지 자동, 이후 관리자 승인)
+    charge_count    TINYINT         NOT NULL DEFAULT 0,        -- v10 추가: 사용자 직접 충전 횟수 (3회까지 금액 자유로 즉시 충전, 이후 관리자 승인)
+    interest_rate   DECIMAL(5,2)    NOT NULL DEFAULT 0.50,     -- v17 추가: 예치금 연이율(%), 매월 1일 balance 기준 이자 지급
+    total_interest  BIGINT          NOT NULL DEFAULT 0,        -- v17 추가: 지급받은 예치금 이자 누계(원)
     version         BIGINT          NOT NULL DEFAULT 0,        -- 낙관적 락용 버전 번호
     status          ENUM('ACTIVE','SUSPENDED')
                                     NOT NULL DEFAULT 'ACTIVE', -- v7 추가: 관리자에 의한 거래 정지
@@ -412,6 +423,7 @@ CREATE TABLE orders (
     order_price BIGINT          NOT NULL,            -- 주문 요청 가격
     exec_price  BIGINT,                              -- 실제 체결가 (미체결=NULL)
     quantity    INT             NOT NULL,            -- 주문 수량 (전량 체결 방식)
+    fee         BIGINT          NOT NULL DEFAULT 0,  -- v17 추가: 매도 체결 거래 수수료(체결금액 × 0.1%, 원 미만 버림). 매수·미체결·취소는 0
     status      ENUM('PENDING','EXECUTED','CANCELLED') NOT NULL DEFAULT 'PENDING',
     version     BIGINT          NOT NULL DEFAULT 0,  -- v9 추가: 낙관적 락용 버전 번호
     ordered_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -797,7 +809,8 @@ CREATE TABLE account_transactions (
     transaction_id            BIGINT          NOT NULL AUTO_INCREMENT,
     account_id                BIGINT          NOT NULL,
     type                      ENUM('INITIAL_GRANT','AUTO_CHARGE','ADMIN_CHARGE','ADMIN_DEDUCTION',
-                                    'ORDER_BUY','ORDER_SELL','ORDER_REFUND')
+                                    'ORDER_BUY','ORDER_SELL','ORDER_REFUND',
+                                    'INTEREST','TRADE_FEE')      -- v17 추가: 예치금 이자, 매도 거래 수수료
                                               NOT NULL,
     amount                    BIGINT          NOT NULL,     -- 증감액 (양수=증가, 음수=감소)
     balance_before             BIGINT          NOT NULL,

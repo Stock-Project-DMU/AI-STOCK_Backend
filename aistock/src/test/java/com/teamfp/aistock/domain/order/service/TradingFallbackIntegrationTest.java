@@ -58,17 +58,18 @@ class TradingFallbackIntegrationTest {
         assertThat(account.getBalance()).isEqualTo(860000);
         var sell = orders.createMarketOrder(user.getUserId(), new CreateOrderRequest(account.getAccountId(), "005930", OrderType.SELL, 1, PriceType.MARKET, 0));
         assertThat(sell.status()).isEqualTo(OrderStatus.EXECUTED);
-        assertThat(account.getBalance()).isEqualTo(930000);
+        // 매도 대금 70,000 - 거래 수수료 70(0.1%)
+        assertThat(account.getBalance()).isEqualTo(929930);
 
         // An unowned stock exercises the limit-order name fallback too.
         when(ls.getCurrentPrice("000660")).thenReturn(Optional.of(CurrentPriceDetailDto.builder()
                 .stockCode("000660").stockName("SK하이닉스").currentPrice(100000).build()));
         var limit = orders.createLimitOrder(user.getUserId(), new CreateOrderRequest(account.getAccountId(), "000660", OrderType.BUY, 1, PriceType.LIMIT, 90000));
         assertThat(limit.status()).isEqualTo(OrderStatus.PENDING);
-        assertThat(account.getBalance()).isEqualTo(840000);
+        assertThat(account.getBalance()).isEqualTo(839930);
         assertThat(account.getFrozenBalance()).isEqualTo(90000);
         orders.cancelOrder(user.getUserId(), limit.orderId());
-        assertThat(account.getBalance()).isEqualTo(930000);
+        assertThat(account.getBalance()).isEqualTo(929930);
         assertThat(account.getFrozenBalance()).isZero();
         recent.recordView(user.getUserId(), "005930");
         recent.recordView(user.getUserId(), "005930");

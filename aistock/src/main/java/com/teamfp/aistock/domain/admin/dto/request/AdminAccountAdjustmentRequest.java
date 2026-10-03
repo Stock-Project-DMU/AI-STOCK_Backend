@@ -2,6 +2,7 @@ package com.teamfp.aistock.domain.admin.dto.request;
 
 import com.teamfp.aistock.domain.account.entity.AccountTransactionType;
 
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -13,7 +14,12 @@ import jakarta.validation.constraints.Positive;
  */
 public record AdminAccountAdjustmentRequest(
         @NotNull(message = "type은 필수 입력 값입니다.") AccountTransactionType type,
-        @Positive(message = "조정 금액은 0보다 커야 합니다.") long amount,
+        @Positive(message = "조정 금액은 0보다 커야 합니다.")
+        @Max(value = AdminAccountAdjustmentRequest.MAX_ADJUSTMENT_AMOUNT, message = "1회 조정 금액은 최대 1조원입니다.")
+        long amount,
         @NotBlank(message = "조정 사유는 필수 입력 값입니다.") String reason
 ) {
+
+    // 1회 조정 최대 금액(계좌 예치금 한도와 같은 1조원). 상한이 없으면 아주 큰 값으로 잔고 계산이 넘칠 수 있다.
+    public static final long MAX_ADJUSTMENT_AMOUNT = 1_000_000_000_000L;
 }

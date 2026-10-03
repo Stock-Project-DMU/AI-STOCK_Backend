@@ -109,7 +109,7 @@ class SimulationServiceTest {
         when(investmentProfileRepository.findByUserId(USER_ID)).thenReturn(Optional.of(InvestmentProfile.builder()
                 .user(user).investmentTendency(3).fundTendency(3).investmentLevel(InvestmentLevel.INTERMEDIATE).build()));
         when(accountService.getMyAccounts(USER_ID)).thenReturn(List.of(new AccountInfoResponse(
-                ACCOUNT_ID, "계좌A", "1234", 5_000_000, 0, 10_000_000, 0, AccountStatus.ACTIVE)));
+                ACCOUNT_ID, "계좌A", "1234", 5_000_000, 0, 10_000_000, 0, 3, new java.math.BigDecimal("0.50"), 0L, AccountStatus.ACTIVE)));
         // 보유: 035420 100주 × 50,000원 = 5,000,000원 → 시작 금액 10,000,000원(보유 50%, 예수금 50%)
         when(holdingValuationService.getHoldingValuations(ACCOUNT_ID)).thenReturn(List.of(
                 new HoldingValuationDto(ACCOUNT_ID, "035420", "NAVER", 100, 40_000, 50_000)));

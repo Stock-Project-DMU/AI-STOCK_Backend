@@ -77,6 +77,10 @@ public class AdminChargeRequestService {
 
         if (request.decision() == ChargeRequestStatus.APPROVED) {
             Account account = chargeRequest.getAccount();
+            // 요청 이후 잔고가 늘었을 수 있어 승인 시점에 예치금 한도(1조원)를 다시 확인한다.
+            if (!account.canDeposit(chargeRequest.getAmount())) {
+                throw new CustomException(ErrorCode.DEPOSIT_LIMIT_EXCEEDED);
+            }
             long balanceBefore = account.getBalance();
             account.applyAdminCharge(chargeRequest.getAmount());
             accountTransactionService.record(account, AccountTransactionType.ADMIN_CHARGE, chargeRequest.getAmount(),

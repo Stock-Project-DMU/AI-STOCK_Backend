@@ -2,6 +2,7 @@ package com.teamfp.aistock.domain.order.entity;
 
 import java.time.LocalDateTime;
 
+import org.hibernate.annotations.ColumnDefault;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
@@ -36,6 +37,9 @@ import lombok.NoArgsConstructor;
 @EntityListeners(AuditingEntityListener.class)
 public class Order {
 
+    // 매도 거래 수수료율 0.1%를 천분율로 표현한 값(1/1000). 매수에는 수수료가 없다.
+    private static final long SELL_FEE_RATE_PER_MILLE = 1L;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "order_id")
@@ -67,6 +71,12 @@ public class Order {
 
     @Column(name = "quantity", nullable = false)
     private int quantity;
+
+    // 거래 수수료(원). 매도 체결 시에만 체결금액 × 0.1%(원 단위 미만 버림)가 채워지고, 매수·미체결·
+    // 취소 주문은 0이다. @ColumnDefault는 ddl-auto=update로 컬럼이 추가될 때 기존 주문을 0으로 채우기 위함.
+    @Column(name = "fee", nullable = false)
+    @ColumnDefault("0")
+    private long fee;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 10)
@@ -101,8 +111,25 @@ public class Order {
         this.status = OrderStatus.PENDING;
     }
 
+    /**
+     * 매도 체결금액에 대한 거래 수수료 = 체결금액 × 0.1%, 원 단위 미만 버림. 잔고 차감
+     * (OrderService/OrderExecutionService)과 execute()의 fee 기록이 같은 계산을 쓰도록 한 곳에 둔다.
+     */
+    public static long calculateSellFee(long tradeAmount) {
+        return tradeAmount * SELL_FEE_RATE_PER_MILLE / 1000;
+    }
+
+    /**
+     * 잔고 변동 원장(account_transactions.reason)에 남길 "종목명 N주" 문구. 계좌 내역 화면이 주문
+     * 상세 없이도 어떤 거래였는지 한 줄로 알 수 있게 모든 주문 관련 원장 사유 앞에 붙인다.
+     */
+    public String describeStockAndQuantity() {
+        return this.stockName + " " + this.quantity + "주";
+    }
+
     public void execute(long execPrice) {
         this.execPrice = execPrice;
+        this.fee = this.orderType == OrderType.SELL ? calculateSellFee(execPrice * this.quantity) : 0L;
         this.status = OrderStatus.EXECUTED;
         this.executedAt = LocalDateTime.now();
     }

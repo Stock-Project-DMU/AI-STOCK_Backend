@@ -82,6 +82,23 @@ class AdminChargeRequestServiceTest {
     }
 
     @Test
+    @DisplayName("decide()로 승인할 때 예치금이 1조원을 넘게 되면 DEPOSIT_LIMIT_EXCEEDED 예외를 던지고 잔고를 바꾸지 않는다")
+    void decide_approve_depositLimitExceeded() {
+        ChargeRequest chargeRequest = chargeRequestOf();
+        ReflectionTestUtils.setField(account, "balance", com.teamfp.aistock.domain.account.entity.Account.MAX_DEPOSIT_AMOUNT);
+        when(chargeRequestRepository.findByIdForUpdate(REQUEST_ID)).thenReturn(Optional.of(chargeRequest));
+        when(userRepository.getReferenceById(ADMIN_ID)).thenReturn(admin);
+
+        assertThatThrownBy(() -> adminChargeRequestService.decide(
+                ADMIN_ID, REQUEST_ID, new AdminChargeDecisionRequest(ChargeRequestStatus.APPROVED, "승인합니다")))
+                .isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException) e).getErrorCode())
+                .isEqualTo(ErrorCode.DEPOSIT_LIMIT_EXCEEDED);
+        assertThat(account.getBalance()).isEqualTo(com.teamfp.aistock.domain.account.entity.Account.MAX_DEPOSIT_AMOUNT);
+        assertThat(chargeRequest.getStatus()).isEqualTo(ChargeRequestStatus.PENDING);
+    }
+
+    @Test
     @DisplayName("decide()에 APPROVED를 보내면 계좌 잔고가 오르고 상태가 APPROVED로 바뀐다")
     void decide_approve_increasesBalance() {
         ChargeRequest chargeRequest = chargeRequestOf();

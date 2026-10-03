@@ -1,5 +1,6 @@
 package com.teamfp.aistock.domain.account.repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -60,6 +61,11 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
     Optional<Account> findByAccountIdAndUserIdForUpdate(@Param("accountId") Long accountId, @Param("userId") Long userId);
 
     Optional<Account> findByAccountNumber(String accountNumber);
+
+    // AccountInterestJob용 — openedBefore(이번 달 1일 0시) 이전에 개설된 계좌 ID. 지난달 이자를 주는 것이라
+    // 이번 달에 만든 계좌는 대상이 아니다. 계좌마다 별도 트랜잭션에서 락을 걸고 다시 조회하므로 ID만 가져온다.
+    @Query("select a.accountId from Account a where a.createdAt < :openedBefore order by a.accountId asc")
+    List<Long> findAllAccountIdsOpenedBefore(@Param("openedBefore") LocalDateTime openedBefore);
 
     // 관리자 계좌 상세 조회 — account.user까지 fetch join으로 한 번에 즉시 로딩한다
     // (AdminAccountService가 userName을 채워야 하는데, admin은 userId를 모르는 상태로

@@ -1,16 +1,19 @@
 package com.teamfp.aistock.domain.account.service;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
-import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.teamfp.aistock.domain.account.dto.request.ChargeBalanceRequest;
 import com.teamfp.aistock.domain.account.dto.request.CreateAccountRequest;
 import com.teamfp.aistock.domain.account.dto.response.AccountInfoResponse;
 import com.teamfp.aistock.domain.account.dto.response.ProfitResponse;
 import com.teamfp.aistock.domain.account.entity.Account;
+import com.teamfp.aistock.domain.account.entity.AccountStatus;
 import com.teamfp.aistock.domain.account.entity.AccountTransactionType;
 import com.teamfp.aistock.domain.account.repository.AccountRepository;
 import com.teamfp.aistock.domain.order.service.HoldingValuationService;
@@ -20,17 +23,23 @@ import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AccountService {
 
-    // 계좌 개설/충전 1회당 지급되는 고정 가상캐시. 회원가입 직후 첫 계좌든 이후 유저가 자유롭게
+    // 계좌 개설 시 지급되는 고정 가상캐시. 회원가입 직후 첫 계좌든 이후 유저가 자유롭게
     // 추가하는 계좌든 항상 이 금액으로 시작한다(schema.sql accounts.balance/base_balance
     // DEFAULT와 동일한 값).
     private static final long INITIAL_BALANCE = 10_000_000L;
-    // 계좌 1개당 자동 충전 최대 횟수. 이 횟수를 넘기면 문의(inquiries)를 통해 관리자 승인이 필요하다.
-    private static final int MAX_CHARGE_COUNT = 3;
+    // 계좌번호 = 고정 은행코드 "110" + 랜덤 9자리 숫자(총 12자리, 숫자만 저장 — 하이픈은 화면에서만 붙인다).
+    private static final String ACCOUNT_NUMBER_PREFIX = "110";
+    private static final int ACCOUNT_NUMBER_RANDOM_BOUND = 1_000_000_000;
+    // 9자리 앞자리 0 채우기용 — String.format("%09d")는 JVM 기본 로케일에 따라 비ASCII 숫자가 나올 수
+    // 있어(코드리뷰 반영), 10억을 더한 뒤 맨 앞 "1"을 떼는 방식으로 항상 ASCII 숫자 9자리를 만든다.
+    private static final long ACCOUNT_NUMBER_PAD_OFFSET = 1_000_000_000L;
     // 유저 1명이 만들 수 있는 최대 계좌 수. 원래 성향별로 나눠 투자하도록 3개였으나, 목표 도달
     // 시뮬레이션이 "내 보유종목 + 예수금"을 계좌 하나로 특정해야 해서 1개로 줄였다(2026-10-01,
     // accounts.uq_account_user — account_single_migration.sql 참고).
@@ -91,9 +100,10 @@ public class AccountService {
     }
 
     /**
-     * 가상캐시 충전. 금액은 고정(INITIAL_BALANCE와 동일한 1000만원)이고 시점은 유저 자유다
-     * (연속으로 3번 다 써도 무방). 계좌의 chargeCount가 MAX_CHARGE_COUNT(3)에 도달하면 더 이상
-     * 자동 충전을 허용하지 않고, 문의(inquiries) 기능으로 관리자에게 요청하도록 안내한다.
+     * 사용자 직접 충전. 금액은 사용자가 자유롭게 입력하고, 계좌당 Account.MAX_CHARGE_COUNT(3)회까지
+     * 관리자 승인 없이 바로 balance에 반영된다(연속으로 3번 다 써도 무방). chargeCount가 한도에
+     * 도달하면 CHARGE_LIMIT_EXCEEDED를 던지고, 이후에는 충전 요청(ChargeRequestService)으로
+     * 관리자 승인을 받아야 한다. 정지(SUSPENDED) 계좌는 충전 요청과 동일하게 막는다.
      *
      * 계좌를 findByAccountIdAndUserIdForUpdate로 비관적 락을 걸어 조회한다 — Account.version
      * (낙관적 락)만으로는 chargeCount==2인 상태에서 동시에 두 번째 충전 요청이 들어왔을 때,
@@ -102,25 +112,67 @@ public class AccountService {
      * 정확히 CHARGE_LIMIT_EXCEEDED 여부를 판단하게 된다.
      */
     @Transactional
-    public AccountInfoResponse chargeBalance(Long userId, Long accountId) {
+    public AccountInfoResponse chargeBalance(Long userId, Long accountId, ChargeBalanceRequest request) {
         Account account = accountRepository.findByAccountIdAndUserIdForUpdate(accountId, userId)
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
-        if (account.getChargeCount() >= MAX_CHARGE_COUNT) {
+        if (account.getStatus() == AccountStatus.SUSPENDED) {
+            throw new CustomException(ErrorCode.ACCOUNT_SUSPENDED_CHARGE);
+        }
+        if (!account.hasRemainingChargeCount()) {
             throw new CustomException(ErrorCode.CHARGE_LIMIT_EXCEEDED);
         }
+        if (!account.canDeposit(request.amount())) {
+            throw new CustomException(ErrorCode.DEPOSIT_LIMIT_EXCEEDED);
+        }
         long balanceBefore = account.getBalance();
-        account.chargeBalance(INITIAL_BALANCE);
-        accountTransactionService.record(account, AccountTransactionType.AUTO_CHARGE, INITIAL_BALANCE, balanceBefore,
-                null, null, null, "자동 충전");
+        account.chargeBalance(request.amount());
+        accountTransactionService.record(account, AccountTransactionType.AUTO_CHARGE, request.amount(), balanceBefore,
+                null, null, null, "직접 충전");
         return AccountInfoResponse.from(account);
     }
 
     /**
-     * 계좌번호 생성. 실제 증권사 계좌 체계를 흉내낼 필요가 없는 모의투자 서비스라
-     * UUID 일부를 잘라 accounts.account_number(UNIQUE, VARCHAR(20))에 맞춘다.
+     * 계좌번호 생성 — "110" + 랜덤 9자리(앞자리 0 허용)의 12자리 숫자. 화면에서는 110-123-456789처럼
+     * 하이픈을 붙여 보여준다. accounts.account_number에 UNIQUE 제약이 있지만, 저장 시점에
+     * 충돌로 실패하지 않도록 생성 단계에서 이미 쓰인 번호면 다시 뽑는다.
      */
     private String generateAccountNumber() {
-        return "VA" + UUID.randomUUID().toString().replace("-", "").substring(0, 10).toUpperCase();
+        String accountNumber;
+        do {
+            accountNumber = ACCOUNT_NUMBER_PREFIX + String.valueOf(
+                    ACCOUNT_NUMBER_PAD_OFFSET + ThreadLocalRandom.current().nextInt(ACCOUNT_NUMBER_RANDOM_BOUND)).substring(1);
+        } while (accountRepository.findByAccountNumber(accountNumber).isPresent());
+        return accountNumber;
+    }
+
+    /**
+     * 예치금 월 이자 지급(AccountInterestJob이 매월 1일 계좌마다 호출). balance(예치금) 기준으로
+     * Account.calculateMonthlyInterest()만큼 지급하고 원장에 INTEREST로 남긴다. 이자는 수익률에
+     * 잡히지 않도록 Account.applyInterest()가 baseBalance도 함께 올린다.
+     *
+     * 같은 달에 잡이 두 번 돌아도(서버 재시작·다중 인스턴스) 중복 지급되지 않도록, paidSince 이후
+     * INTEREST 원장이 이미 있으면 건너뛴다. 주문 체결과 같은 계좌를 동시에 건드릴 수 있어 관리자
+     * 잔고 조정과 동일하게 비관적 락으로 조회한다.
+     *
+     * @param paidSince 이번 달 1일 0시(KST)를 JVM 기본 시간대로 바꾼 값 — 원장 createdAt과 같은 기준
+     * @param interestMonth 이자 대상 월(지급일 기준 지난달), 원장 사유 문구용
+     */
+    @Transactional
+    public void payMonthlyInterest(Long accountId, LocalDateTime paidSince, int interestMonth) {
+        Account account = accountRepository.findAccountWithUserByIdForUpdate(accountId)
+                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+        if (accountTransactionService.existsTransactionSince(accountId, AccountTransactionType.INTEREST, paidSince)) {
+            return;
+        }
+        long interest = account.calculateMonthlyInterest();
+        if (interest <= 0) {
+            return;
+        }
+        long balanceBefore = account.getBalance();
+        account.applyInterest(interest);
+        accountTransactionService.record(account, AccountTransactionType.INTEREST, interest, balanceBefore,
+                null, null, null, String.format("%d월 예치금 이자(연 %s%%)", interestMonth, account.getInterestRate()));
+        log.info("[AccountService] 예치금 이자 지급 - accountId: {}, interest: {}", accountId, interest);
     }
 
     /**

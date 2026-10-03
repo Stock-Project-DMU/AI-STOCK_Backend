@@ -68,6 +68,8 @@ public class OrderService {
     private final NotificationService notificationService;
     // 잔고 변동 원장 기록(ADMIN_API_BACKEND_HANDOFF.md 4.3) — 매수/매도/취소 환불 시점에 record()를 호출한다.
     private final AccountTransactionService accountTransactionService;
+    // 매도 거래 수수료 차감(지정가 매도 OrderExecutionService와 공용).
+    private final TradeFeeService tradeFeeService;
     // 관리자 강제취소 감사 로그(ADMIN_API_BACKEND_HANDOFF.md 5.2) — 이 서비스가 admin 도메인의
     // AuditLogService를 직접 호출하지 않고 AdminOrderCancelledEvent를 발행하기만 한다
     // (코드리뷰 반영, 2026-09) — order가 admin의 서비스를 직접 주입받으면 admin↔order 양방향
@@ -129,7 +131,13 @@ public class OrderService {
         boolean isBuy = request.orderType() == OrderType.BUY;
         accountTransactionService.record(account, isBuy ? AccountTransactionType.ORDER_BUY : AccountTransactionType.ORDER_SELL,
                 isBuy ? -totalAmount : totalAmount, balanceBefore, order.getOrderId(), null, null,
-                (isBuy ? "시장가 매수" : "시장가 매도") + " 체결");
+                order.describeStockAndQuantity() + (isBuy ? " 시장가 매수" : " 시장가 매도"));
+
+        // 매도 거래 수수료(체결금액 × 0.1%, order.execute()가 계산해 둔 Order.fee) — 매도 대금과 구분되도록
+        // 원장에 따로 남긴다.
+        if (!isBuy) {
+            tradeFeeService.applySellFee(account, order);
+        }
 
         notificationService.notifyOrder(userId, order.getOrderId(), "주문 체결", buildExecutionMessage(order));
 
@@ -267,7 +275,7 @@ public class OrderService {
         // (보유 주식을 이미 갖고 있어 별도 예약 잠금이 필요 없음) 기록하지 않는다.
         if (request.orderType() == OrderType.BUY) {
             accountTransactionService.record(account, AccountTransactionType.ORDER_BUY, -totalAmount, balanceBefore,
-                    order.getOrderId(), null, null, "지정가 매수 주문 등록(잔고 동결)");
+                    order.getOrderId(), null, null, order.describeStockAndQuantity() + " 지정가 매수 주문(잔고 동결)");
         }
 
         PendingOrderDto pendingOrderDto = PendingOrderDto.builder()
@@ -352,7 +360,7 @@ public class OrderService {
             long balanceBefore = account.getBalance();
             account.unfreezeForOrder(refundAmount);
             accountTransactionService.record(account, AccountTransactionType.ORDER_REFUND, refundAmount, balanceBefore,
-                    order.getOrderId(), null, null, "지정가 매수 주문 취소(동결 해제)");
+                    order.getOrderId(), null, null, order.describeStockAndQuantity() + " 지정가 매수 주문 취소 환불");
         }
 
         order.cancel();
@@ -397,7 +405,7 @@ public class OrderService {
             long balanceBefore = account.getBalance();
             account.unfreezeForOrder(refundAmount);
             accountTransactionService.record(account, AccountTransactionType.ORDER_REFUND, refundAmount, balanceBefore,
-                    order.getOrderId(), null, adminUserId, "관리자 강제취소: " + reason);
+                    order.getOrderId(), null, adminUserId, order.describeStockAndQuantity() + " 관리자 강제취소 환불: " + reason);
         }
 
         order.cancel();
@@ -431,7 +439,7 @@ public class OrderService {
                 long balanceBefore = account.getBalance();
                 account.unfreezeForOrder(refundAmount);
                 accountTransactionService.record(account, AccountTransactionType.ORDER_REFUND, refundAmount, balanceBefore,
-                        order.getOrderId(), null, null, "계좌 정지로 인한 주문 일괄 취소(동결 해제)");
+                        order.getOrderId(), null, null, order.describeStockAndQuantity() + " 계좌 정지로 인한 주문 취소 환불");
             }
             order.cancel();
             notificationService.notifyOrder(account.getUser().getUserId(), order.getOrderId(), "계좌 정지로 주문 취소",

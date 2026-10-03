@@ -1,5 +1,8 @@
 package com.teamfp.aistock.domain.account.service;
 
+import java.time.LocalDateTime;
+import java.util.List;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -47,6 +50,30 @@ public class AccountTransactionService {
                 .reason(reason)
                 .build();
         accountTransactionRepository.save(transaction);
+    }
+
+    /**
+     * since 이후 해당 유형의 원장 기록이 있는지 확인한다(예: 이번 달 예치금 이자가 이미 지급됐는지).
+     */
+    @Transactional(readOnly = true)
+    public boolean existsTransactionSince(Long accountId, AccountTransactionType type, LocalDateTime since) {
+        return accountTransactionRepository.existsByAccount_AccountIdAndTypeAndCreatedAtGreaterThanEqual(accountId, type, since);
+    }
+
+    /**
+     * since 이후 해당 유형의 원장 기록이 계좌와 무관하게 한 건이라도 있는지(예: 이번 달 정기 이자 지급 여부).
+     */
+    @Transactional(readOnly = true)
+    public boolean existsAnyTransactionSince(AccountTransactionType type, LocalDateTime since) {
+        return accountTransactionRepository.existsByTypeAndCreatedAtGreaterThanEqual(type, since);
+    }
+
+    /**
+     * 계좌의 특정 유형 원장 전체(예: 충전 이력용 AUTO_CHARGE·ADMIN_CHARGE).
+     */
+    @Transactional(readOnly = true)
+    public List<AccountTransaction> getTransactionsByTypes(Long accountId, List<AccountTransactionType> types) {
+        return accountTransactionRepository.findAllByAccount_AccountIdAndTypeIn(accountId, types);
     }
 
     @Transactional(readOnly = true)

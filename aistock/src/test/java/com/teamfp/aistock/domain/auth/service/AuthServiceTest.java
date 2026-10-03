@@ -241,8 +241,8 @@ class AuthServiceTest {
             given(passwordEncoder.encode(request.getPassword())).willReturn("encoded-password");
             stubUserSaveWithGeneratedId(1L);
             given(accountService.createAccount(eq(1L), any(CreateAccountRequest.class)))
-                    .willReturn(new AccountInfoResponse(10L, "기본 계좌", "VA0000000000",
-                            10_000_000L, 0L, 10_000_000L, 0, AccountStatus.ACTIVE));
+                    .willReturn(new AccountInfoResponse(10L, "기본 계좌", "110000000000",
+                            10_000_000L, 0L, 10_000_000L, 0, 3, new java.math.BigDecimal("0.50"), 0L, AccountStatus.ACTIVE));
 
             SignupResponse response = authService.signup(request);
 
@@ -367,8 +367,8 @@ class AuthServiceTest {
             given(passwordEncoder.encode(anyString())).willReturn("encoded-password");
             stubUserSaveWithGeneratedId(2L);
             given(accountService.createAccount(eq(2L), any(CreateAccountRequest.class)))
-                    .willReturn(new AccountInfoResponse(11L, "기본 계좌", "VA0000000001",
-                            10_000_000L, 0L, 10_000_000L, 0, AccountStatus.ACTIVE));
+                    .willReturn(new AccountInfoResponse(11L, "기본 계좌", "110000000001",
+                            10_000_000L, 0L, 10_000_000L, 0, 3, new java.math.BigDecimal("0.50"), 0L, AccountStatus.ACTIVE));
 
             SignupResponse response = authService.signup(request);
 

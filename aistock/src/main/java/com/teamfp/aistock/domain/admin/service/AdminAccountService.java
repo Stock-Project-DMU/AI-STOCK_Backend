@@ -127,6 +127,9 @@ public class AdminAccountService {
             accountTransactionService.record(account, AccountTransactionType.ADMIN_DEDUCTION, -request.amount(),
                     balanceBefore, null, null, adminUserId, request.reason());
         } else if (request.type() == AccountTransactionType.ADMIN_CHARGE) {
+            if (!account.canDeposit(request.amount())) {
+                throw new CustomException(ErrorCode.DEPOSIT_LIMIT_EXCEEDED);
+            }
             account.applyAdminCharge(request.amount());
             accountTransactionService.record(account, AccountTransactionType.ADMIN_CHARGE, request.amount(),
                     balanceBefore, null, null, adminUserId, request.reason());
