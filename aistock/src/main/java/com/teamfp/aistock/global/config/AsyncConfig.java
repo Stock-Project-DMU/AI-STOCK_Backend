@@ -39,6 +39,20 @@ public class AsyncConfig {
         return executor;
     }
 
+    // 서버 기동 시 실행하는 보충 배치(AccountInterestJob.payMissedMonthlyInterest — 이번 달 미지급 예치금
+    // 이자)용. 기동 스레드에서 돌면 계좌가 많을수록 서버 준비가 늦어지고 그동안 들어온 주문과 계좌 락이
+    // 부딪힐 수 있어 별도 스레드 하나에서 순서대로 처리한다.
+    @Bean
+    public Executor batchTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(1);
+        executor.setQueueCapacity(10);
+        executor.setThreadNamePrefix("batch-executor-");
+        executor.initialize();
+        return executor;
+    }
+
     // AiPlanningService.converseWithTools()가 Gemini의 parallel function calling 응답(한
     // 라운드에서 여러 도구를 동시에 요청)을 실제로 동시에 실행할 때 쓴다. 도구 실행은 DART/네이버
     // 호출을 기다리는 블로킹 I/O라, ForkJoinPool.commonPool()(다른 병렬 스트림과 공유)을 쓰면

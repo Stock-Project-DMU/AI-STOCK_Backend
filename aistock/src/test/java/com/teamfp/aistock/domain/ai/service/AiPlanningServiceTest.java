@@ -210,7 +210,7 @@ class AiPlanningServiceTest {
         @DisplayName("계좌가 있으면 AccountService가 돌려준 계좌 목록의 첫 번째 계좌로 보유종목을 조회한다")
         void withAccounts_usesFirstAccountFromAccountService() {
             AccountInfoResponse accountInfo = new AccountInfoResponse(
-                    ACCOUNT_ID, "계좌A", "ACC-0001", 1_000_000L, 0L, 1_000_000L, 0, AccountStatus.ACTIVE);
+                    ACCOUNT_ID, "계좌A", "ACC-0001", 1_000_000L, 0L, 1_000_000L, 0, 3, new java.math.BigDecimal("0.50"), 0L, AccountStatus.ACTIVE);
 
             when(sessionRepository.findByUserIdAndSessionId(USER_ID, SESSION_ID)).thenReturn(Optional.of(session));
             when(messageRepository.findRecentBySessionId(anyLong(), any())).thenReturn(List.of());

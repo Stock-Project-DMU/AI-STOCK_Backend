@@ -13,6 +13,7 @@ import com.teamfp.aistock.domain.order.entity.PriceType;
  *
  * feature/mypage-profit(GET /api/orders)와 feature/admin-*(AdminUserDetailResponse 내부 필드)에서
  * 재사용하므로 order-limit 단계에서는 Order 엔티티 → 이 DTO로 변환하는 from()만 준비해둔다.
+ * fee는 매도 체결 거래 수수료(원)이고 매수·미체결·취소 주문은 0이다.
  */
 public record OrderHistoryResponse(
         Long accountId,
@@ -24,6 +25,7 @@ public record OrderHistoryResponse(
         long orderPrice,
         Long execPrice,
         int quantity,
+        long fee,
         OrderStatus status,
         LocalDateTime orderedAt,
         LocalDateTime executedAt
@@ -40,6 +42,7 @@ public record OrderHistoryResponse(
                 order.getOrderPrice(),
                 order.getExecPrice(),
                 order.getQuantity(),
+                order.getFee(),
                 order.getStatus(),
                 order.getOrderedAt(),
                 order.getExecutedAt()

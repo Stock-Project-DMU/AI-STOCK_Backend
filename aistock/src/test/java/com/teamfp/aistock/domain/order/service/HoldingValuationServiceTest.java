@@ -16,8 +16,11 @@ import com.teamfp.aistock.domain.order.dto.HoldingValuationDto;
 import com.teamfp.aistock.domain.order.entity.Holding;
 import com.teamfp.aistock.domain.order.repository.HoldingRepository;
 import com.teamfp.aistock.domain.stock.dto.StockPriceDto;
+import com.teamfp.aistock.domain.stock.service.StockQuoteService;
 import com.teamfp.aistock.domain.user.entity.Role;
 import com.teamfp.aistock.domain.user.entity.User;
+import com.teamfp.aistock.global.exception.CustomException;
+import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.redis.RedisStockCacheService;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -38,6 +41,9 @@ class HoldingValuationServiceTest {
     @Mock
     private RedisStockCacheService redisStockCacheService;
 
+    @Mock
+    private StockQuoteService stockQuoteService;
+
     private HoldingValuationService holdingValuationService;
 
     private static final Long ACCOUNT_ID = 100L;
@@ -47,7 +53,7 @@ class HoldingValuationServiceTest {
 
     @BeforeEach
     void setUp() {
-        holdingValuationService = new HoldingValuationService(holdingRepository, redisStockCacheService);
+        holdingValuationService = new HoldingValuationService(holdingRepository, redisStockCacheService, stockQuoteService);
 
         User user = User.builder()
                 .loginId("tester")
@@ -105,11 +111,39 @@ class HoldingValuationServiceTest {
     }
 
     @Test
-    @DisplayName("시세 캐시가 비어있으면 평단가로 대체한다")
-    void getHoldingValuations_priceCacheMissFallsBackToAvgPrice() {
+    @DisplayName("시세 캐시가 비어있으면 마지막 시세(장 마감 후에는 종가)로 평가한다")
+    void getHoldingValuations_priceCacheMissUsesLastQuote() {
         Holding holding = holdingOf(10, 50_000L);
         when(holdingRepository.findAllByAccountId(ACCOUNT_ID)).thenReturn(List.of(holding));
         when(redisStockCacheService.getStockPrices(List.of(STOCK_CODE))).thenReturn(Map.of());
+        when(stockQuoteService.getStockPrice(STOCK_CODE)).thenReturn(
+                StockPriceDto.builder().stockCode(STOCK_CODE).stockName("삼성전자").currentPrice(55_000L).build());
+
+        List<HoldingValuationDto> result = holdingValuationService.getHoldingValuations(ACCOUNT_ID);
+
+        assertThat(result.get(0).currentPrice()).isEqualTo(55_000L);
+    }
+
+    @Test
+    @DisplayName("시세 캐시도 비고 마지막 시세도 없으면 평단가로 대체한다")
+    void getHoldingValuations_noQuoteFallsBackToAvgPrice() {
+        Holding holding = holdingOf(10, 50_000L);
+        when(holdingRepository.findAllByAccountId(ACCOUNT_ID)).thenReturn(List.of(holding));
+        when(redisStockCacheService.getStockPrices(List.of(STOCK_CODE))).thenReturn(Map.of());
+        when(stockQuoteService.getStockPrice(STOCK_CODE)).thenReturn(null);
+
+        List<HoldingValuationDto> result = holdingValuationService.getHoldingValuations(ACCOUNT_ID);
+
+        assertThat(result.get(0).currentPrice()).isEqualTo(50_000L);
+    }
+
+    @Test
+    @DisplayName("마지막 시세 조회가 실패(시세 제공처 장애)해도 목록 조회는 실패하지 않고 평단가로 대체한다")
+    void getHoldingValuations_quoteFailureFallsBackToAvgPrice() {
+        Holding holding = holdingOf(10, 50_000L);
+        when(holdingRepository.findAllByAccountId(ACCOUNT_ID)).thenReturn(List.of(holding));
+        when(redisStockCacheService.getStockPrices(List.of(STOCK_CODE))).thenReturn(Map.of());
+        when(stockQuoteService.getStockPrice(STOCK_CODE)).thenThrow(new CustomException(ErrorCode.MARKET_DATA_UNAVAILABLE));
 
         List<HoldingValuationDto> result = holdingValuationService.getHoldingValuations(ACCOUNT_ID);
 

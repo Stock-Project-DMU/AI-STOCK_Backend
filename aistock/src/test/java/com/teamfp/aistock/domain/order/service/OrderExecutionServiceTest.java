@@ -108,6 +108,7 @@ class OrderExecutionServiceTest {
         // 모킹해버리면 여기서 검증할 대상이 사라진다. 대신 그 서비스가 의존하는
         // holdingRepository는 이미 모킹돼 있는 것을 그대로 재사용한다.
         ReflectionTestUtils.setField(orderExecutionService, "holdingSettlementService", new HoldingSettlementService(holdingRepository));
+        ReflectionTestUtils.setField(orderExecutionService, "tradeFeeService", new TradeFeeService(accountTransactionService));
     }
 
     private Order pendingOrder(OrderType orderType, long orderPrice, int quantity) {
@@ -206,7 +207,7 @@ class OrderExecutionServiceTest {
     class ExecuteSell {
 
         @Test
-        @DisplayName("보유수량이 충분하면 지정가보다 높은 현재가로 체결되고 잔고가 늘어난다")
+        @DisplayName("보유수량이 충분하면 지정가보다 높은 현재가로 체결되고 매도 수수료 0.1%를 뺀 금액만큼 잔고가 늘어난다")
         void success() {
             Order order = pendingOrder(OrderType.SELL, 60_000L, 5);
             when(orderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
@@ -223,7 +224,9 @@ class OrderExecutionServiceTest {
             // 지정가 60,000원인데 현재가 61,000원에 체결 → 더 비싸게 팔린다
             orderExecutionService.execute(pendingOrderDto(1L, OrderType.SELL, 60_000L, 5), 61_000L);
 
-            assertThat(account.getBalance()).isEqualTo(1_305_000L); // 1,000,000 + 61,000*5
+            // 1,000,000 + 61,000*5(305,000) - 수수료 305(0.1%)
+            assertThat(account.getBalance()).isEqualTo(1_304_695L);
+            assertThat(order.getFee()).isEqualTo(305L);
             assertThat(order.getExecPrice()).isEqualTo(61_000L);
             assertThat(holding.getQuantity()).isEqualTo(5);
             assertThat(order.getStatus()).isEqualTo(OrderStatus.EXECUTED);

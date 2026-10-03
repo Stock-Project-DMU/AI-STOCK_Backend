@@ -101,6 +101,8 @@
   성과보다 수익률이 부풀어 보이는 문제가 생긴다(예: 원금 1000만으로 80% 수익 후 1000만
   충전 시, baseBalance를 안 올리면 표시 수익률이 180%로 왜곡됨). 최대 충전 횟수(3회) 검증은
   Entity가 아니라 `AccountService.chargeBalance()`에서 한다.
+  (2026-10-01 feature/mypage-improvement 변경: 충전 금액은 고정 1000만원이 아니라 사용자가 입력한
+  금액이고, 한도 상수는 `Account.MAX_CHARGE_COUNT`로 옮겼다 — 8-28 참고.)
 
 ### 1-2. Repository 인터페이스 및 메서드
 
@@ -181,7 +183,8 @@
 | `MARKET_DATA_UNAVAILABLE` | 503 (외부 장애와 빈 목록 구분 처리, #05, 2026-09-24 추가 — 외부 시세 데이터 제공사 REST 호출(토큰 발급 포함)이 네트워크 오류·HTTP 오류로 실패한 경우. `infra/marketdata`의 REST 클라이언트는 이 예외를 던지고, 빈 목록/`Optional.empty()`는 "제공사가 정상 응답했지만 데이터가 없음"만 뜻한다. `EXTERNAL_API_ERROR`(Gemini/DART/네이버 등 다른 외부 API)와 구분) |
 | `ORDER_ALREADY_PROCESSED` | 409 (order-limit 추가 — 이미 `EXECUTED`/`CANCELLED` 상태인 주문을 다시 취소(`DELETE /api/orders/{orderId}`)하려는 경우) |
 | `ACCOUNT_LIMIT_EXCEEDED` | 400 (mypage-account 추가 — 유저가 이미 계좌 3개를 보유한 상태에서 추가 개설을 시도하는 경우) |
-| `CHARGE_LIMIT_EXCEEDED` | 400 (mypage-account 추가 — 계좌의 `chargeCount`가 이미 3회에 도달한 상태에서 추가 충전을 시도하는 경우. 문의(inquiries) 기능으로 관리자에게 요청하도록 안내) |
+| `CHARGE_LIMIT_EXCEEDED` | 400 (mypage-account 추가 — 계좌의 `chargeCount`가 이미 3회에 도달한 상태에서 직접 충전을 시도하는 경우. mypage-improvement부터 충전 요청(`charge-requests`)으로 관리자에게 요청하도록 안내) |
+| `CHARGE_REQUEST_NOT_ALLOWED` | 400 (mypage-improvement 추가 — 직접 충전 횟수가 남아 있는(`chargeCount < 3`) 계좌가 관리자 충전 요청을 만들려는 경우. 직접 충전(`POST .../charge`)으로 바로 충전하도록 안내) |
 | `SELF_STATUS_CHANGE_NOT_ALLOWED` | 400 (feature/admin-user 코드리뷰 추가 — 관리자가 `PATCH /api/admin/users/{userId}/status`로 본인 계정을 SUSPENDED로 정지시키려는 경우) |
 | `LAST_ADMIN_SUSPEND_NOT_ALLOWED` | 400 (feature/admin-user 코드리뷰 추가 — 활성 상태인 ADMIN이 본인 하나만 남은 상태에서 그 ADMIN을 정지시키려는 경우. 관리자 전원이 `/api/admin/**`에서 잠기는 lockout을 막기 위함) |
 | `INVALID_NEWS_OUTLET` | 400 (feature/ai-news 추가 — `PUT /api/ai/news/settings`에 `NewsRelevanceMatcher.OUTLET_NAMES`에 없는 언론사 도메인을 보낸 경우. `AiNewsService.UNRELIABLE_BRIEFING_OUTLET_DOMAINS`(2026-08-24 추가)에 속한 도메인도 동일하게 거부) |
@@ -525,7 +528,7 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 | 엔드포인트 (OrderController 추가) | `POST /api/orders` (priceType=LIMIT 공용), `DELETE /api/orders/{orderId}` |
 | Service (OrderService 추가) | `createLimitOrder(Long userId, CreateOrderRequest request)`(fix/realtime-trade-fix — 커밋 직후 private `tryImmediateExecution(String stockCode)`로 현재가 기준 체결 조건을 1회 확인, 취소 경로는 private `removePendingOrder(Order order)`로 대기 리스트 제거와 주문 구독 감소를 함께 처리), `cancelOrder(Long userId, Long orderId)`, `cancelAllPendingOrdersForSuspension(Account account)`(feature/admin-account 코드리뷰 반영, v8 — `AdminAccountService.updateAccountStatus()`가 계좌를 SUSPENDED로 바꿀 때 함께 호출. `cancelOrder()`와 달리 소유권 검증·SUSPENDED 차단을 하지 않는다(정지 처리 자체의 일부이므로). `OrderRepository.findAllPendingByAccountIdForUpdate(accountId)`로 그 계좌의 PENDING 지정가 주문 전부를 비관적 락으로 조회해, 매수 주문이면 `account.unfreezeForOrder()`로 동결 해제 후 `order.cancel()`, 커밋 후 Redis `pending:orders`에서도 제거한다 — 정지 후에도 tick 체결이 계속되거나 사용자가 취소도 못 하는 상태로 남는 것을 막는다, 8-16 참고) |
 | Execution Service | `OrderExecutionService` — `execute(PendingOrderDto pendingOrder, long currentPrice)`, `checkAndExecute(String stockCode, long currentPrice)` |
-| Response DTO | `OrderHistoryResponse`(accountId, orderId, stockCode, stockName, orderType, priceType, orderPrice, execPrice, quantity, status, orderedAt, executedAt) |
+| Response DTO | `OrderHistoryResponse`(accountId, orderId, stockCode, stockName, orderType, priceType, orderPrice, execPrice, quantity, fee, status, orderedAt, executedAt) |
 | Holding 공용 서비스 | `HoldingSettlementService`(domain/order/service) — `increaseOrCreate(Account account, String stockCode, String stockName, int quantity, long execPrice)`, `decrease(Holding holding, int quantity)`. `OrderService.executeBuy()`/`executeSell()`(시장가)와 `OrderExecutionService.executeBuy()`/`executeSell()`(지정가)가 각자 갖고 있던 동일한 보유종목 갱신 로직을 하나로 합친 것 |
 
 > feature/order-limit 정리: `createMarketOrder()`/`createLimitOrder()`의 매수·매도 체결이 각자
@@ -553,10 +556,10 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 | 구분 | 이름 |
 |---|---|
 | Controller | `AccountController`, `WatchlistController`, `RecentViewedController` |
-| 엔드포인트 | `GET /api/accounts`(내 계좌 목록, 최대 3개), `POST /api/accounts`(계좌 개설), `POST /api/accounts/{accountId}/charge`(가상캐시 충전), `GET /api/watchlist`, `POST /api/watchlist`, `DELETE /api/watchlist/{stockCode}`, `GET /api/recent-viewed`, `POST /api/recent-viewed` |
-| Service | `AccountService` — `getMyAccounts(Long userId)`, `createAccount(Long userId, CreateAccountRequest request)`, `chargeBalance(Long userId, Long accountId)` / `WatchlistService` — `getMyWatchlist(Long userId)`, `addWatchlist(Long userId, String stockCode)`, `removeWatchlist(Long userId, String stockCode)` / `RecentViewedService` — `getMyRecentViewed(Long userId)`, `recordView(Long userId, String stockCode)` |
-| Request DTO | `CreateAccountRequest`(accountName), `WatchlistRequest`(stockCode), `RecentViewedRequest`(stockCode) |
-| Response DTO | `AccountInfoResponse`(accountId, accountName, accountNumber, balance, frozenBalance, baseBalance, chargeCount, `status`), `WatchlistResponse`(stockCode, stockName, addedAt), `RecentViewedResponse`(stockCode, stockName, viewedAt) |
+| 엔드포인트 | `GET /api/accounts`(내 계좌 목록, 최대 3개), `POST /api/accounts`(계좌 개설), `POST /api/accounts/{accountId}/charge`(가상캐시 직접 충전, body: `ChargeBalanceRequest`), `GET /api/watchlist`, `POST /api/watchlist`, `DELETE /api/watchlist/{stockCode}`, `GET /api/recent-viewed`, `POST /api/recent-viewed` |
+| Service | `AccountService` — `getMyAccounts(Long userId)`, `createAccount(Long userId, CreateAccountRequest request)`, `chargeBalance(Long userId, Long accountId, ChargeBalanceRequest request)`, `payMonthlyInterest(Long accountId, LocalDateTime paidSince, int interestMonth)` / `WatchlistService` — `getMyWatchlist(Long userId)`, `addWatchlist(Long userId, String stockCode)`, `removeWatchlist(Long userId, String stockCode)` / `RecentViewedService` — `getMyRecentViewed(Long userId)`, `recordView(Long userId, String stockCode)` |
+| Request DTO | `CreateAccountRequest`(accountName), `ChargeBalanceRequest`(amount), `WatchlistRequest`(stockCode), `RecentViewedRequest`(stockCode) |
+| Response DTO | `AccountInfoResponse`(accountId, accountName, accountNumber, balance, frozenBalance, baseBalance, chargeCount, maxChargeCount, interestRate, totalInterest, `status`), `WatchlistResponse`(stockCode, stockName, addedAt), `RecentViewedResponse`(stockCode, stockName, viewedAt) |
 
 > 유저 1명당 계좌 최대 3개(성향별로 나눠 투자 가능 — 예: "계좌 A"는 안정적으로, "계좌 B"는
 > 공격적으로), 계좌당 가상캐시 충전 최대 3회(1회당 고정 1000만원, 시점은 유저 자유 — 가입
@@ -1546,7 +1549,7 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 
 | 구분 | 이름 |
 |---|---|
-| Entity | `AccountTransaction`(domain/account/entity) — append-only(수정 메서드 없음). transactionId, account, type(`AccountTransactionType`: INITIAL_GRANT/AUTO_CHARGE/ADMIN_CHARGE/ADMIN_DEDUCTION/ORDER_BUY/ORDER_SELL/ORDER_REFUND), amount(부호 있는 증감액), balanceBefore, balanceAfter, relatedOrderId/relatedChargeRequestId/processedBy(전부 FK 아닌 단순 참조 ID), reason, createdAt |
+| Entity | `AccountTransaction`(domain/account/entity) — append-only(수정 메서드 없음). transactionId, account, type(`AccountTransactionType`: INITIAL_GRANT/AUTO_CHARGE/ADMIN_CHARGE/ADMIN_DEDUCTION/ORDER_BUY/ORDER_SELL/ORDER_REFUND/INTEREST/TRADE_FEE), amount(부호 있는 증감액), balanceBefore, balanceAfter, relatedOrderId/relatedChargeRequestId/processedBy(전부 FK 아닌 단순 참조 ID), reason, createdAt |
 | Repository | `AccountTransactionRepository`(domain/account/repository) — `findAllByAccount_AccountId` |
 | Service | `AccountTransactionService`(domain/account/service) — `record(Account account, AccountTransactionType type, long amount, long balanceBefore, Long relatedOrderId, Long relatedChargeRequestId, Long processedBy, String reason)`, `getTransactions(Long accountId, Pageable pageable)` |
 | 사용자 엔드포인트 | `GET /api/accounts/{accountId}/transactions` (AccountController에 추가) |
@@ -1565,6 +1568,10 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 > - `OrderService.cancelOrder()`/`adminCancelOrder()`/`cancelAllPendingOrdersForSuspension()`(매수 주문 취소·환불) → ORDER_REFUND
 > - `AdminChargeRequestService.decide()`(APPROVED) → ADMIN_CHARGE
 > - `AdminAccountService.adjustBalance()` → ADMIN_CHARGE 또는 ADMIN_DEDUCTION
+> - `AccountService.payMonthlyInterest()`(매월 1일 예치금 이자, mypage-improvement) → INTEREST
+> - `OrderService.createMarketOrder()`/`OrderExecutionService.executeSell()`(매도 체결 직후 수수료 차감, mypage-improvement) → TRADE_FEE
+>
+> 주문 관련 원장 사유(reason)에는 mypage-improvement부터 `Order.describeStockAndQuantity()`("종목명 N주")를 앞에 붙인다.
 >
 > `balanceBefore`는 호출부가 Account 엔티티의 잔고 변경 메서드를 부르기 "직전" 값을 직접
 > 읽어서 넘긴다(`AccountTransactionService.record()` Javadoc 참고) — `account.getBalance()`는
@@ -1632,6 +1639,38 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 > `AuditLog.requestIp`에 채운다. 인증 컨텍스트가 없는 경로(예: 통합 테스트에서 직접 서비스 호출)는
 > `getDetails()`가 null이라 여전히 requestIp가 null로 남는다.
 
+### 8-28. feature/mypage-improvement (2026-10-01 신규 — 계좌 정보 보완: 예치 이자율·거래 수수료·직접 충전·계좌번호)
+
+| 구분 | 이름 |
+|---|---|
+| Account 엔티티 상수 | `MAX_CHARGE_COUNT`(3, public — `AccountService`의 private 상수를 옮김), `MAX_DEPOSIT_AMOUNT`(1조원 — 예치금 balance+frozenBalance 최대치, 충전으로만 제한), `DEFAULT_INTEREST_RATE`(`BigDecimal` 0.50, public), `MONTHLY_INTEREST_DIVISOR`(1200, private) |
+| Account 엔티티 필드 | `interestRate`(`BigDecimal`, `accounts.interest_rate DECIMAL(5,2) DEFAULT 0.50`), `totalInterest`(`long`, `accounts.total_interest BIGINT DEFAULT 0` — 이자 누계, `applyInterest()`가 증가) |
+| Account 엔티티 메서드 | `canDeposit(long amount)`(충전 후 예치금 한도 이내 여부), `applyTradeFee(long fee)`(balance만 차감 — 수수료는 실제 비용이라 수익률에 반영), `hasRemainingChargeCount()`, `calculateMonthlyInterest()`(balance × 연이율 ÷ 1200, 원 미만 버림 — frozenBalance 제외), `applyInterest(long amount)`(balance·baseBalance 함께 증가 — 이자는 수익률에 안 잡힘) |
+| Order 엔티티 | 필드 `fee`(`orders.fee BIGINT DEFAULT 0`), 상수 `SELL_FEE_RATE_PER_MILLE`(1 = 0.1%, private), 정적 메서드 `calculateSellFee(long tradeAmount)` — `execute()`가 매도일 때 이 값으로 `fee`를 채운다 |
+| AccountTransactionType | `INTEREST`, `TRADE_FEE` 추가 |
+| Service | `AccountService.payMonthlyInterest(Long accountId, LocalDateTime paidSince, int interestMonth)`, `AccountService` 상수 `ACCOUNT_NUMBER_PREFIX`("110"), `ACCOUNT_NUMBER_RANDOM_BOUND`, `ACCOUNT_NUMBER_PAD_OFFSET` / `AccountTransactionService.existsTransactionSince(Long accountId, AccountTransactionType type, LocalDateTime since)` |
+| Scheduler | `AccountInterestJob`(domain/account/service) — `payMonthlyInterest()`, `@Scheduled(cron = "0 0 0 1 * *", zone = "Asia/Seoul")`, `payMissedMonthlyInterest()`(`@Async("batchTaskExecutor")` + `@EventListener(ApplicationReadyEvent.class)` — 이번 달 정기 지급 기록이 아예 없을 때만 서버 기동 시 보충 지급), `currentMonthStart()`. 실행기 `AsyncConfig.batchTaskExecutor()`(단일 스레드) / `AccountTransactionService.existsAnyTransactionSince(AccountTransactionType type, LocalDateTime since)` |
+| 충전 이력 | `GET /api/accounts/{accountId}/charge-history` — `AccountController.getMyChargeHistory`, `ChargeRequestService.getChargeHistory(Long userId, Long accountId)`. 응답 `List<ChargeHistoryResponse>`(source, status, amount, balanceAfter, reason, decisionReason, requestedAt, decidedAt, requestId — 정적 팩토리 `fromSelfCharge`, `fromAdminGrant`, `fromRequest`), enum `ChargeSource`(domain/account/dto — SELF/ADMIN). 직접 충전(AUTO_CHARGE)·관리자 충전 요청·관리자 수동 지급(요청과 무관한 ADMIN_CHARGE)을 합쳐 최신순 |
+| 충전 이력 Repository/Service | `AccountTransactionRepository.findAllByAccount_AccountIdAndTypeIn(Long accountId, Collection<AccountTransactionType> types)`, `AccountTransactionService.getTransactionsByTypes(Long accountId, List<AccountTransactionType> types)`, `ChargeRequestRepository.findAllByAccount_AccountId(Long accountId)` |
+| 매도 수수료 Service | `TradeFeeService`(domain/order/service) — `applySellFee(Account account, Order order)`. 시장가(OrderService)·지정가(OrderExecutionService) 매도가 `order.execute()` 직후 공용으로 호출 |
+| Repository | `AccountRepository.findAllAccountIdsOpenedBefore(LocalDateTime openedBefore)`(이번 달 1일 이전 개설 계좌만 이자 대상), `AccountTransactionRepository.existsByTypeAndCreatedAtGreaterThanEqual(AccountTransactionType type, LocalDateTime createdAt)`, `AccountTransactionRepository.existsByAccount_AccountIdAndTypeAndCreatedAtGreaterThanEqual(Long accountId, AccountTransactionType type, LocalDateTime createdAt)` |
+| Request DTO | `ChargeBalanceRequest`(amount — `@Max(MAX_CHARGE_AMOUNT)`, 상수 `MAX_CHARGE_AMOUNT` = 1억원), `ChargeRequestCreateRequest.MAX_REQUEST_AMOUNT`(관리자 충전 요청 1회 최대 1조원, `@Max`), `AdminAccountAdjustmentRequest.MAX_ADJUSTMENT_AMOUNT`(관리자 잔고 조정 1회 최대 1조원, `@Max`) |
+| Response DTO 필드 추가 | `AccountInfoResponse.maxChargeCount`, `AccountInfoResponse.interestRate`, `AccountInfoResponse.totalInterest`, `OrderHistoryResponse.fee` |
+| 보유종목 평가 | `HoldingValuationService`가 `StockQuoteService`를 추가로 주입받아, Redis 시세 캐시가 빈 종목은 `fetchLastQuote(String stockCode)`로 마지막 시세(장 마감 후 종가)를 조회한다. 실패 시에만 평단가로 대체 |
+| ErrorCode | `DEPOSIT_LIMIT_EXCEEDED`(400 — 충전 후 예치금이 1조원을 넘는 직접 충전·충전 요청·관리자 승인·관리자 증액), `CHARGE_REQUEST_NOT_ALLOWED`, `ACCOUNT_SUSPENDED_CHARGE`(400 — 거래 정지 계좌의 직접 충전·충전 요청. 주문용 `ACCOUNT_SUSPENDED`와 문구 분리) |
+| Migration | `mypage_account_migration.sql`(저장소 루트, schema.sql v17) |
+| Order 엔티티 메서드 | `describeStockAndQuantity()` — 원장 사유용 "종목명 N주" 문구 |
+
+> - **예치 이자율**: 모든 계좌는 개설 시 연 0.50% 고정. 매월 1일 0시(KST) `AccountInterestJob`이 계좌마다
+>   `AccountService.payMonthlyInterest()`를 별도 트랜잭션으로 호출해 balance(예치금) 기준 한 달치 이자를
+>   지급한다. 같은 달 INTEREST 원장이 이미 있으면 건너뛰어 중복 지급을 막는다.
+> - **거래 수수료**: 매도 체결 시에만 체결금액 × 0.1%(원 미만 버림)를 balance에서 차감하고, 매도 대금(ORDER_SELL)과
+>   분리된 TRADE_FEE 원장으로 남긴다. 매수는 수수료가 없다.
+> - **충전**: `POST /api/accounts/{accountId}/charge`는 계좌당 3회까지 사용자가 입력한 금액을 관리자 승인 없이 바로
+>   충전한다(정지 계좌 불가). 3회를 다 쓴 계좌만 `POST /api/accounts/{accountId}/charge-requests`로 관리자 승인
+>   충전을 요청할 수 있다(남아 있으면 `CHARGE_REQUEST_NOT_ALLOWED`).
+> - **계좌번호**: "110" + 랜덤 9자리 숫자(12자리)를 하이픈 없이 저장한다. 화면에서 `110-123-456789`처럼 표시한다.
+
 ---
 
 ## 9. 공통 변수명 컨벤션 (모든 도메인 공통 적용)
@@ -1650,7 +1689,7 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 > (Spring Data Web `PageableHandlerMethodArgumentResolver`가 요청 `size`를 이 값으로 clamp).
 # 프론트 기능 완성 API (2026-09-09)
 
-- `RealizedReturnService.getReturns/calculateReturns`, `RealizedReturnController`, `RealizedReturnResponse(orderId, stockCode, stockName, quantity, averageCost, sellPrice, profitAmount, profitRate, executedAt)`: GET `/api/accounts/{accountId}/returns`. 체결 순서대로 매수 평균단가(원 단위 내림)를 재현하여 매도 실현손익 계산. 수수료·배당·이자는 현재 모의주문 원장에 없어 계산에 포함하지 않는다.
+- `RealizedReturnService.getReturns/calculateReturns`, `RealizedReturnController`, `RealizedReturnResponse(orderId, stockCode, stockName, quantity, averageCost, sellPrice, profitAmount, profitRate, executedAt)`: GET `/api/accounts/{accountId}/returns`. 체결 순서대로 매수 평균단가(원 단위 내림)를 재현하여 매도 실현손익 계산. 매도 거래 수수료(`OrderHistoryResponse.fee`)는 차감하고(mypage-improvement), 배당·이자는 포함하지 않는다.
 
 - `RedisAuthCodeService.VERIFY_EMAIL_SCRIPT`: 인증 코드 검증·실패횟수 제한·원자적 소비. 신규 API 복구 요청의 인증코드 재사용 및 무제한 추측 방지.
 - `SignupRequest.investmentLevel`: 가입 화면에서 선택한 투자 경험을 기존 투자 프로필에 저장.

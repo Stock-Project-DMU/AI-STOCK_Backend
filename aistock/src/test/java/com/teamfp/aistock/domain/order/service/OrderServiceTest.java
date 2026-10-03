@@ -117,6 +117,8 @@ class OrderServiceTest {
         // 모킹해버리면 여기서 검증할 대상이 사라진다. 대신 그 서비스가 의존하는
         // holdingRepository는 이미 모킹돼 있는 것을 그대로 재사용한다.
         ReflectionTestUtils.setField(orderService, "holdingSettlementService", new HoldingSettlementService(holdingRepository));
+        // TradeFeeService도 실제 구현을 쓴다 — 매도 시 잔고에서 수수료가 빠지는지까지 검증한다.
+        ReflectionTestUtils.setField(orderService, "tradeFeeService", new TradeFeeService(accountTransactionService));
     }
 
     @Test
@@ -247,7 +249,7 @@ class OrderServiceTest {
     class Sell {
 
         @Test
-        @DisplayName("보유수량이 충분하면 즉시 체결되고 잔고가 늘어난다")
+        @DisplayName("보유수량이 충분하면 즉시 체결되고 매도 수수료 0.1%를 뺀 금액만큼 잔고가 늘어난다")
         void sell_success() {
             Holding existing = Holding.builder()
                     .account(account)
@@ -261,8 +263,8 @@ class OrderServiceTest {
 
             CreateOrderResponse response = orderService.createMarketOrder(USER_ID, requestOf(OrderType.SELL, 4));
 
-            // 60,000 * 4 = 240,000원 입금 → 잔고 1,240,000원
-            assertThat(account.getBalance()).isEqualTo(1_240_000L);
+            // 60,000 * 4 = 240,000원 입금 - 수수료 240원(0.1%) → 잔고 1,239,760원
+            assertThat(account.getBalance()).isEqualTo(1_239_760L);
             assertThat(existing.getQuantity()).isEqualTo(6);
             assertThat(response.status()).isEqualTo(OrderStatus.EXECUTED);
             verify(holdingRepository, never()).delete(any());

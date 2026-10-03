@@ -1,5 +1,7 @@
 package com.teamfp.aistock.domain.account.entity;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -38,6 +40,17 @@ import lombok.NoArgsConstructor;
 @EntityListeners(AuditingEntityListener.class)
 public class Account {
 
+    // 사용자가 스스로 충전할 수 있는 최대 횟수. 이 횟수를 다 쓴 뒤부터는 충전 요청
+    // (ChargeRequestService)으로 관리자 승인을 받아야 한다.
+    public static final int MAX_CHARGE_COUNT = 3;
+    // 계좌 예치금(현금 = balance + frozenBalance) 최대 보유액 1조원. 충전(직접 충전·관리자 승인 충전·관리자
+    // 증액)으로는 이 한도를 넘길 수 없다. 매도 대금·이자처럼 투자 결과로 늘어나는 건 막지 않는다.
+    public static final long MAX_DEPOSIT_AMOUNT = 1_000_000_000_000L;
+    // 예치금 이자율(연 %). 계좌 개설 시점에 이 값으로 고정된다.
+    public static final BigDecimal DEFAULT_INTEREST_RATE = new BigDecimal("0.50");
+    // 연이율(%)을 월 이자로 바꿀 때의 분모 — 100(퍼센트) × 12(개월).
+    private static final BigDecimal MONTHLY_INTEREST_DIVISOR = BigDecimal.valueOf(1200);
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "account_id")
@@ -66,9 +79,22 @@ public class Account {
     @Column(name = "frozen_balance", nullable = false)
     private long frozenBalance;
 
-    // 가상캐시 충전 횟수(최대 3회 — 초과분은 관리자 승인 필요). 검증은 AccountService에서 한다.
+    // 사용자 직접 충전 횟수(최대 MAX_CHARGE_COUNT회 — 초과분은 관리자 승인 필요). 검증은 AccountService에서 한다.
     @Column(name = "charge_count", nullable = false)
     private int chargeCount;
+
+    // 예치금 이자율(연 %, 예: 0.50). 매월 1일 AccountInterestJob이 balance(예치금) 기준으로
+    // 한 달치 이자를 지급한다. @ColumnDefault는 ddl-auto=update로 컬럼이 추가될 때 기존 계좌에도
+    // 0.50이 채워지도록 하기 위함이다.
+    @Column(name = "interest_rate", nullable = false, precision = 5, scale = 2)
+    @ColumnDefault("0.50")
+    private BigDecimal interestRate;
+
+    // 지금까지 지급받은 예치금 이자 누계(원). applyInterest()가 지급할 때마다 더한다. 계좌 조회 응답이
+    // 충전 직후 응답 등 여러 곳에서 재사용돼, 원장을 매번 합산하지 않고 컬럼으로 들고 있는다.
+    @Column(name = "total_interest", nullable = false)
+    @ColumnDefault("0")
+    private long totalInterest;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 10)
@@ -93,6 +119,7 @@ public class Account {
         this.balance = balance;
         this.frozenBalance = 0L;
         this.chargeCount = 0;
+        this.interestRate = DEFAULT_INTEREST_RATE;
         this.status = AccountStatus.ACTIVE;
     }
 
@@ -107,6 +134,51 @@ public class Account {
      */
     public void applySellOrder(long amount) {
         this.balance += amount;
+    }
+
+    /**
+     * 매도 체결 거래 수수료 차감. applySellOrder()로 매도 대금을 넣은 뒤 호출한다. 수수료는 실제
+     * 비용이므로 baseBalance는 건드리지 않는다 — 그대로 수익률에 손실로 반영된다.
+     */
+    public void applyTradeFee(long fee) {
+        this.balance -= fee;
+    }
+
+    /**
+     * amount를 충전해도 예치금(balance + frozenBalance)이 MAX_DEPOSIT_AMOUNT 이하인지 여부.
+     */
+    public boolean canDeposit(long amount) {
+        // balance + frozenBalance + amount를 그대로 더하면 아주 큰 amount에서 long이 넘쳐 음수가 돼 검사를
+        // 통과해버린다(코드리뷰 반영). 남은 한도와 비교하는 방식은 넘침이 없다.
+        return amount <= MAX_DEPOSIT_AMOUNT - this.balance - this.frozenBalance;
+    }
+
+    /**
+     * 사용자가 스스로 충전할 수 있는 횟수가 남아 있는지 여부.
+     */
+    public boolean hasRemainingChargeCount() {
+        return this.chargeCount < MAX_CHARGE_COUNT;
+    }
+
+    /**
+     * balance(예치금) 기준 한 달치 이자 = balance × 연이율(%) ÷ 1200, 원 단위 미만 버림.
+     * 지정가 주문에 묶인 frozenBalance는 예치금이 아니므로 제외한다.
+     */
+    public long calculateMonthlyInterest() {
+        return BigDecimal.valueOf(this.balance)
+                .multiply(this.interestRate)
+                .divide(MONTHLY_INTEREST_DIVISOR, 0, RoundingMode.DOWN)
+                .longValue();
+    }
+
+    /**
+     * 예치금 이자 지급. 충전과 마찬가지로 baseBalance도 같은 금액만큼 올려, 이자가 수익률
+     * 계산식 (총자산-baseBalance)/baseBalance에 수익으로 잡히지 않게 한다.
+     */
+    public void applyInterest(long amount) {
+        this.balance += amount;
+        this.baseBalance += amount;
+        this.totalInterest += amount;
     }
 
     /**
@@ -155,7 +227,7 @@ public class Account {
      * 가상캐시 충전. balance에 chargeAmount를 더하고(덮어쓰기 아님) baseBalance도 같은 금액만큼
      * 함께 올린다. baseBalance를 같이 올리지 않으면 충전으로 늘어난 현금이 수익률 계산식
      * (총자산-baseBalance)/baseBalance에 그대로 섞여 들어가 실제 투자 성과보다 수익률이
-     * 부풀어 보이는 문제가 생긴다. 최대 충전 횟수(3회) 검증은 이 메서드가 아니라
+     * 부풀어 보이는 문제가 생긴다. 최대 충전 횟수(MAX_CHARGE_COUNT) 검증은 이 메서드가 아니라
      * AccountService.chargeBalance()에서 한다 — Entity는 잔고/횟수 필드를 바꾸는 책임만 갖는다.
      */
     public void chargeBalance(long chargeAmount) {

@@ -13,10 +13,12 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.teamfp.aistock.domain.account.dto.request.ChargeBalanceRequest;
 import com.teamfp.aistock.domain.account.dto.request.ChargeRequestCreateRequest;
 import com.teamfp.aistock.domain.account.dto.request.CreateAccountRequest;
 import com.teamfp.aistock.domain.account.dto.response.AccountInfoResponse;
 import com.teamfp.aistock.domain.account.dto.response.AccountTransactionResponse;
+import com.teamfp.aistock.domain.account.dto.response.ChargeHistoryResponse;
 import com.teamfp.aistock.domain.account.dto.response.ChargeRequestResponse;
 import com.teamfp.aistock.domain.account.dto.response.ProfitResponse;
 import com.teamfp.aistock.domain.account.service.AccountService;
@@ -49,10 +51,15 @@ public class AccountController {
         return ApiResponse.success("계좌가 개설되었습니다.", accountService.createAccount(userId, request));
     }
 
+    // 사용자 직접 충전 — 계좌당 3회(Account.MAX_CHARGE_COUNT)까지 관리자 승인 없이 입력한 금액이
+    // 바로 충전된다. 3회를 다 쓴 뒤에는 아래 충전 요청(charge-requests)으로 관리자 승인을 받는다.
     @PostMapping("/{accountId}/charge")
-    public ApiResponse<AccountInfoResponse> chargeBalance(@PathVariable Long accountId) {
+    public ApiResponse<AccountInfoResponse> chargeBalance(
+            @PathVariable Long accountId,
+            @Valid @RequestBody ChargeBalanceRequest request
+    ) {
         Long userId = SecurityUtil.getCurrentUserId();
-        return ApiResponse.success("가상캐시가 충전되었습니다.", accountService.chargeBalance(userId, accountId));
+        return ApiResponse.success("가상캐시가 충전되었습니다.", accountService.chargeBalance(userId, accountId, request));
     }
 
     @GetMapping("/{accountId}/profit")
@@ -61,8 +68,8 @@ public class AccountController {
         return ApiResponse.success(accountService.getProfit(userId, accountId));
     }
 
-    // 추가 충전 요청(ADMIN_API_BACKEND_HANDOFF.md 4.2) — 자동 충전(POST .../charge) 3회 한도를
-    // 초과한 사용자가 관리자 승인을 받기 위해 요청을 남긴다.
+    // 추가 충전 요청(ADMIN_API_BACKEND_HANDOFF.md 4.2) — 직접 충전(POST .../charge) 3회 한도를
+    // 다 쓴 사용자만 관리자 승인을 받기 위해 요청을 남길 수 있다(남아 있으면 CHARGE_REQUEST_NOT_ALLOWED).
     @PostMapping("/{accountId}/charge-requests")
     public ApiResponse<ChargeRequestResponse> createChargeRequest(
             @PathVariable Long accountId,
@@ -79,6 +86,13 @@ public class AccountController {
     ) {
         Long userId = SecurityUtil.getCurrentUserId();
         return ApiResponse.success(chargeRequestService.getMyRequests(userId, accountId, pageable));
+    }
+
+    // 충전 이력 — 직접 충전(셀프)·관리자 충전 요청·관리자 지급을 합친 목록(source로 구분, 최신순).
+    @GetMapping("/{accountId}/charge-history")
+    public ApiResponse<List<ChargeHistoryResponse>> getMyChargeHistory(@PathVariable Long accountId) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        return ApiResponse.success(chargeRequestService.getChargeHistory(userId, accountId));
     }
 
     @GetMapping("/{accountId}/charge-requests/{requestId}")

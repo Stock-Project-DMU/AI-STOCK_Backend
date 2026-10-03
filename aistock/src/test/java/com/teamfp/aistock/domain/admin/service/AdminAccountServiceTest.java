@@ -186,6 +186,19 @@ class AdminAccountServiceTest {
     }
 
     @Test
+    @DisplayName("adjustBalance()로 증액해 예치금이 1조원을 넘게 되면 DEPOSIT_LIMIT_EXCEEDED 예외를 던진다")
+    void adjustBalance_charge_depositLimitExceeded() {
+        ReflectionTestUtils.setField(account, "balance", com.teamfp.aistock.domain.account.entity.Account.MAX_DEPOSIT_AMOUNT - 100L);
+        when(accountRepository.findAccountWithUserByIdForUpdate(ACCOUNT_ID)).thenReturn(Optional.of(account));
+
+        assertThatThrownBy(() -> adminAccountService.adjustBalance(
+                ADMIN_ID, ACCOUNT_ID, new AdminAccountAdjustmentRequest(AccountTransactionType.ADMIN_CHARGE, 101L, "이벤트 보상 지급")))
+                .isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException) e).getErrorCode())
+                .isEqualTo(ErrorCode.DEPOSIT_LIMIT_EXCEEDED);
+    }
+
+    @Test
     @DisplayName("adjustBalance()에 ADMIN_DEDUCTION을 보내면 잔고가 줄고 원장에 기록한다")
     void adjustBalance_deduction_decreasesBalance() {
         when(accountRepository.findAccountWithUserByIdForUpdate(ACCOUNT_ID)).thenReturn(Optional.of(account));

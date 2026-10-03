@@ -1,5 +1,6 @@
 package com.teamfp.aistock.domain.account.repository;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.domain.Page;
@@ -20,6 +21,9 @@ public interface ChargeRequestRepository extends JpaRepository<ChargeRequest, Lo
     // 검증하므로, 여기서는 그 accountId로만 걸러도 안전하다.
     @Query("select c from ChargeRequest c where c.account.accountId = :accountId order by c.requestedAt desc")
     Page<ChargeRequest> findAllByAccountId(@Param("accountId") Long accountId, Pageable pageable);
+
+    // ChargeRequestService.getChargeHistory()용 — 계좌의 충전 요청 전체(대기·승인·거절).
+    List<ChargeRequest> findAllByAccount_AccountId(Long accountId);
 
     @Query("select c from ChargeRequest c where c.requestId = :requestId and c.account.accountId = :accountId")
     Optional<ChargeRequest> findByRequestIdAndAccountId(@Param("requestId") Long requestId, @Param("accountId") Long accountId);
