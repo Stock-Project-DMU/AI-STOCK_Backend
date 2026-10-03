@@ -79,6 +79,10 @@ public class MarketDataWebSocketHandler extends TextWebSocketHandler {
                 } else {
                     log.warn("외부 시세 데이터 실시간 등록/해제 요청이 거부됨: trCd={}, rspCd={}, rspMsg={}",
                             trCd, rspCd, header.path("rsp_msg").asString(""));
+                    if ("10001".equals(rspCd)) {
+                        log.error("실전·모의 서버와 API 키 종류가 일치하지 않아 WebSocket 재연결을 중지합니다. 설정을 확인한 뒤 서버를 다시 시작하세요.");
+                        marketDataWebSocketClient.disconnect();
+                    }
                 }
                 return;
             }
@@ -112,6 +116,9 @@ public class MarketDataWebSocketHandler extends TextWebSocketHandler {
     @Override
     public void handleTransportError(WebSocketSession session, Throwable exception) {
         log.warn("외부 시세 데이터 WebSocket 전송 오류 발생", exception);
+        if (marketDataWebSocketClient.isIntentionalDisconnect()) {
+            return;
+        }
         marketDataReconnectService.scheduleReconnect();
     }
 

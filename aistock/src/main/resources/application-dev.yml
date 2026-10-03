@@ -47,6 +47,8 @@ logging:
 # mode 기본값은 mock — CI/테스트 및 외부 시세 데이터 연동이 필요 없는 로컬 개발에서는 MarketDataWebSocketClient 빈
 # 자체가 생성되지 않아 MARKET_DATA_APP_KEY/MARKET_DATA_APP_SECRET 없이도 컨텍스트 로딩이 통과한다. 실제 외부 시세 데이터 연동이
 # 필요한 로컬 개발자는 .env나 개인 프로필에서 MARKET_DATA_MODE=real로 오버라이드하면 된다.
+# real 모드의 WebSocket 주소는 키의 계좌 종류와 별개로 맞춰야 한다: 실전 키는 9443, 모의 키는 29443.
+# 계좌 종류가 다르면 제공사가 10001로 구독을 거부한다.
 market-data:
   mode: ${MARKET_DATA_MODE:mock}
   websocket-url: ${MARKET_DATA_WEBSOCKET_URL:wss://openapi.ls-sec.co.kr:29443/websocket}
