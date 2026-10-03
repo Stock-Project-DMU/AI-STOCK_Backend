@@ -171,6 +171,19 @@ class AccountServiceTest {
                     org.mockito.ArgumentMatchers.isNull(),
                     org.mockito.ArgumentMatchers.anyString());
         }
+
+        @Test
+        @DisplayName("이미 계좌가 1개 있으면 ACCOUNT_LIMIT_EXCEEDED 예외를 던진다(유저당 계좌 1개)")
+        void fail_accountLimitExceeded() {
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(account.getUser()));
+            when(accountRepository.findAllByUserIdForUpdate(USER_ID)).thenReturn(List.of(account));
+
+            assertThatThrownBy(() -> accountService.createAccount(USER_ID,
+                    new com.teamfp.aistock.domain.account.dto.request.CreateAccountRequest("계좌B")))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.ACCOUNT_LIMIT_EXCEEDED);
+        }
     }
 
     @Nested

@@ -20,7 +20,7 @@ public enum ErrorCode {
     ACCOUNT_SUSPENDED(HttpStatus.BAD_REQUEST, "ACCOUNT_SUSPENDED", "정지된 계좌는 주문할 수 없습니다."),
     ACCOUNT_SUSPENDED_CHARGE(HttpStatus.BAD_REQUEST, "ACCOUNT_SUSPENDED_CHARGE", "거래가 정지된 계좌는 충전할 수 없습니다."),
     INVALID_ADMIN_CODE(HttpStatus.BAD_REQUEST, "INVALID_ADMIN_CODE", "관리자 코드가 일치하지 않습니다."),
-    ACCOUNT_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "ACCOUNT_LIMIT_EXCEEDED", "계좌는 최대 3개까지 만들 수 있습니다."),
+    ACCOUNT_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "ACCOUNT_LIMIT_EXCEEDED", "계좌는 1개만 만들 수 있습니다."),
     CHARGE_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "CHARGE_LIMIT_EXCEEDED", "직접 충전 가능 횟수(3회)를 모두 사용했습니다. 충전 요청으로 관리자에게 요청해 주세요."),
     DEPOSIT_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "DEPOSIT_LIMIT_EXCEEDED", "계좌 예치금은 최대 1조원까지 보유할 수 있습니다."),
     CHARGE_REQUEST_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "CHARGE_REQUEST_NOT_ALLOWED", "직접 충전 가능 횟수가 남아 있습니다. 관리자 요청 없이 바로 충전해 주세요."),
@@ -28,6 +28,8 @@ public enum ErrorCode {
     LAST_ADMIN_SUSPEND_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "LAST_ADMIN_SUSPEND_NOT_ALLOWED", "마지막 남은 관리자는 정지할 수 없습니다."),
     INVALID_NEWS_OUTLET(HttpStatus.BAD_REQUEST, "INVALID_NEWS_OUTLET", "지원하지 않는 언론사입니다."),
     CHARGE_REQUEST_ALREADY_PENDING(HttpStatus.BAD_REQUEST, "CHARGE_REQUEST_ALREADY_PENDING", "이미 처리 대기 중인 충전 요청이 있습니다."),
+    GOAL_TEXT_PARSE_FAILED(HttpStatus.BAD_REQUEST, "GOAL_TEXT_PARSE_FAILED", "목표를 이해하지 못했어요. 목표 금액이 들어간 문장으로 다시 입력해 주세요. 예) \"3년 안에 5천만원 모으기\", \"총자산 1억 만들기\""),
+    GOAL_PERIOD_OUT_OF_RANGE(HttpStatus.BAD_REQUEST, "GOAL_PERIOD_OUT_OF_RANGE", "목표 기한은 1개월 이상 30년 이하로 입력해 주세요."),
 
     // 401 Unauthorized
     INVALID_PASSWORD(HttpStatus.UNAUTHORIZED, "INVALID_PASSWORD", "비밀번호가 일치하지 않습니다."),
@@ -39,6 +41,7 @@ public enum ErrorCode {
     // 403 Forbidden
     ACCESS_DENIED(HttpStatus.FORBIDDEN, "ACCESS_DENIED", "접근 권한이 없습니다."),
     SURVEY_REQUIRED(HttpStatus.FORBIDDEN, "SURVEY_REQUIRED", "AI 상담을 이용하려면 투자 성향 설문을 완료해 주세요."),
+    INVESTMENT_PROFILE_REQUIRED(HttpStatus.FORBIDDEN, "INVESTMENT_PROFILE_REQUIRED", "목표 도달 시뮬레이션을 이용하려면 투자 성향 설문을 먼저 완료해 주세요."),
 
     // 404 Not Found
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다."),
@@ -52,6 +55,7 @@ public enum ErrorCode {
     NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "NOTIFICATION_NOT_FOUND", "알림을 찾을 수 없습니다."),
     AI_SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "AI_SESSION_NOT_FOUND", "AI 상담 세션을 찾을 수 없습니다."),
     SIMULATION_NOT_FOUND(HttpStatus.NOT_FOUND, "SIMULATION_NOT_FOUND", "시뮬레이션을 찾을 수 없습니다."),
+    SIMULATION_EXPIRED(HttpStatus.NOT_FOUND, "SIMULATION_EXPIRED", "시뮬레이션 결과 보관 시간(30분)이 지났습니다. 다시 실행한 뒤 저장해 주세요."),
     NEWS_BRIEFING_NOT_FOUND(HttpStatus.NOT_FOUND, "NEWS_BRIEFING_NOT_FOUND", "아직 생성된 브리핑이 없습니다."),
     NEWS_CHAT_SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "NEWS_CHAT_SESSION_NOT_FOUND", "뉴스 채팅을 찾을 수 없습니다."),
 
@@ -61,6 +65,7 @@ public enum ErrorCode {
     OPTIMISTIC_LOCK_CONFLICT(HttpStatus.CONFLICT, "OPTIMISTIC_LOCK_CONFLICT", "동시 요청으로 처리에 실패했습니다. 다시 시도해 주세요."),
     ORDER_ALREADY_PROCESSED(HttpStatus.CONFLICT, "ORDER_ALREADY_PROCESSED", "이미 체결되었거나 취소된 주문입니다."),
     CHARGE_REQUEST_ALREADY_PROCESSED(HttpStatus.CONFLICT, "CHARGE_REQUEST_ALREADY_PROCESSED", "이미 승인되었거나 거절된 충전 요청입니다."),
+    SIMULATION_ALREADY_SAVED(HttpStatus.CONFLICT, "SIMULATION_ALREADY_SAVED", "이미 저장한 시뮬레이션 결과입니다. 저장 목록에서 확인해 주세요."),
 
     // 423 Locked
     LOGIN_LOCKED(HttpStatus.LOCKED, "LOGIN_LOCKED", "로그인 시도 횟수 초과로 계정이 잠겼습니다."),
@@ -80,6 +85,7 @@ public enum ErrorCode {
     // 502 Bad Gateway
     EXTERNAL_API_ERROR(HttpStatus.BAD_GATEWAY, "EXTERNAL_API_ERROR", "외부 API 연동 중 에러가 발생했습니다."),
     OAUTH_PROVIDER_RESPONSE_INVALID(HttpStatus.BAD_GATEWAY, "OAUTH_PROVIDER_RESPONSE_INVALID", "소셜 로그인 제공자의 응답이 올바르지 않습니다."),
+    REBALANCE_SUGGESTION_INVALID(HttpStatus.BAD_GATEWAY, "REBALANCE_SUGGESTION_INVALID", "AI 리밸런싱 추천 결과가 올바르지 않습니다. 잠시 후 다시 시도해 주세요."),
 
     // 503 Service Unavailable
     MARKET_NOT_CONFIGURED(HttpStatus.SERVICE_UNAVAILABLE, "MARKET_NOT_CONFIGURED", "시장 데이터 제공자 설정이 아직 완료되지 않았습니다."),

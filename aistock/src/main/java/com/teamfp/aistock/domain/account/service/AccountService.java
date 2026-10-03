@@ -40,8 +40,10 @@ public class AccountService {
     // 9자리 앞자리 0 채우기용 — String.format("%09d")는 JVM 기본 로케일에 따라 비ASCII 숫자가 나올 수
     // 있어(코드리뷰 반영), 10억을 더한 뒤 맨 앞 "1"을 떼는 방식으로 항상 ASCII 숫자 9자리를 만든다.
     private static final long ACCOUNT_NUMBER_PAD_OFFSET = 1_000_000_000L;
-    // 유저 1명이 만들 수 있는 최대 계좌 수(성향별로 나눠 투자해볼 수 있도록 — 예: 안정형/공격형).
-    private static final int MAX_ACCOUNT_COUNT = 3;
+    // 유저 1명이 만들 수 있는 최대 계좌 수. 원래 성향별로 나눠 투자하도록 3개였으나, 목표 도달
+    // 시뮬레이션이 "내 보유종목 + 예수금"을 계좌 하나로 특정해야 해서 1개로 줄였다(2026-10-01,
+    // accounts.uq_account_user — account_single_migration.sql 참고).
+    private static final int MAX_ACCOUNT_COUNT = 1;
 
     private final AccountRepository accountRepository;
     private final UserRepository userRepository;
@@ -64,7 +66,7 @@ public class AccountService {
     /**
      * 계좌 개설. 회원가입 시 자동 생성되는 첫 계좌도, 이후 유저가 추가하는 계좌도 전부 이
      * 메서드를 거친다(feature/auth-signup이 구현되면 그대로 재사용할 수 있도록). 유저 1명당
-     * 최대 3개(MAX_ACCOUNT_COUNT)까지만 허용한다.
+     * 최대 1개(MAX_ACCOUNT_COUNT)까지만 허용한다.
      *
      * accounts.user_id에는 유니크 제약이 없어(1:N) "개수 확인 → 저장(save)" 사이의 경합을 DB가
      * 대신 막아주지 않는다. 그래서 accountRepository.findAllByUserIdForUpdate로 같은 유저의

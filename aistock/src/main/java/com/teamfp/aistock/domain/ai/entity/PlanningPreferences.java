@@ -9,7 +9,7 @@ public class PlanningPreferences {
     public static PlanningPreferences from(Long userId) {
         PlanningPreferences preferences = new PlanningPreferences();
         preferences.userId = userId;
-        preferences.selections = "{\"savedBriefingDates\":[],\"linkedBriefingDates\":[],\"linkedGoalPlanIds\":[]}";
+        preferences.selections = "{\"savedBriefingDates\":[],\"linkedBriefingDates\":[],\"linkedGoalPlanIds\":[],\"linkedSimulationIds\":[]}";
         return preferences;
     }
     public void updateSelections(String selections) { this.selections = selections; }

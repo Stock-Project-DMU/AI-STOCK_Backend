@@ -35,6 +35,14 @@ class NewsChatServiceTest {
         verify(news).search(argThat(request -> request.companyName().equals("삼성전자") && request.periodDays() == 7));
         verify(gemini).generate(argThat(request -> request.history().size() == 1 && !request.tools().isEmpty()));
     }
+    @Test void searchedAtIsStandardIsoOffsetThatFitsColumn() {
+        articles();
+        when(gemini.generate(any())).thenReturn(search(), new GeminiResponse("영업이익이 발표되었습니다.", 1), new GeminiResponse("SAFE", 1));
+        var response = service.chat(1L, new NewsChatRequest("관련 뉴스 찾아줘", List.of()));
+        // searched_at 컬럼은 VARCHAR(40)이고 프론트는 new Date()로 파싱하므로 "[Asia/Seoul]" 같은 비표준 접미사가 없어야 한다.
+        assertThat(response.searchedAt()).doesNotContain("[").endsWith("+09:00").hasSizeLessThanOrEqualTo(40);
+        assertThatCode(() -> java.time.OffsetDateTime.parse(response.searchedAt())).doesNotThrowAnyException();
+    }
     @Test void unsupportedSummaryFallsBackToRealArticles() {
         articles();
         when(gemini.generate(any())).thenReturn(search(), new GeminiResponse("근거 없는 주장", 1), new GeminiResponse("UNSAFE", 1));

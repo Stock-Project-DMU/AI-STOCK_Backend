@@ -3,30 +3,22 @@ package com.teamfp.aistock.domain.ai.dto.request;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 
 /**
- * 목표 도달 시뮬레이션 요청 DTO. 사용자가 실제 보유한 종목/수량과 무관하게
- * investmentAmount(투자 원금)를 가정해 계산한다.
- *
- * feature/simulation 1차 PR 시점에는 이 DTO를 실제로 받는 POST 엔드포인트가
- * 없다 — Gemini/DART/뉴스 연동(runSimulation)은 feature/ai-planning이 dev에
- * 병합된 뒤 별도 브랜치에서 이어간다. 다음 PR에서 그대로 재사용할 수 있도록
- * 지금 정의만 해둔다(NAMING.md 8-11절 참고).
+ * 목표 도달 시뮬레이션 실행 요청 DTO(feature/goal-simulation-v2, 2026-10-01).
+ * 목표는 자유 문장(goalText)으로 받고, 목표 금액·기한 추출은 서버가 Gemini로 한다
+ * (예: "3년 안에 1억" → targetAmount 100000000, periodMonths 36). 시작 금액은 사용자의
+ * 실제 보유종목 평가금액 + 예수금이라 요청으로 받지 않는다.
  */
 public record SimulationRequest(
 
-        @NotBlank(message = "종목 코드는 필수입니다.")
-        String stockCode,
+        @NotBlank(message = "목표를 입력해 주세요.")
+        @Size(max = 200, message = "목표는 200자 이내로 입력해 주세요.")
+        String goalText,
 
-        @Positive(message = "투자 금액은 0보다 커야 합니다.")
-        long investmentAmount,
-
-        @Positive(message = "목표 금액은 0보다 커야 합니다.")
-        long targetAmount,
-
-        @Min(value = 1, message = "목표 기간은 최소 1개월입니다.")
-        @Max(value = 12, message = "목표 기간은 최대 12개월입니다.")
-        int targetMonths
+        @Min(value = 0, message = "월 추가 납입액은 0원 이상이어야 합니다.")
+        @Max(value = 100_000_000, message = "월 추가 납입액은 1억원 이하로 입력해 주세요.")
+        long monthlyContribution
 ) {
 }

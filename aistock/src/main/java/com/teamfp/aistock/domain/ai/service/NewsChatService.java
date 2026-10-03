@@ -1,6 +1,6 @@
 package com.teamfp.aistock.domain.ai.service;
 
-import java.time.ZonedDateTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
@@ -41,7 +41,7 @@ public class NewsChatService {
     }
 
     public NewsChatResponse chatForOutlet(String outletDomain, NewsChatRequest request) {
-        String now = ZonedDateTime.now(ZoneId.of("Asia/Seoul")).toString();
+        String now = OffsetDateTime.now(ZoneId.of("Asia/Seoul")).toString();
         String outletName = outletDomain == null ? null : NewsRelevanceMatcher.OUTLET_NAMES.getOrDefault(outletDomain, "선택한 언론사");
         var history = request.history().stream().map(t -> new GeminiRequest.HistoryTurn(
                 t.role().equals("USER") ? "user" : "model", t.content())).toList();

@@ -69,18 +69,19 @@ public class MarketQueryService {
             default -> throw new CustomException(ErrorCode.INVALID_INPUT);
         };
     }
-    // isAll=true는 홈 주요 종목 무한 스크롤용 — mock 모드에서 상위 10건 제한 없이 stocks.json 전체 종목을
-    // 한 번에 반환한다(real 모드는 그대로 최대 10건). false면 기존과 동일하게 상위 10건.
+    // isAll=true는 홈 주요 종목 무한 스크롤·시뮬레이션 리밸런싱 후보용 — mock/real 모두 상위 10건 제한 없이
+    // 등록 종목(stocks.json, 2026-10-02 기준 105개) 전체를 한 번에 반환한다. real 모드는 순위 TR 대신 등록 종목의
+    // t8407 현재가로 정렬한다(HighItemApiClient 참고, 이전에는 real 모드만 최대 10건이었음). false면 기존과 동일하게 상위 10건.
     public List<RankingItemDto> getRankings(String sort, boolean isAll) {
         requireMarketConfigured();
         if (isAll) {
-            int mockLimit = Integer.MAX_VALUE;
+            int limit = HighItemApiClient.ALL_REGISTERED_STOCKS;
             return switch (sort) {
-                case "volume" -> highItemApiClient.getTopVolume(mockLimit);
-                case "value" -> highItemApiClient.getTopTradingValue(mockLimit);
-                case "rise", "change" -> highItemApiClient.getTopPriceChangeRate(mockLimit);
-                case "fall" -> highItemApiClient.getTopPriceDeclineRate(mockLimit);
-                case "market-cap" -> highItemApiClient.getTopMarketCap(mockLimit);
+                case "volume" -> highItemApiClient.getTopVolume(limit);
+                case "value" -> highItemApiClient.getTopTradingValue(limit);
+                case "rise", "change" -> highItemApiClient.getTopPriceChangeRate(limit);
+                case "fall" -> highItemApiClient.getTopPriceDeclineRate(limit);
+                case "market-cap" -> highItemApiClient.getTopMarketCap(limit);
                 default -> throw new CustomException(ErrorCode.INVALID_INPUT);
             };
         }

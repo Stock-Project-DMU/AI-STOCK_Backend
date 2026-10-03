@@ -54,6 +54,15 @@ public class OrderExecutionService {
     // 매도 거래 수수료 차감(시장가 매도 OrderService와 공용).
     private final TradeFeeService tradeFeeService;
 
+    // 주문이 대기 리스트에서 빠질 때 미체결 주문 종목 구독(주문 접수 시 +1)을 함께 줄인다.
+    // 생성자 주입이면 real 모드에서 StockSubscriptionManager → MarketDataWebSocketClient →
+    // MarketDataWebSocketHandler → StockBroadcastService → OrderExecutionService → StockSubscriptionManager
+    // 순환 의존이 생겨 애플리케이션이 기동하지 못한다(mock 모드는 WebSocket 클라이언트 빈이 없어 드러나지
+    // 않았음, 2026-10-01 확인). 아래 self와 같은 @Lazy 필드 주입으로 프록시를 받아 고리를 끊는다.
+    @Autowired
+    @Lazy
+    private StockSubscriptionManager stockSubscriptionManager;
+
     // execute()의 @Transactional은 Spring AOP 프록시를 거쳐야만 실제로 트랜잭션을 연다.
     // checkAndExecute()가 같은 클래스 안에서 execute(...)를 그냥 호출하면(self-invocation)
     // 프록시를 우회해 트랜잭션이 전혀 열리지 않고, orderRepository.findById()가 끝나자마자
@@ -63,13 +72,6 @@ public class OrderExecutionService {
     @Autowired
     @Lazy
     private OrderExecutionService self;
-
-    // 주문이 대기 리스트에서 빠질 때 미체결 주문 종목 구독(주문 접수 시 +1)을 함께 줄인다.
-    // StockSubscriptionManager → MarketDataWebSocketClient → MarketDataWebSocketHandler
-    // → StockBroadcastService → OrderExecutionService로 순환 참조가 생기므로 @Lazy 프록시로 주입한다.
-    @Autowired
-    @Lazy
-    private StockSubscriptionManager stockSubscriptionManager;
 
     /**
      * 특정 종목의 체결 tick을 받을 때마다 호출된다. Redis pending:orders:{stockCode}에 쌓인

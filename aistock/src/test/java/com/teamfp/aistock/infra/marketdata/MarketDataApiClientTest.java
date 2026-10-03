@@ -281,6 +281,37 @@ class MarketDataApiClientTest {
 
             assertThat(result).isEmpty();
         }
+
+        @Test
+        @DisplayName("getMultiStockPricesInBatches는 105종목을 50/50/5개로 나눠 t8407을 3번 호출하고 거래대금까지 합쳐 반환한다")
+        void inBatches_splitsBy50AndMergesResults() {
+            when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
+            List<String> stockCodes = java.util.stream.IntStream.rangeClosed(1, 105).mapToObj("%06d"::formatted).toList();
+            for (int[] batch : new int[][] {{1, 50}, {51, 100}, {101, 105}}) {
+                String rows = java.util.stream.IntStream.rangeClosed(batch[0], batch[1])
+                        .mapToObj(i -> "{\"shcode\":\"%06d\",\"hname\":\"종목%d\",\"price\":1000,\"change\":0,\"diff\":\"0.00\",\"volume\":1,\"value\":%d}"
+                                .formatted(i, i, i))
+                        .collect(java.util.stream.Collectors.joining(","));
+                mockServer.expect(requestTo(MARKET_DATA_URL))
+                        .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers
+                                .jsonPath("$.t8407InBlock.nrec").value(batch[1] - batch[0] + 1))
+                        .andRespond(withSuccess("{\"t8407OutBlock1\":[" + rows + "]}", MediaType.APPLICATION_JSON));
+            }
+
+            List<MultiStockPriceDto> result = client.getMultiStockPricesInBatches(stockCodes);
+
+            assertThat(result).hasSize(105);
+            assertThat(result.get(104).getStockCode()).isEqualTo("000105");
+            assertThat(result.get(104).getTradingValue()).isEqualTo(105L);
+            mockServer.verify();
+        }
+
+        @Test
+        @DisplayName("getMultiStockPricesInBatches는 종목코드 목록이 비어있으면 호출 없이 빈 리스트를 반환한다")
+        void inBatches_emptyStockCodes_returnsEmpty() {
+            assertThat(client.getMultiStockPricesInBatches(List.of())).isEmpty();
+            mockServer.verify();
+        }
     }
 
     @Nested

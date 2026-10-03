@@ -347,7 +347,8 @@ CREATE TABLE accounts (
     created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (account_id),
     INDEX idx_account_status (status),               -- v7 추가: 관리자 페이지 정지 계좌 필터링용
-    INDEX idx_account_user (user_id),                -- v10 추가: "내 계좌 목록" 조회(user_id 기준 최대 3건)용
+    INDEX idx_account_user (user_id),                -- v10 추가: "내 계좌 목록" 조회용
+    UNIQUE KEY uq_account_user (user_id),            -- 2026-10-01 추가: 유저당 계좌 1개(원래 최대 3개, account_single_migration.sql)
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
@@ -499,40 +500,48 @@ CREATE TABLE ai_planning_messages (
 -- 10. 목표 도달 시뮬레이션 (simulations)
 -- =====================================================
 /*
+  feature/goal-simulation-v2(2026-10-01)로 구조 변경 — 단일 종목·투자 원금 가정 구조에서
+  "내 보유종목 유지 vs 투자성향 리밸런싱" 비교 구조로 바꿨다(기존 데이터는 구조가 달라 삭제,
+  simulation_v2_migration.sql 참고). 실행할 때마다 저장하지 않고, 사용자가 저장 버튼을 눌렀을
+  때만 행이 생긴다(그 전까지는 Redis simulation:pending:{userId}:{pendingSimulationId}에 30분 보관).
+
   [데이터 출처]
-  dart_data     : Open DART API (재무제표, 공시)
-  news_data     : 네이버 뉴스 검색 API (NCP API Hub) — 원래 Tavily였으나 feature/ai-planning에서
-                  2026-08-05 네이버로 교체(관련 코드는 2026-08-06 완전 삭제), 이 기능도 동일하게 맞춘다
-  scenario_data : Gemini는 시나리오별 월 복리 성장률(스칼라) + 근거만 반환하고,
-                  실제 date+value 곡선은 서버가 investment_amount를 기점으로
-                  복리 계산해서 생성한다(정확성·Best≥Base≥Worst 보장·지연시간
-                  이유 — feature/simulation 설계 논의 결정). value는 종목의
-                  주당 시장가(price)가 아니라 investment_amount 복리 계산
-                  결과인 "포트폴리오 평가금액" 총액이므로 필드명을 price가
-                  아닌 value로 둔다(price는 stock:price:{stockCode} 캐시 등
-                  코드베이스 전역에서 이미 "주당가" 의미로 쓰이고 있어 재사용
-                  시 혼동 위험).
-                  {
-                    "best":  [{"date":"2026-05-01","value":8500000}, ...],
-                    "base":  [{"date":"2026-05-01","value":7500000}, ...],
-                    "worst": [{"date":"2026-05-01","value":6200000}, ...]
-                  }
+  goal_text            : 사용자가 입력한 목표 문장(예: "3년 안에 1억")
+  target_amount        : Gemini가 goal_text에서 추출한 목표 금액(원)
+  period_months        : Gemini가 goal_text에서 추출한 목표 기한(개월), 기한 없는 목표면 NULL
+  start_amount         : 실행 시점 보유종목 평가금액 + 예수금(balance + frozen_balance)
+  projection_data      : 서버 계산 결과. 성장률은 종목별 최근 3년 월봉 복리(기하평균) 수익률에서 30% 할인
+                         (음수면 그대로), 종목당 월 5% 상한, 예수금 0%, 비중 가중평균. value는 주당가가 아니라
+                         포트폴리오 평가금액 총액이다.
+                         {
+                           "holdingsAmount": 5000000, "cashAmount": 5000000, "shortenedMonths": 14,
+                           "current":    {"monthlyGrowthRate":0.0035,"cashWeight":50.0,
+                                          "allocations":[{"stockCode":"035420","stockName":"NAVER","weight":50.0,"monthlyGrowthRate":0.007}],
+                                          "excludedStockNames":[],
+                                          "points":[{"date":"2026-10-01","value":10000000}, ...],
+                                          "reachMonths":80,"reachDate":"2033-06-01","achievableWithinPeriod":false},
+                           "rebalanced": { ...같은 구조... }
+                         }
+  rebalance_reason, time_reduction_explanation : Gemini가 서버 계산 숫자만 인용해 작성한 설명
+  dart_data            : Open DART API — 비중 변화 상위 5개 종목의 재무(연간+최근분기), 종목코드별 맵
+  news_data            : 네이버 뉴스 검색 API — 같은 5개 종목의 뉴스 검색 결과, 종목코드별 맵
 */
 CREATE TABLE simulations (
-    simulation_id     BIGINT     NOT NULL AUTO_INCREMENT,
-    user_id           BIGINT     NOT NULL,
-    stock_code        VARCHAR(10) NOT NULL,
-    stock_name        VARCHAR(50) NOT NULL,
-    investment_amount BIGINT     NOT NULL,           -- 투자 원금 (원) — 실제 보유 종목/수량과 무관
-    target_amount     BIGINT     NOT NULL,            -- 목표 금액 (원)
-    target_months     INT        NOT NULL,            -- 목표 기간 (개월)
-    scenario_data     JSON       NOT NULL,            -- 서버 복리 계산 시나리오 곡선
-    best_reach_date  DATE,                           -- Best 시나리오 목표 도달 예상일
-    base_reach_date  DATE,                           -- Base 시나리오 목표 도달 예상일
-    worst_reach_date DATE,                           -- Worst 시나리오 목표 도달 예상일
-    dart_data        JSON,                           -- Open DART 재무 원본
-    news_data        JSON,                           -- 네이버 뉴스 검색 원본
-    created_at       DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    simulation_id              BIGINT       NOT NULL AUTO_INCREMENT,
+    user_id                    BIGINT       NOT NULL,
+    goal_text                  VARCHAR(200) NOT NULL,    -- 사용자가 입력한 목표 문장
+    target_amount              BIGINT       NOT NULL,    -- 목표 금액 (원)
+    period_months              INT,                      -- 목표 기한 (개월), 기한 없으면 NULL
+    start_amount               BIGINT       NOT NULL,    -- 시작 금액 (보유종목 평가금액 + 예수금)
+    monthly_contribution       BIGINT       NOT NULL,    -- 월 추가 납입액 (원)
+    current_reach_date         DATE,                     -- 현재 보유 유지 시 목표 도달 예상일 (30년 내 미도달이면 NULL)
+    rebalanced_reach_date      DATE,                     -- 리밸런싱 시 목표 도달 예상일 (30년 내 미도달이면 NULL)
+    projection_data            JSON         NOT NULL,    -- 두 포트폴리오 구성·곡선·도달 시점
+    rebalance_reason           TEXT         NOT NULL,    -- Gemini 리밸런싱 이유
+    time_reduction_explanation TEXT         NOT NULL,    -- Gemini 목표 도달 시간 단축 설명
+    dart_data                  JSON,                     -- Open DART 재무 원본 (종목코드별)
+    news_data                  JSON,                     -- 네이버 뉴스 검색 원본 (종목코드별)
+    created_at                 DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (simulation_id),
     INDEX idx_user_sim (user_id),
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE

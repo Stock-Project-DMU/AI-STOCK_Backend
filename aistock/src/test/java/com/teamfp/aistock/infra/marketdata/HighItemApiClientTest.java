@@ -40,6 +40,12 @@ class HighItemApiClientTest {
     @Mock
     private MarketDataAccessTokenProvider accessTokenProvider;
 
+    @Mock
+    private RegisteredStockReader registeredStockReader;
+
+    @Mock
+    private MarketDataApiClient marketDataApiClient;
+
     private MockRestServiceServer mockServer;
     private HighItemApiClient client;
 
@@ -48,7 +54,7 @@ class HighItemApiClientTest {
         RestClient.Builder builder = RestClient.builder();
         mockServer = MockRestServiceServer.bindTo(builder).build();
 
-        client = new HighItemApiClient(accessTokenProvider, java.util.Optional.empty(), builder);
+        client = new HighItemApiClient(accessTokenProvider, java.util.Optional.empty(), registeredStockReader, marketDataApiClient, builder);
         ReflectionTestUtils.setField(client, "highItemUrl", HIGH_ITEM_URL);
     }
 
@@ -214,7 +220,8 @@ class HighItemApiClientTest {
 
         @BeforeEach
         void setUpMockMode() {
-            mockModeClient = new HighItemApiClient(accessTokenProvider, Optional.of(localMarketDataReader), RestClient.builder());
+            mockModeClient = new HighItemApiClient(accessTokenProvider, Optional.of(localMarketDataReader),
+                    registeredStockReader, marketDataApiClient, RestClient.builder());
         }
 
         private CurrentPriceDetailDto stock(String code, String name, long price, long volume, double changeRate) {
@@ -302,7 +309,7 @@ class HighItemApiClientTest {
         }
 
         @Test
-        @DisplayName("mockLimit을 넘기면 10건 제한 없이 mock 전체 종목을 순위대로 반환한다(홈 무한 스크롤용)")
+        @DisplayName("등록 종목 전체(limit)를 넘기면 10건 제한 없이 mock 전체 종목을 순위대로 반환한다(홈 무한 스크롤용)")
         void getTopVolume_withMockLimit_returnsAllItems() {
             Map<String, CurrentPriceDetailDto> all = new java.util.HashMap<>();
             for (int i = 1; i <= 15; i++) {
@@ -319,7 +326,7 @@ class HighItemApiClientTest {
         }
 
         @Test
-        @DisplayName("상승률상위에 mockLimit을 넘겨도 상승 종목만 반환한다")
+        @DisplayName("상승률상위에 등록 종목 전체(limit)를 넘겨도 상승 종목만 반환한다")
         void getTopPriceChangeRate_withMockLimit_keepsRisingFilter() {
             Map<String, CurrentPriceDetailDto> all = new java.util.HashMap<>();
             for (int i = 1; i <= 15; i++) {
@@ -335,8 +342,8 @@ class HighItemApiClientTest {
     }
 
     @Test
-    @DisplayName("real 모드는 mockLimit을 넘겨도 기존처럼 최대 10건만 반환한다")
-    void realMode_ignoresMockLimit() {
+    @DisplayName("real 모드 기본 순위(all=false)는 순위 TR 결과를 최대 10건까지만 반환한다")
+    void realMode_defaultRanking_keepsTrLimitOfTen() {
         when(accessTokenProvider.issueAccessToken()).thenReturn("test-token");
         StringBuilder rows = new StringBuilder();
         for (int i = 1; i <= 15; i++) {
@@ -346,9 +353,128 @@ class HighItemApiClientTest {
         mockServer.expect(requestTo(HIGH_ITEM_URL))
                 .andRespond(withSuccess("{\"t1452OutBlock1\":[" + rows + "]}", MediaType.APPLICATION_JSON));
 
-        List<RankingItemDto> result = client.getTopVolume(Integer.MAX_VALUE);
+        List<RankingItemDto> result = client.getTopVolume();
 
         assertThat(result).hasSize(10);
+        verify(marketDataApiClient, never()).getMultiStockPricesInBatches(org.mockito.ArgumentMatchers.anyList());
         mockServer.verify();
+    }
+
+    @Nested
+    @DisplayName("real 모드 + 등록 종목 전체(all=true) 순위")
+    class RealModeAllRegisteredStocks {
+
+        private com.teamfp.aistock.infra.marketdata.dto.RegisteredStockDto registered(String code, Long listingShares) {
+            return new com.teamfp.aistock.infra.marketdata.dto.RegisteredStockDto(code, "종목" + code, "KOSPI", listingShares);
+        }
+
+        private com.teamfp.aistock.infra.marketdata.dto.MultiStockPriceDto price(
+                String code, long price, double changeRate, long volume, long tradingValue) {
+            return com.teamfp.aistock.infra.marketdata.dto.MultiStockPriceDto.builder()
+                    .stockCode(code).stockName("종목" + code).price(price).changeAmount(0L)
+                    .changeRate(changeRate).volume(volume).tradingValue(tradingValue)
+                    .build();
+        }
+
+        /** 등록 종목 count개(000001~)와 각 종목의 t8407 시세를 준비한다 — 거래량은 종목번호와 같다. */
+        private List<String> givenRegisteredStocks(int count) {
+            List<com.teamfp.aistock.infra.marketdata.dto.RegisteredStockDto> stocks = new java.util.ArrayList<>();
+            List<com.teamfp.aistock.infra.marketdata.dto.MultiStockPriceDto> prices = new java.util.ArrayList<>();
+            for (int i = 1; i <= count; i++) {
+                String code = "%06d".formatted(i);
+                stocks.add(registered(code, 1_000L));
+                prices.add(price(code, 1000, 0.0, i, i));
+            }
+            List<String> codes = stocks.stream()
+                    .map(com.teamfp.aistock.infra.marketdata.dto.RegisteredStockDto::stockCode).toList();
+            when(registeredStockReader.getRegisteredStocks()).thenReturn(stocks);
+            when(marketDataApiClient.getMultiStockPricesInBatches(codes)).thenReturn(prices);
+            return codes;
+        }
+
+        @Test
+        @DisplayName("거래량 순위는 순위 TR을 부르지 않고 등록 종목 전체(10개 초과)를 거래량 내림차순으로 반환한다")
+        void getTopVolume_all_returnsEveryRegisteredStock() {
+            givenRegisteredStocks(105);
+
+            List<RankingItemDto> result = client.getTopVolume(HighItemApiClient.ALL_REGISTERED_STOCKS);
+
+            assertThat(result).hasSize(105);
+            assertThat(result.get(0).getStockCode()).isEqualTo("000105");
+            assertThat(result.get(104).getStockCode()).isEqualTo("000001");
+            assertThat(result).extracting(RankingItemDto::getRank).startsWith(1, 2, 3).endsWith(105);
+            // 순위 TR(high-item URL)을 호출하지 않는다 — mockServer에 기대 요청이 없으므로 호출 시 실패한다.
+            mockServer.verify();
+        }
+
+        @Test
+        @DisplayName("시가총액 순위는 실시간 현재가 × 등록 종목 상장주식수(천주)로 정렬하고 비중을 extraInfo로 담는다")
+        void getTopMarketCap_all_sortsByPriceTimesListingShares() {
+            when(registeredStockReader.getRegisteredStocks()).thenReturn(List.of(
+                    registered("000001", 100L), registered("000002", 1_000L), registered("000003", null)));
+            when(marketDataApiClient.getMultiStockPricesInBatches(List.of("000001", "000002", "000003"))).thenReturn(List.of(
+                    price("000001", 3000, 0.0, 1, 1),   // 시가총액 3000 × 100천주
+                    price("000002", 1000, 0.0, 1, 1),   // 1000 × 1000천주 → 가장 큼
+                    price("000003", 9000, 0.0, 1, 1))); // 상장주식수 없음 → 0
+
+            List<RankingItemDto> result = client.getTopMarketCap(HighItemApiClient.ALL_REGISTERED_STOCKS);
+
+            assertThat(result).extracting(RankingItemDto::getStockCode).containsExactly("000002", "000001", "000003");
+            assertThat(result.get(0).getExtraInfo()).isEqualTo("시가총액 비중 76.92%");
+            assertThat(result.get(2).getExtraInfo()).isEqualTo("시가총액 비중 0.00%");
+        }
+
+        @Test
+        @DisplayName("상승률 순위는 등록 종목 중 상승 종목만, 하락률 순위는 하락 종목만 정렬한다")
+        void priceChangeRate_all_filtersRisingAndFalling() {
+            when(registeredStockReader.getRegisteredStocks()).thenReturn(List.of(
+                    registered("000001", 1L), registered("000002", 1L), registered("000003", 1L), registered("000004", 1L)));
+            when(marketDataApiClient.getMultiStockPricesInBatches(List.of("000001", "000002", "000003", "000004"))).thenReturn(List.of(
+                    price("000001", 1000, 2.5, 1, 1),
+                    price("000002", 1000, -3.0, 1, 1),
+                    price("000003", 1000, 0.0, 1, 1),
+                    price("000004", 1000, 7.1, 1, 1)));
+
+            assertThat(client.getTopPriceChangeRate(HighItemApiClient.ALL_REGISTERED_STOCKS))
+                    .extracting(RankingItemDto::getStockCode).containsExactly("000004", "000001");
+            assertThat(client.getTopPriceDeclineRate(HighItemApiClient.ALL_REGISTERED_STOCKS))
+                    .extracting(RankingItemDto::getStockCode).containsExactly("000002");
+        }
+
+        @Test
+        @DisplayName("거래대금 순위는 t8407의 실제 거래대금(백만원)으로 정렬한다")
+        void getTopTradingValue_all_sortsByTradingValue() {
+            when(registeredStockReader.getRegisteredStocks()).thenReturn(List.of(registered("000001", 1L), registered("000002", 1L)));
+            when(marketDataApiClient.getMultiStockPricesInBatches(List.of("000001", "000002"))).thenReturn(List.of(
+                    price("000001", 1000, 0.0, 999_999, 50),
+                    price("000002", 1000, 0.0, 1, 7_000)));
+
+            List<RankingItemDto> result = client.getTopTradingValue(HighItemApiClient.ALL_REGISTERED_STOCKS);
+
+            assertThat(result).extracting(RankingItemDto::getStockCode).containsExactly("000002", "000001");
+            assertThat(result.get(0).getExtraInfo()).isEqualTo("거래대금 7000백만원");
+        }
+
+        @Test
+        @DisplayName("현재가가 없는(0) 종목은 결과에서 뺀다")
+        void all_skipsStocksWithoutPrice() {
+            when(registeredStockReader.getRegisteredStocks()).thenReturn(List.of(registered("000001", 1L), registered("000002", 1L)));
+            when(marketDataApiClient.getMultiStockPricesInBatches(List.of("000001", "000002"))).thenReturn(List.of(
+                    price("000001", 0, 0.0, 10, 1),
+                    price("000002", 1000, 0.0, 5, 1)));
+
+            assertThat(client.getTopVolume(HighItemApiClient.ALL_REGISTERED_STOCKS))
+                    .extracting(RankingItemDto::getStockCode).containsExactly("000002");
+        }
+
+        @Test
+        @DisplayName("등록 종목 목록을 읽지 못했으면 t8407을 호출하지 않고 빈 목록을 반환한다")
+        void all_emptyRegisteredStocks_returnsEmptyWithoutCall() {
+            when(registeredStockReader.getRegisteredStocks()).thenReturn(List.of());
+
+            assertThat(client.getTopVolume(HighItemApiClient.ALL_REGISTERED_STOCKS)).isEmpty();
+            verify(marketDataApiClient, never()).getMultiStockPricesInBatches(org.mockito.ArgumentMatchers.anyList());
+            verify(accessTokenProvider, never()).issueAccessToken();
+        }
     }
 }
