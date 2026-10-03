@@ -39,7 +39,7 @@ class NewsChatPersistenceIntegrationTest {
                 .outletDomain("hankyung.com").deliveryTime(LocalTime.of(18, 0)).build());
         messages.saveAndFlush(NewsChatMessage.builder()
                 .session(morning).role("ASSISTANT").content("오전 답변")
-                .sourcesJson("[]").searchedAt("2026-09-30T07:00:00+09:00").build());
+                .sourcesJson("[]").searchedAt("2026-09-30T07:00:00.123456789+09:00").build());
         messages.saveAndFlush(NewsChatMessage.builder()
                 .session(evening).role("USER").content("저녁 질문")
                 .sourcesJson("[]").build());
