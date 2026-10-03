@@ -47,12 +47,19 @@ public class OrderExecutionService {
     private final HoldingRepository holdingRepository;
     private final RedisPendingOrderService redisPendingOrderService;
     private final HoldingSettlementService holdingSettlementService;
-    // 주문이 대기 리스트에서 빠질 때 미체결 주문 종목 구독(주문 접수 시 +1)을 함께 줄인다.
-    private final StockSubscriptionManager stockSubscriptionManager;
     // 지정가 주문 체결 시 알림 발송 — 도메인 간 직접 참조 대신 서비스 계층을 통해 호출한다.
     private final NotificationService notificationService;
     // 잔고 변동 원장 기록(ADMIN_API_BACKEND_HANDOFF.md 4.3).
     private final AccountTransactionService accountTransactionService;
+
+    // 주문이 대기 리스트에서 빠질 때 미체결 주문 종목 구독(주문 접수 시 +1)을 함께 줄인다.
+    // 생성자 주입이면 real 모드에서 StockSubscriptionManager → MarketDataWebSocketClient →
+    // MarketDataWebSocketHandler → StockBroadcastService → OrderExecutionService → StockSubscriptionManager
+    // 순환 의존이 생겨 애플리케이션이 기동하지 못한다(mock 모드는 WebSocket 클라이언트 빈이 없어 드러나지
+    // 않았음, 2026-10-01 확인). 아래 self와 같은 @Lazy 필드 주입으로 프록시를 받아 고리를 끊는다.
+    @Autowired
+    @Lazy
+    private StockSubscriptionManager stockSubscriptionManager;
 
     // execute()의 @Transactional은 Spring AOP 프록시를 거쳐야만 실제로 트랜잭션을 연다.
     // checkAndExecute()가 같은 클래스 안에서 execute(...)를 그냥 호출하면(self-invocation)
