@@ -18,4 +18,6 @@ public class MultiStockPriceDto {
     private Long changeAmount;
     private Double changeRate;
     private Long volume;
+    // 누적 거래대금(백만원, t8407 value). 전체 종목 거래대금 순위(real 모드)에서 쓴다.
+    private Long tradingValue;
 }

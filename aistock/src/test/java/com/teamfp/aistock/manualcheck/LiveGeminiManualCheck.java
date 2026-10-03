@@ -158,7 +158,8 @@ class LiveGeminiManualCheck {
         ReflectionTestUtils.setField(investInfoApiClient, "investInfoUrl", "https://openapi.ls-sec.co.kr:8080/stock/investinfo");
 
         // 2026-08-11 추가 — get_market_ranking/get_theme_info 도구 전용.
-        HighItemApiClient highItemApiClient = new HighItemApiClient(marketDataAccessTokenProvider, java.util.Optional.empty(), RestClient.builder());
+        HighItemApiClient highItemApiClient = new HighItemApiClient(marketDataAccessTokenProvider, java.util.Optional.empty(),
+                new com.teamfp.aistock.infra.marketdata.RegisteredStockReader(), marketDataApiClient, RestClient.builder());
         ReflectionTestUtils.setField(highItemApiClient, "highItemUrl", "https://openapi.ls-sec.co.kr:8080/stock/high-item");
 
         SectorApiClient sectorApiClient = new SectorApiClient(marketDataAccessTokenProvider, RestClient.builder());

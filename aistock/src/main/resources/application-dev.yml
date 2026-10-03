@@ -52,10 +52,13 @@ logging:
 market-data:
   mode: ${MARKET_DATA_MODE:mock}
   websocket-url: ${MARKET_DATA_WEBSOCKET_URL:wss://openapi.ls-sec.co.kr:29443/websocket}
-  # market-data.mode=mock 전용 — 로컬 파일로 시세를 공급할 때 사용할 데이터 디렉토리 경로(프로젝트
-  # 상대경로, feature/ls-local-data). 여기서 "프로젝트 상대경로"는 백엔드 프로세스 실행
-  # 디렉토리(aistock/) 기준이 아니라, local-market-data-generator(별도 Python 프로젝트)의
-  # output/ 폴더를 절대경로로 직접 가리킨다 — 두 프로젝트가 서로 다른 폴더에서 실행되므로
-  # generator 쪽 .env(OUTPUT_DIR)도 반드시 이 경로와 같은 절대경로를 가리켜야 한다.
+  # market-data.mode=mock 전용 — 로컬 파일로 시세를 공급할 때 사용할 데이터 디렉토리 경로
+  # (feature/ls-local-data). local-market-data-generator(별도 Python 프로젝트)의 output/ 폴더를 가리키며,
+  # generator 쪽 .env(OUTPUT_DIR)도 같은 폴더를 가리켜야 한다(generator의 OUTPUT_DIR 기본값은 output/가
+  # 아니라 local-market-data/이므로 generator .env에 OUTPUT_DIR을 꼭 지정한다).
   # LocalMarketDataReader가 이 경로의 market_data.json 단일 파일을 읽는다.
-  local-path: ${MARKET_DATA_PATH:C:\AI-STOCK\local-market-data-generator\output}
+  # 기본값은 특정 PC의 절대경로(C:\AI-STOCK\...)가 아니라 백엔드 실행 디렉토리(aistock/, bootRun·IntelliJ
+  # 기본값) 기준 상대경로다 — AI-STOCK_Backend와 local-market-data-generator가 같은 상위 폴더에 나란히 있다는
+  # 전제다. 폴더 배치가 다르면 .env에 MARKET_DATA_PATH(절대경로)를 넣는다. 경로에 파일이 없거나 generator가
+  # 없으면 서버는 정상 기동하고 시세·순위만 빈 값으로 응답한다(LocalMarketDataReader의 fallback, 2026-10-02).
+  local-path: ${MARKET_DATA_PATH:../../local-market-data-generator/output}

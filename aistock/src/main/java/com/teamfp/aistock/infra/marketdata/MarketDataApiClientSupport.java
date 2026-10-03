@@ -42,7 +42,8 @@ abstract class MarketDataApiClientSupport {
             Map<String, String> extraHeaders) {
         long ttl = switch (trCd) {
             case "t1102", "t1511", "t1901" -> 2_000;
-            case "t1452", "t1463", "t1441", "t1444" -> 10_000;
+            // t8407은 등록 종목 전체 순위(real 모드, 50종목씩 3회)를 순위 TR과 같은 주기로 재사용하려고 함께 둔다.
+            case "t1452", "t1463", "t1441", "t1444", "t8407" -> 10_000;
             case "t1305", "t3401" -> 60_000;
             default -> 0;
         };

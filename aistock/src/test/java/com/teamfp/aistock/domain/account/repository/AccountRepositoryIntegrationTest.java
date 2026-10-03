@@ -6,6 +6,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,6 +18,7 @@ import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * feature/admin-api-p0 — AccountRepository.searchAccountsWithUser() 실제 MySQL 연동 테스트
@@ -42,8 +44,16 @@ class AccountRepositoryIntegrationTest {
     void searchAccountsWithUser_filtersByQueryAndStatus() {
         long uniqueSuffix = System.nanoTime();
         String loginId = "account-search-test-" + uniqueSuffix;
+        // 유저당 계좌 1개(accounts.uq_account_user, 2026-10-01)라 계좌 두 개를 같은 유저에 만들 수 없다 —
+        // 아이디가 loginId로 시작하는 유저 두 명에게 계좌를 하나씩 만들어 like 검색으로 둘 다 걸리게 한다.
         User user = userRepository.save(User.builder()
-                .loginId(loginId)
+                .loginId(loginId + "-a")
+                .name("계좌검색테스터")
+                .role(Role.USER)
+                .isActive(true)
+                .build());
+        User secondUser = userRepository.save(User.builder()
+                .loginId(loginId + "-b")
                 .name("계좌검색테스터")
                 .role(Role.USER)
                 .isActive(true)
@@ -57,7 +67,7 @@ class AccountRepositoryIntegrationTest {
                 .balance(1_000_000L)
                 .build());
         Account suspendedAccount = accountRepository.save(Account.builder()
-                .user(user)
+                .user(secondUser)
                 .accountName("계좌B")
                 .accountNumber("B" + (uniqueSuffix % 10_000_000))
                 .openedAt(LocalDate.now())
@@ -74,5 +84,35 @@ class AccountRepositoryIntegrationTest {
         assertThat(byLoginIdAndActive.getContent()).extracting(Account::getAccountId).containsExactly(activeAccount.getAccountId());
         assertThat(byLoginIdAndActive.getContent()).extracting(Account::getAccountId).doesNotContain(suspendedAccount.getAccountId());
         assertThat(noMatch.getTotalElements()).isZero();
+    }
+
+    @Test
+    @DisplayName("같은 유저에게 계좌를 두 개 만들면 DB 제약(uq_account_user)이 막는다")
+    void uniqueAccountPerUser() {
+        long uniqueSuffix = System.nanoTime();
+        User user = userRepository.save(User.builder()
+                .loginId("account-unique-test-" + uniqueSuffix)
+                .name("계좌제약테스터")
+                .role(Role.USER)
+                .isActive(true)
+                .build());
+        accountRepository.saveAndFlush(Account.builder()
+                .user(user)
+                .accountName("계좌A")
+                .accountNumber("U" + (uniqueSuffix % 10_000_000))
+                .openedAt(LocalDate.now())
+                .baseBalance(1_000_000L)
+                .balance(1_000_000L)
+                .build());
+
+        assertThatThrownBy(() -> accountRepository.saveAndFlush(Account.builder()
+                .user(user)
+                .accountName("계좌B")
+                .accountNumber("V" + (uniqueSuffix % 10_000_000))
+                .openedAt(LocalDate.now())
+                .baseBalance(1_000_000L)
+                .balance(1_000_000L)
+                .build()))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 }

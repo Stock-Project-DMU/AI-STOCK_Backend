@@ -47,6 +47,20 @@ gradlew.bat build        # Windows
 - CI: `.github/workflows/backend-ci.yml` — working-directory는 `aistock`
 - 민감한 값(JWT_SECRET, API 키)은 `.env` 또는 IDE 환경변수로 주입. 코드·yml에 하드코딩 금지.
 
+### 시세 데이터 모드 설정 (팀원 로컬 환경, `aistock/.env`)
+
+| 상황 | `.env` 설정 | 결과 |
+|---|---|---|
+| LS 키만 있고 local-market-data-generator가 없음 | `MARKET_DATA_MODE=real` | 시세·차트·순위를 LS API에서 직접 받음. 홈 주요 종목(`all=true`)도 등록 종목 105개 |
+| generator를 함께 띄움(mock, 기본값) | `MARKET_DATA_MODE` 미지정 또는 `mock` | 시세·순위는 generator의 `market_data.json`. 차트는 합성 시세라 **목표 도달 시뮬레이션 수익률이 0% 근처로 나온다** |
+| mock인데 폴더 배치가 기본과 다름 | `MARKET_DATA_PATH=<generator의 output 폴더 절대경로>` | 기본값 `../../local-market-data-generator/output` 대신 지정 경로를 읽음 |
+
+- generator는 git에 포함되지 않은 별도 프로젝트다. mock 모드로 쓰려면 `AI-STOCK_Backend`와 같은 상위 폴더에
+  `local-market-data-generator`를 두고, generator `.env`의 `OUTPUT_DIR`도 같은 `output` 폴더를 가리키게 한다
+  (generator의 `OUTPUT_DIR` 기본값은 `output/`이 아니라 `local-market-data/`다).
+- generator가 없거나 경로가 틀려도 서버는 기동된다 — 홈 종목 목록이 비어 있으면 경로부터 확인한다.
+- 예시 (Windows, 기본 폴더 배치가 아닐 때): `MARKET_DATA_PATH=D:\work\local-market-data-generator\output`
+
 ---
 
 ## 4. 디렉토리 구조 (고정 — 임의 변경 금지)
@@ -77,7 +91,7 @@ com.teamfp.aistock
 │   ├── response       → ApiResponse
 │   ├── redis          → RedisTokenService, RedisAuthCodeService, RedisStockCacheService,
 │   │                     RedisPendingOrderService, RedisRateLimiterService, RedisOnlineStatusService,
-│   │                     RedisAiToolCacheService
+│   │                     RedisAiToolCacheService, RedisPendingSimulationService
 │   └── util           → DateUtil, SecurityUtil, ExternalApiInvoker, NewsRelevanceMatcher
 ├── infra
 │   ├── ls            → MarketDataWebSocketClient, MarketDataWebSocketHandler, MarketDataReconnectService, dto
@@ -212,10 +226,11 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
 | `pending:orders:{stockCode}` | 없음 | 지정가 미체결 주문 |
 | `gemini:rate:{userId}:minute` | 1분 | Gemini Rate Limiter (분당 3회) — SimulationService만 사용, AI 재무설계사는 2026-09-21부터 미적용 |
 | `gemini:rate:{userId}:daily` | 1일 | Gemini Rate Limiter (일일 10회) — SimulationService만 사용, AI 재무설계사는 2026-09-21부터 미적용 |
+| `simulation:pending:{userId}:{pendingSimulationId}` | 30분 | 목표 도달 시뮬레이션 실행 결과 임시 보관 — 저장 버튼을 눌러야 DB(simulations)에 기록 (`RedisPendingSimulationService`, 2026-10-01) |
 | `admin:online:users` | 없음 (이벤트 기반) | 관리자 대시보드 — 온라인 사용자 집합 (WebSocket CONNECT/DISCONNECT 시 갱신) |
 | `ai:tool:{sessionId}:{도구이름}?{인자}` | 30분 | AI 상담 세션 내 DART/네이버 도구 실행 결과 캐시 (같은 조건 재조회 시 재사용) |
 
-- Redis 접근은 반드시 `global/redis`의 **7개** 서비스 클래스를 통해서만 한다.
+- Redis 접근은 반드시 `global/redis`의 **8개** 서비스 클래스를 통해서만 한다.
 - 도메인 서비스에서 RedisTemplate 직접 주입 금지.
 
 ---
@@ -263,9 +278,20 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
     모드에서는 상승 종목만/하락 종목만 걸러 정렬한다(상승·하락 순위 전체 시장 기준, #13, 2026-09-30). 전종목이 아니라
     `LocalMarketDataReader.getAllCurrentPrices()`(stocks.json에 등록된 종목만, 2026-09-21 기준
     105개)를 정렬해 상위 10개만 뽑는 근사치다. 단 홈 주요 종목은 `GET /api/market/rankings?all=true`로
-    `(int mockLimit)` 오버로드를 호출해 10개 제한 없이 등록 종목 전체를 한 번에 받아 화면에서 15개씩
-    무한 스크롤로 보여준다(real 모드는 `all=true`여도 최대 10개, 2026-10-01). 같은 클래스의 나머지 3개
+    `(int limit)` 오버로드(`HighItemApiClient.ALL_REGISTERED_STOCKS`)를 호출해 10개 제한 없이 등록 종목 전체를
+    한 번에 받아 화면에서 15개씩 무한 스크롤로 보여준다(2026-10-01). 같은 클래스의 나머지 3개
     (`getSurgingVolumeVsYesterday()`/시간외 2종)는 mock 대상이 아니다.
+  - **real 모드의 `all=true`(2026-10-02 수정)**: real 모드에서는 `all=true`여도 LS API 특성상(순위 TR
+    t1441/t1444/t1452/t1463은 시장 전체 상위 목록만 줌) `MAX_RANKING_ITEMS=10`에서 잘렸으나, 이번 수정으로
+    해제됐다. 이전에는 배포(prod=real) 환경에서 홈 무한 스크롤이 10개만 보이고, 시뮬레이션 리밸런싱 후보
+    (`getRankings("market-cap", true)`)도 10개뿐이었다. 이제 `limit`이 10을 넘으면 순위 TR 대신
+    `RegisteredStockReader`가 읽은 등록 종목 목록(`aistock/src/main/resources/stocks.json`, 105개)의 종목코드로
+    `MarketDataApiClient.getMultiStockPricesInBatches()`(t8407, 50종목씩 3회, REST 캐시 10초)를 호출해 mock과 같은
+    기준으로 정렬한다 — mock/real 모두 등록 종목 105개 범위의 순위다. 시가총액은 t8407에 없어 실시간 현재가 ×
+    `stocks.json`의 상장주식수(`listingShares`, 천주, 2026-10-02 스냅샷)로 계산하고, 거래대금은 t8407 `value`(백만원,
+    실제값)를 쓴다. `all=false`(기본, AI 상담 도구 포함)는 그대로 순위 TR 상위 10건이다. 백엔드
+    `resources/stocks.json`과 local-market-data-generator의 `stocks.json`은 종목 구성이 같아야 하므로 종목을
+    추가·삭제할 때 두 파일을 함께 고친다.
   - `IndustryApiClient.getCurrentPrice(marketName)` — 지수(코스피/코스닥). 실지수는 전종목 시가총액
     가중평균이라 105개 mock 종목으로 재현 불가능해, 고정 베이스값(`MOCK_BASE_INDEX_VALUE`)을 같은
     시장 mock 종목의 평균 등락률만큼 흔든 근사치를 쓴다. **실제 지수 값이 아니다.** 같은 클래스의
@@ -283,7 +309,12 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
   `LocalMarketDataReader`는 원본을 파일 또는 HTTP 둘 중 하나에서 읽는다:
   - **파일 모드(로컬 개발 기본값)**: `market-data.url`이 비어있으면 `market-data.local-path`
     디렉토리의 `market_data.json` 단일 파일(종목코드를 키로, 현재가·호가 필드가 함께 들어있는
-    맵, local-market-data-generator가 생성)을 직접 읽는다.
+    맵, local-market-data-generator가 생성)을 직접 읽는다. dev 기본값은 `MARKET_DATA_PATH` 환경변수가 없을 때
+    `../../local-market-data-generator/output`(백엔드 실행 디렉토리 `aistock/` 기준 상대경로 — `AI-STOCK_Backend`와
+    `local-market-data-generator`가 같은 상위 폴더에 나란히 있다는 전제)이다. 이전 기본값
+    `C:\AI-STOCK\...` 절대경로는 PC마다 경로가 달라 generator가 있어도 데이터를 못 읽는 문제가 있어 바꿨다
+    (2026-10-02). 파일이 없거나(generator 미설치·미실행) 파싱에 실패해도 서버는 정상 기동하고 시세·순위만 빈 값으로
+    응답한다.
   - **HTTP 모드(백엔드가 생성기와 파일 시스템을 공유 못 하는 배포 환경)**: 환경변수
     `MARKET_DATA_URL`을 설정하면 파일 대신 그 URL로 GET 요청해 같은 JSON을 가져온다.
     local-market-data-generator는 자체 HTTP 서버(기본 포트 8081)를 함께 띄워

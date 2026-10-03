@@ -61,6 +61,7 @@
 | `pending:orders:{stockCode}` | 없음 | 지정가 미체결 주문 목록 |
 | `gemini:rate:{userId}:minute` | 1분 | Gemini API 호출 횟수 (분당 3회 제한) |
 | `gemini:rate:{userId}:daily` | 1일 | Gemini API 호출 횟수 (일일 10회 제한) |
+| `simulation:pending:{userId}:{pendingSimulationId}` | 30분 | 목표 도달 시뮬레이션 실행 결과 임시 보관 (`RedisPendingSimulationService` — `savePending`, `claimPending`(GET 후 `__SAVED__` 표시로 교체하는 Lua 스크립트, 남은 TTL 유지)). 저장 버튼 요청에는 임시 ID만 받아 값 조작을 막고, 꺼내면서 "저장됨" 표시로 바꿔 중복 저장을 막는다 — 두 번째 요청은 만료가 아니라 "이미 저장함"으로 안내한다 (2026-10-01, 2026-10-03 표시 방식으로 변경) |
 | `admin:online:users` | 없음 (이벤트 기반) | 현재 WebSocket 연결 중인 userId 집합 (관리자 대시보드) |
 | `ai:tool:{sessionId}:{도구이름}?{인자}` | 30분 | AI 상담 세션 내 DART/네이버 도구 실행 결과 캐시 |
 

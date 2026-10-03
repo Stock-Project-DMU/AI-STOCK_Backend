@@ -22,6 +22,7 @@ import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import jakarta.persistence.Version;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -32,6 +33,10 @@ import lombok.NoArgsConstructor;
 @Table(name = "accounts", indexes = {
         @Index(name = "idx_account_status", columnList = "status"),
         @Index(name = "idx_account_user", columnList = "user_id")
+}, uniqueConstraints = {
+        // 유저 1명당 계좌 1개(2026-10-01) — account_single_migration.sql과 같은 제약 이름을 써서
+        // ddl-auto=update가 같은 제약을 중복 생성하지 않게 한다.
+        @UniqueConstraint(name = "uq_account_user", columnNames = "user_id")
 })
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -47,7 +52,7 @@ public class Account {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    // 유저 1명이 계좌를 최대 3개까지 가질 수 있어(성향별로 나눠 투자) 구분용 이름을 둔다.
+    // 계좌 구분용 이름. 원래 유저당 최대 3개였던 시절에 생긴 컬럼이며, 1개로 줄인 뒤에도 표시용으로 유지한다.
     @Column(name = "account_name", length = 50, nullable = false)
     private String accountName;
 

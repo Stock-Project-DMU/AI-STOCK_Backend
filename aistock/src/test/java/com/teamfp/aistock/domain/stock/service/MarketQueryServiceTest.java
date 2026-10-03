@@ -136,6 +136,38 @@ class MarketQueryServiceTest {
     }
 
     @Test
+    @DisplayName("real 모드에서 all=true면 순위 TR(최대 10건) 대신 등록 종목 전체를 t8407 현재가로 정렬해 반환한다")
+    void getRankings_all_realMode_returnsEveryRegisteredStock() {
+        com.teamfp.aistock.infra.marketdata.RegisteredStockReader registeredStockReader =
+                org.mockito.Mockito.mock(com.teamfp.aistock.infra.marketdata.RegisteredStockReader.class);
+        com.teamfp.aistock.infra.marketdata.MarketDataAccessTokenProvider tokenProvider =
+                org.mockito.Mockito.mock(com.teamfp.aistock.infra.marketdata.MarketDataAccessTokenProvider.class);
+        List<com.teamfp.aistock.infra.marketdata.dto.RegisteredStockDto> stocks = java.util.stream.IntStream.rangeClosed(1, 15)
+                .mapToObj(i -> new com.teamfp.aistock.infra.marketdata.dto.RegisteredStockDto("%06d".formatted(i), "종목" + i, "KOSPI", 1_000L))
+                .toList();
+        List<String> stockCodes = stocks.stream().map(com.teamfp.aistock.infra.marketdata.dto.RegisteredStockDto::stockCode).toList();
+        when(registeredStockReader.getRegisteredStocks()).thenReturn(stocks);
+        when(marketDataApiClient.getMultiStockPricesInBatches(stockCodes)).thenReturn(stockCodes.stream()
+                .map(code -> com.teamfp.aistock.infra.marketdata.dto.MultiStockPriceDto.builder()
+                        .stockCode(code).stockName("종목").price(1000L).changeAmount(0L).changeRate(0.0)
+                        .volume(Long.parseLong(code)).tradingValue(1L).build())
+                .toList());
+        // real 모드(LocalMarketDataReader 없음)의 실제 HighItemApiClient를 연결한다 — 순위 TR URL은 비워 둬
+        // TR 경로로 새면 바로 실패하게 한다.
+        HighItemApiClient realModeClient = new HighItemApiClient(tokenProvider, Optional.empty(),
+                registeredStockReader, marketDataApiClient, org.springframework.web.client.RestClient.builder());
+        MarketQueryService realModeService = new MarketQueryService(realModeClient, marketDataApiClient, null, null, null, null);
+        ReflectionTestUtils.setField(realModeService, "appKey", "test-key");
+        ReflectionTestUtils.setField(realModeService, "appSecret", "test-secret");
+
+        List<RankingItemDto> result = realModeService.getRankings("volume", true);
+
+        assertThat(result).hasSize(15);
+        assertThat(result).extracting(RankingItemDto::getStockCode).startsWith("000015", "000014").endsWith("000001");
+        verify(tokenProvider, never()).issueAccessToken();
+    }
+
+    @Test
     @DisplayName("all=false면 기존처럼 상위 10건 순위 메서드를 호출한다")
     void getRankings_notAll_keepsDefaultRanking() {
         when(highItemApiClient.getTopVolume()).thenReturn(ranking("000004"));

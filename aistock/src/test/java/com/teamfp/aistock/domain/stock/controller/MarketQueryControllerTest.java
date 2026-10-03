@@ -52,7 +52,8 @@ class MarketQueryControllerTest {
         ReflectionTestUtils.setField(tokenProvider, "appKey", "test-key");
         ReflectionTestUtils.setField(tokenProvider, "appSecret", "test-secret");
 
-        HighItemApiClient highItemApiClient = new HighItemApiClient(tokenProvider, Optional.empty(), builder);
+        // 등록 종목 전체 순위(all=true) 경로를 쓰지 않으므로 RegisteredStockReader·MarketDataApiClient는 null로 둔다.
+        HighItemApiClient highItemApiClient = new HighItemApiClient(tokenProvider, Optional.empty(), null, null, builder);
         ReflectionTestUtils.setField(highItemApiClient, "highItemUrl", HIGH_ITEM_URL);
 
         // 순위 조회 경로에서 쓰지 않는 클라이언트(현재가·뉴스·업종·투자정보·DART)는 null로 둔다.

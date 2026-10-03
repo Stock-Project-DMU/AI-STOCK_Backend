@@ -99,6 +99,9 @@ class OrderExecutionServiceTest {
         // 테스트는 checkAndExecute()가 self.execute(...)를 올바른 인자로 호출하는지만 검증하면
         // 되므로(실제 AOP 프록시 동작 자체는 여기서 검증 대상이 아니다), 자기 자신을 그대로 넣어준다.
         ReflectionTestUtils.setField(orderExecutionService, "self", orderExecutionService);
+        // stockSubscriptionManager도 순환 의존 해소를 위해 @Lazy 필드 주입으로 바뀌어(생성자 파라미터 아님)
+        // @InjectMocks의 생성자 주입 대상이 아니므로 직접 넣어준다.
+        ReflectionTestUtils.setField(orderExecutionService, "stockSubscriptionManager", stockSubscriptionManager);
 
         // HoldingSettlementService도 @Mock이 아니라 실제 구현을 그대로 쓴다 — 이 테스트들이
         // 검증하는 "보유종목 수량/평단가가 실제로 어떻게 바뀌는지"는 그 서비스 내부 로직이라,
