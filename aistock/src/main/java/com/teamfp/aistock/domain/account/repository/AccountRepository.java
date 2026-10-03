@@ -25,7 +25,7 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
     String FIND_BY_ACCOUNT_ID_AND_USER_ID =
             "select a from Account a where a.accountId = :accountId and a.user.userId = :userId";
 
-    // 유저 1명이 계좌를 최대 3개까지 가질 수 있어(feature/mypage-account) 단일 계좌를
+    // 유저 1명이 계좌를 최대 3개까지 가질 수 있던 시절(feature/mypage-account, 2026-10-01부터 1개) 단일 계좌를
     // 가정하던 findByUserId(Long)는 더 이상 쓰지 않는다 — 항상 목록 또는 accountId+userId
     // 조합으로 특정 계좌를 골라 조회한다.
     // ORDER BY 없이는 반환 순서가 보장되지 않아, "첫 번째 계좌"를 가정하는 호출부
