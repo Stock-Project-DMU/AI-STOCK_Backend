@@ -21,6 +21,8 @@ class UserWithdrawalServiceTest {
     @Mock UserService userService;
     @Mock UserRepository userRepository;
     @Mock AccountRepository accountRepository;
+    @Mock com.teamfp.aistock.domain.auth.service.InitialAdminService initialAdminService;
+    @Mock com.teamfp.aistock.domain.admin.service.AuditLogService auditLogService;
     @InjectMocks UserWithdrawalService service;
 
     private void account(String loginId) {
@@ -61,5 +63,20 @@ class UserWithdrawalServiceTest {
         assertThatThrownBy(() -> service.withdraw(1L, new UserWithdrawalRequest("password", null)))
                 .isSameAs(cleanupBoundary);
         verify(userService).verifyPassword(1L, new PasswordVerifyRequest("password"));
+    }
+
+    @Test void adminDisposeRejectsWrongAdminCodeAfterPasswordCheck() {
+        User admin = User.builder().loginId("admin1").password("encoded").name("관리자").email("admin@example.com")
+                .role(com.teamfp.aistock.domain.user.entity.Role.ADMIN).isActive(true).build();
+        org.mockito.Mockito.when(userRepository.findByUserIdAndIsActiveTrue(1L)).thenReturn(java.util.Optional.of(admin));
+        org.mockito.Mockito.doThrow(new CustomException(com.teamfp.aistock.global.exception.ErrorCode.INVALID_ADMIN_CODE))
+                .when(initialAdminService).verifyAdminCode("user:1", "wrong");
+
+        assertThatThrownBy(() -> service.withdraw(1L, new UserWithdrawalRequest("password", null, "wrong")))
+                .isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException) e).getErrorCode())
+                .isEqualTo(com.teamfp.aistock.global.exception.ErrorCode.INVALID_ADMIN_CODE);
+        org.mockito.Mockito.verify(accountRepository, org.mockito.Mockito.never()).findAllByUserIdForUpdate(org.mockito.ArgumentMatchers.anyLong());
+        org.mockito.Mockito.verifyNoInteractions(auditLogService);
     }
 }

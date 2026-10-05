@@ -7,7 +7,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.teamfp.aistock.domain.admin.dto.request.AdminInquiryAnswerRequest;
 import com.teamfp.aistock.domain.admin.dto.response.AdminInquiryResponse;
+import com.teamfp.aistock.domain.admin.dto.request.AdminSearchConditionDto;
 import com.teamfp.aistock.domain.inquiry.entity.Inquiry;
+import com.teamfp.aistock.domain.inquiry.entity.InquiryStatus;
 import com.teamfp.aistock.domain.inquiry.repository.InquiryRepository;
 import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
@@ -28,9 +30,11 @@ public class AdminInquiryService {
     private final InquiryRepository inquiryRepository;
     private final UserRepository userRepository;
 
+    // 문의 목록 — 검색(문의번호·아이디·이름·제목), 상태 필터(대기/답변 완료), 정렬(pageable에 담겨 옴)
     @Transactional(readOnly = true)
-    public Page<AdminInquiryResponse> getInquiries(Pageable pageable) {
-        return inquiryRepository.findAllByOrderByStatusDescCreatedAtDesc(pageable)
+    public Page<AdminInquiryResponse> getInquiries(AdminSearchConditionDto search, InquiryStatus status, Pageable pageable) {
+        return inquiryRepository.searchWithUser(search.query(), search.pattern(), search.queryId(), search.field(),
+                        search.exact(), status, pageable)
                 .map(AdminInquiryResponse::from);
     }
 

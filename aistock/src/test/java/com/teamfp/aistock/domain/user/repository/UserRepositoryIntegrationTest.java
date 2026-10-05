@@ -94,9 +94,9 @@ class UserRepositoryIntegrationTest {
                 .isActive(true)
                 .build());
 
-        Page<User> queryOnly = userRepository.searchUsers(loginIdPrefix, null, null, PageRequest.of(0, 10));
-        Page<User> activeUsersOnly = userRepository.searchUsers(loginIdPrefix, UserStatus.ACTIVE, Role.USER, PageRequest.of(0, 10));
-        Page<User> noMatch = userRepository.searchUsers("no-such-login-id-" + uniqueSuffix, null, null, PageRequest.of(0, 10));
+        Page<User> queryOnly = userRepository.searchUsers(loginIdPrefix, "%" + (loginIdPrefix) + "%", null, "ALL", false, null, null, PageRequest.of(0, 10));
+        Page<User> activeUsersOnly = userRepository.searchUsers(loginIdPrefix, "%" + (loginIdPrefix) + "%", null, "ALL", false, UserStatus.ACTIVE, Role.USER, PageRequest.of(0, 10));
+        Page<User> noMatch = userRepository.searchUsers("no-such-login-id-" + uniqueSuffix, "%" + ("no-such-login-id-" + uniqueSuffix) + "%", null, "ALL", false, null, null, PageRequest.of(0, 10));
 
         assertThat(queryOnly.getTotalElements()).isEqualTo(3);
         assertThat(activeUsersOnly.getContent()).hasSize(1);

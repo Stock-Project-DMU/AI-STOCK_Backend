@@ -19,6 +19,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.teamfp.aistock.domain.admin.dto.request.AdminOrderCancelRequest;
+import com.teamfp.aistock.domain.admin.dto.request.AdminSearchConditionDto;
+import com.teamfp.aistock.domain.admin.dto.request.AdminSearchMatchType;
+import com.teamfp.aistock.domain.admin.dto.request.AdminSortType;
+import com.teamfp.aistock.domain.admin.dto.request.AdminTradeSearchField;
+import com.teamfp.aistock.domain.admin.dto.request.AdminTradeSortColumn;
+import com.teamfp.aistock.domain.admin.dto.response.AdminTradeDetailResponse;
 import com.teamfp.aistock.domain.admin.dto.response.AdminTradeResponse;
 import com.teamfp.aistock.domain.admin.service.AdminTradeService;
 import com.teamfp.aistock.domain.order.entity.OrderStatus;
@@ -41,31 +47,36 @@ public class AdminTradeController {
 
     private final AdminTradeService adminTradeService;
 
-    // query(주문번호/회원 아이디/계좌번호/종목코드/종목명 통합검색), status, orderType, priceType,
-    // stockCode(정확일치), from~to(orderedAt 구간)는 전부 선택 파라미터다. 기본 정렬은 orderedAt
-    // 내림차순 — 클라이언트가 sort를 직접 지정하면 그 값이 우선 적용된다.
+    // query(주문번호/회원 아이디/회원 이름/계좌번호/종목코드/종목명 검색 — field로 항목, matchType으로 일치/포함 선택), status, orderType, priceType,
+    // stockCode(정확일치), from~to(orderedAt 구간)는 전부 선택 파라미터다. 정렬은 sortBy로만 고른다(feat/admin-improvements, AdminSortSupport).
     @GetMapping
     public ApiResponse<Page<AdminTradeResponse>> getTrades(
             @RequestParam(required = false) String query,
+            @RequestParam(defaultValue = "ALL") AdminTradeSearchField field,
+            @RequestParam(defaultValue = "CONTAINS") AdminSearchMatchType matchType,
             @RequestParam(required = false) OrderStatus status,
             @RequestParam(required = false) OrderType orderType,
             @RequestParam(required = false) PriceType priceType,
             @RequestParam(required = false) String stockCode,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to,
-            @PageableDefault(size = 20, sort = "orderedAt", direction = Sort.Direction.DESC) Pageable pageable
+            @RequestParam(defaultValue = "LATEST") AdminSortType sortBy,
+            @RequestParam(required = false) AdminTradeSortColumn sortColumn,
+            @RequestParam(defaultValue = "DESC") Sort.Direction direction,
+            @PageableDefault(size = 20) Pageable pageable
     ) {
-        return ApiResponse.success(adminTradeService.getTrades(query, status, orderType, priceType, stockCode, from, to, pageable));
+        return ApiResponse.success(adminTradeService.getTrades(AdminSearchConditionDto.of(query, field, matchType), status, orderType, priceType, stockCode, from, to,
+                AdminSortSupport.trades(pageable, sortBy, sortColumn, direction)));
     }
 
     @GetMapping("/{orderId}")
-    public ApiResponse<AdminTradeResponse> getTradeDetail(@PathVariable Long orderId) {
+    public ApiResponse<AdminTradeDetailResponse> getTradeDetail(@PathVariable Long orderId) {
         return ApiResponse.success(adminTradeService.getTradeDetail(orderId));
     }
 
     // 주문 강제취소(3.3, "구현 전 결정이 필요한 정책" 2번 — 정책 확정 전 우선 구현).
     @PatchMapping("/{orderId}/cancel")
-    public ApiResponse<AdminTradeResponse> cancelTrade(
+    public ApiResponse<AdminTradeDetailResponse> cancelTrade(
             @PathVariable Long orderId,
             @Valid @RequestBody AdminOrderCancelRequest request
     ) {
@@ -79,6 +90,8 @@ public class AdminTradeController {
     @GetMapping("/export")
     public ResponseEntity<byte[]> exportTrades(
             @RequestParam(required = false) String query,
+            @RequestParam(defaultValue = "ALL") AdminTradeSearchField field,
+            @RequestParam(defaultValue = "CONTAINS") AdminSearchMatchType matchType,
             @RequestParam(required = false) OrderStatus status,
             @RequestParam(required = false) OrderType orderType,
             @RequestParam(required = false) PriceType priceType,
@@ -87,7 +100,7 @@ public class AdminTradeController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to,
             @RequestParam(defaultValue = "orderedAt,desc") String sort
     ) {
-        byte[] csv = adminTradeService.exportTradesCsv(query, status, orderType, priceType, stockCode, from, to, parseSort(sort));
+        byte[] csv = adminTradeService.exportTradesCsv(AdminSearchConditionDto.of(query, field, matchType), status, orderType, priceType, stockCode, from, to, parseSort(sort));
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=admin-trades.csv")
                 .contentType(MediaType.parseMediaType("text/csv; charset=UTF-8"))

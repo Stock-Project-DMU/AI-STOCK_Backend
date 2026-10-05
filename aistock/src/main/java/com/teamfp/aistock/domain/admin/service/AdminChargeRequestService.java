@@ -1,6 +1,9 @@
 package com.teamfp.aistock.domain.admin.service;
 
+import java.util.List;
+
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,6 +15,8 @@ import com.teamfp.aistock.domain.account.entity.ChargeRequestStatus;
 import com.teamfp.aistock.domain.account.repository.ChargeRequestRepository;
 import com.teamfp.aistock.domain.account.service.AccountTransactionService;
 import com.teamfp.aistock.domain.admin.dto.request.AdminChargeDecisionRequest;
+import com.teamfp.aistock.domain.admin.dto.request.AdminSearchConditionDto;
+import com.teamfp.aistock.domain.admin.dto.response.AdminChargeRequestDetailResponse;
 import com.teamfp.aistock.domain.admin.dto.response.AdminChargeRequestResponse;
 import com.teamfp.aistock.domain.notification.entity.NotificationType;
 import com.teamfp.aistock.domain.notification.service.NotificationService;
@@ -38,16 +43,25 @@ public class AdminChargeRequestService {
     private final NotificationService notificationService;
 
     @Transactional(readOnly = true)
-    public Page<AdminChargeRequestResponse> getRequests(String query, ChargeRequestStatus status, Pageable pageable) {
-        return chargeRequestRepository.searchWithAccountAndUser(blankToNull(query), status, pageable)
+    public Page<AdminChargeRequestResponse> getRequests(AdminSearchConditionDto search, ChargeRequestStatus status, Pageable pageable) {
+        return chargeRequestRepository.searchWithAccountAndUser(search.query(), search.pattern(), search.queryId(), search.field(), search.exact(), status, pageable)
                 .map(AdminChargeRequestResponse::from);
     }
 
     @Transactional(readOnly = true)
-    public AdminChargeRequestResponse getRequestDetail(Long requestId) {
-        return chargeRequestRepository.findWithAccountAndUserById(requestId)
-                .map(AdminChargeRequestResponse::from)
+    public AdminChargeRequestDetailResponse getRequestDetail(Long requestId) {
+        ChargeRequest chargeRequest = chargeRequestRepository.findWithAccountAndUserById(requestId)
                 .orElseThrow(() -> new CustomException(ErrorCode.CHARGE_REQUEST_NOT_FOUND));
+        // 같은 계좌의 최근 요청 이력(이 요청 제외) — 한 건 더 읽어 이 요청이 끼어 있으면 빼고 최대 N건만 쓴다.
+        List<AdminChargeRequestResponse> recentRequests = chargeRequestRepository
+                .findAllByAccountId(chargeRequest.getAccount().getAccountId(),
+                        PageRequest.of(0, AdminChargeRequestDetailResponse.RECENT_REQUEST_LIMIT + 1))
+                .stream()
+                .filter(other -> !other.getRequestId().equals(requestId))
+                .limit(AdminChargeRequestDetailResponse.RECENT_REQUEST_LIMIT)
+                .map(AdminChargeRequestResponse::from)
+                .toList();
+        return AdminChargeRequestDetailResponse.of(chargeRequest, recentRequests);
     }
 
     /**
@@ -105,7 +119,4 @@ public class AdminChargeRequestService {
                 .orElseThrow(() -> new CustomException(ErrorCode.CHARGE_REQUEST_NOT_FOUND));
     }
 
-    private String blankToNull(String value) {
-        return (value == null || value.isBlank()) ? null : value;
-    }
 }

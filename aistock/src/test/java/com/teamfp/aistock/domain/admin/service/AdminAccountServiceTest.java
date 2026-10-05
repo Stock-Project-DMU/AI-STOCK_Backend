@@ -23,6 +23,7 @@ import com.teamfp.aistock.domain.account.repository.AccountRepository;
 import com.teamfp.aistock.domain.account.service.AccountTransactionService;
 import com.teamfp.aistock.domain.admin.dto.request.AdminAccountAdjustmentRequest;
 import com.teamfp.aistock.domain.admin.dto.request.AdminAccountStatusRequest;
+import com.teamfp.aistock.domain.admin.dto.request.AdminSearchConditionDto;
 import com.teamfp.aistock.domain.admin.dto.response.AdminAccountDetailResponse;
 import com.teamfp.aistock.domain.notification.entity.NotificationType;
 import com.teamfp.aistock.domain.notification.service.NotificationService;
@@ -56,6 +57,16 @@ class AdminAccountServiceTest {
     private AuditLogService auditLogService;
     @Mock
     private NotificationService notificationService;
+    @Mock
+    private com.teamfp.aistock.domain.order.service.HoldingValuationService holdingValuationService;
+    @Mock
+    private com.teamfp.aistock.domain.order.repository.OrderRepository orderRepository;
+    @Mock
+    private com.teamfp.aistock.domain.account.repository.ChargeRequestRepository chargeRequestRepository;
+    @Mock
+    private com.teamfp.aistock.domain.admin.repository.AuditLogRepository auditLogRepository;
+    @Mock
+    private com.teamfp.aistock.domain.account.repository.AccountTransactionRepository accountTransactionRepository;
 
     private AdminAccountService adminAccountService;
 
@@ -66,7 +77,13 @@ class AdminAccountServiceTest {
 
     @BeforeEach
     void setUp() {
-        adminAccountService = new AdminAccountService(accountRepository, orderService, accountTransactionService, auditLogService, notificationService);
+        adminAccountService = new AdminAccountService(accountRepository, orderService, accountTransactionService, auditLogService, notificationService,
+                holdingValuationService, orderRepository, chargeRequestRepository, auditLogRepository,
+                accountTransactionRepository);
+        // 상세 응답(toDetail)을 만드는 모든 경로가 계좌의 최근 충전 요청을 조회한다 — 기본은 빈 페이지.
+        org.mockito.Mockito.lenient().when(chargeRequestRepository.findAllByAccountId(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(org.springframework.data.domain.Page.empty());
 
         User user = User.builder()
                 .loginId("tester")
@@ -93,11 +110,46 @@ class AdminAccountServiceTest {
     void getAccountDetail_returnsDetail() {
         when(accountRepository.findAccountWithUserById(ACCOUNT_ID)).thenReturn(Optional.of(account));
 
+        when(orderRepository.countByAccountIdIn(List.of(ACCOUNT_ID))).thenReturn(42L);
+        when(accountTransactionRepository.sumAmountByAccountIdAndTypeIn(ACCOUNT_ID, List.of(
+                AccountTransactionType.AUTO_CHARGE, AccountTransactionType.ADMIN_CHARGE))).thenReturn(5_000_000L);
+        when(accountTransactionRepository.sumAmountByAccountIdAndTypeIn(ACCOUNT_ID, List.of(
+                AccountTransactionType.ADMIN_DEDUCTION, AccountTransactionType.AUTO_DEDUCTION))).thenReturn(-300_000L);
+        when(accountTransactionRepository.sumAmountByAccountIdAndTypeIn(ACCOUNT_ID, List.of(
+                AccountTransactionType.TRADE_FEE))).thenReturn(-1_200L);
+        when(auditLogRepository.findAllByActionAndTargetTypeAndTargetIdOrderByCreatedAtDesc(
+                AuditLogService.ACTION_ACCOUNT_STATUS_CHANGE, AuditLogService.TARGET_ACCOUNT, ACCOUNT_ID))
+                .thenReturn(List.of(com.teamfp.aistock.domain.admin.entity.AuditLog.builder().adminUserId(ADMIN_ID)
+                        .adminLoginId("admin").action(AuditLogService.ACTION_ACCOUNT_STATUS_CHANGE)
+                        .targetType(AuditLogService.TARGET_ACCOUNT).targetId(ACCOUNT_ID)
+                        .beforeValue("ACTIVE").afterValue("SUSPENDED").reason("이상 거래").build()));
+        when(orderRepository.findRecentByAccountIdIn(org.mockito.ArgumentMatchers.eq(List.of(ACCOUNT_ID)), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(List.of());
+        // 보유: 10주 × 현재가 12만원 = 120만원(평단 10만원)
+        when(holdingValuationService.getHoldingValuations(ACCOUNT_ID)).thenReturn(List.of(
+                new com.teamfp.aistock.domain.order.dto.HoldingValuationDto(ACCOUNT_ID, "005930", "삼성전자", 10, 100_000L, 120_000L)));
+
         AdminAccountDetailResponse result = adminAccountService.getAccountDetail(ACCOUNT_ID);
 
         assertThat(result.accountId()).isEqualTo(ACCOUNT_ID);
         assertThat(result.userName()).isEqualTo("테스터");
         assertThat(result.status()).isEqualTo(AccountStatus.ACTIVE);
+        // feat/admin-improvements: 보유 종목과 총 자산·손익(마이페이지와 같은 식)이 함께 담긴다.
+        assertThat(result.holdings()).hasSize(1);
+        assertThat(result.holdings().get(0).stockCode()).isEqualTo("005930");
+        assertThat(result.totalAsset()).isEqualTo(account.getBalance() + account.getFrozenBalance() + 1_200_000L);
+        assertThat(result.profitAmount()).isEqualTo(result.totalAsset() - account.getBaseBalance());
+        assertThat(result.maxChargeCount()).isEqualTo(Account.MAX_CHARGE_COUNT);
+        // 이 계좌의 최근 주문 N건 + 전체 건수, 최근 충전 요청 N건이 함께 담긴다.
+        assertThat(result.orderCount()).isEqualTo(42L);
+        assertThat(result.recentOrders()).isEmpty();
+        assertThat(result.recentChargeRequests()).isEmpty();
+        // 누적 통계: 차감·수수료는 음수 합계를 양수로 바꿔 보여준다. 정지 이력은 감사 로그를 그대로.
+        assertThat(result.stats().totalCharged()).isEqualTo(5_000_000L);
+        assertThat(result.stats().totalDeducted()).isEqualTo(300_000L);
+        assertThat(result.stats().totalFee()).isEqualTo(1_200L);
+        assertThat(result.stats().realizedProfit()).isZero();
+        assertThat(result.suspensionHistory()).extracting("reason").containsExactly("이상 거래");
     }
 
     @Test
@@ -149,13 +201,13 @@ class AdminAccountServiceTest {
     void getAccounts_noFilter_passesAllNull() {
         Pageable pageable = PageRequest.of(0, 20);
         Page<Account> page = new PageImpl<>(List.of(account), pageable, 1);
-        when(accountRepository.searchAccountsWithUser(null, null, pageable)).thenReturn(page);
+        when(accountRepository.searchAccountsWithUser(null, null, null, "ALL", false, null, pageable)).thenReturn(page);
 
-        Page<AdminAccountDetailResponse> result = adminAccountService.getAccounts(null, null, pageable);
+        Page<com.teamfp.aistock.domain.admin.dto.response.AdminAccountListResponse> result = adminAccountService.getAccounts(AdminSearchConditionDto.of(null, null, null), null, pageable);
 
         assertThat(result.getContent()).hasSize(1);
         assertThat(result.getContent().get(0).accountId()).isEqualTo(ACCOUNT_ID);
-        verify(accountRepository).searchAccountsWithUser(null, null, pageable);
+        verify(accountRepository).searchAccountsWithUser(null, null, null, "ALL", false, null, pageable);
     }
 
     @Test
@@ -163,11 +215,11 @@ class AdminAccountServiceTest {
     void getAccounts_blankQuery_normalizedToNull() {
         Pageable pageable = PageRequest.of(0, 20);
         Page<Account> page = new PageImpl<>(List.of(account), pageable, 1);
-        when(accountRepository.searchAccountsWithUser(null, AccountStatus.SUSPENDED, pageable)).thenReturn(page);
+        when(accountRepository.searchAccountsWithUser(null, null, null, "ALL", false, AccountStatus.SUSPENDED, pageable)).thenReturn(page);
 
-        adminAccountService.getAccounts("   ", AccountStatus.SUSPENDED, pageable);
+        adminAccountService.getAccounts(AdminSearchConditionDto.of("   ", null, null), AccountStatus.SUSPENDED, pageable);
 
-        verify(accountRepository).searchAccountsWithUser(null, AccountStatus.SUSPENDED, pageable);
+        verify(accountRepository).searchAccountsWithUser(null, null, null, "ALL", false, AccountStatus.SUSPENDED, pageable);
     }
 
     @Test

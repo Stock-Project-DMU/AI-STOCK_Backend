@@ -1,22 +1,40 @@
 package com.teamfp.aistock.domain.admin.service;
 
+import java.util.List;
+
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.teamfp.aistock.domain.account.dto.response.AccountTransactionResponse;
+import com.teamfp.aistock.domain.account.dto.response.ProfitResponse;
 import com.teamfp.aistock.domain.account.entity.Account;
 import com.teamfp.aistock.domain.account.entity.AccountStatus;
 import com.teamfp.aistock.domain.account.entity.AccountTransactionType;
 import com.teamfp.aistock.domain.account.repository.AccountRepository;
-import com.teamfp.aistock.domain.account.dto.response.AccountTransactionResponse;
+import com.teamfp.aistock.domain.account.repository.AccountTransactionRepository;
+import com.teamfp.aistock.domain.account.repository.ChargeRequestRepository;
 import com.teamfp.aistock.domain.account.service.AccountTransactionService;
 import com.teamfp.aistock.domain.admin.dto.request.AdminAccountAdjustmentRequest;
 import com.teamfp.aistock.domain.admin.dto.request.AdminAccountStatusRequest;
+import com.teamfp.aistock.domain.admin.dto.request.AdminSearchConditionDto;
 import com.teamfp.aistock.domain.admin.dto.response.AdminAccountDetailResponse;
+import com.teamfp.aistock.domain.admin.dto.response.AdminAccountListResponse;
+import com.teamfp.aistock.domain.admin.dto.response.AdminAccountStatsResponse;
+import com.teamfp.aistock.domain.admin.dto.response.AdminChargeRequestResponse;
+import com.teamfp.aistock.domain.admin.dto.response.AuditLogResponse;
+import com.teamfp.aistock.domain.admin.repository.AuditLogRepository;
 import com.teamfp.aistock.domain.notification.entity.NotificationType;
 import com.teamfp.aistock.domain.notification.service.NotificationService;
+import com.teamfp.aistock.domain.order.dto.HoldingValuationDto;
+import com.teamfp.aistock.domain.order.dto.response.HoldingResponse;
+import com.teamfp.aistock.domain.order.dto.response.OrderHistoryResponse;
+import com.teamfp.aistock.domain.order.repository.OrderRepository;
+import com.teamfp.aistock.domain.order.service.HoldingValuationService;
 import com.teamfp.aistock.domain.order.service.OrderService;
+import com.teamfp.aistock.domain.order.service.RealizedReturnService;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 
@@ -44,24 +62,82 @@ public class AdminAccountService {
     private final AccountTransactionService accountTransactionService;
     private final AuditLogService auditLogService;
     private final NotificationService notificationService;
+    // 계좌 상세의 보유 종목·총 자산·수익률 계산용(feat/admin-improvements).
+    private final HoldingValuationService holdingValuationService;
+    // 계좌 상세의 최근 주문·충전 요청 이력(feat/admin-improvements).
+    private final OrderRepository orderRepository;
+    private final ChargeRequestRepository chargeRequestRepository;
+    // 계좌 상세의 정지 이력·누적 통계(feat/admin-improvements)
+    private final AuditLogRepository auditLogRepository;
+    private final AccountTransactionRepository accountTransactionRepository;
+
+    // 계좌 상세에 함께 내려주는 최근 주문·충전 요청 건수(회원 상세와 같은 값).
+    static final int RECENT_ORDER_LIMIT = 20;
+    static final int RECENT_CHARGE_REQUEST_LIMIT = 10;
 
     @Transactional(readOnly = true)
     public AdminAccountDetailResponse getAccountDetail(Long accountId) {
-        return AdminAccountDetailResponse.from(findAccount(accountId));
+        return toDetail(findAccount(accountId));
     }
 
-    // 계좌 목록·검색(ADMIN_API_BACKEND_HANDOFF.md 3.4). 별도 목록 DTO를 새로 만들지 않고
-    // AdminAccountDetailResponse를 그대로 재사용한다 — admin-trade(8-15)가 이미 목록/상세를
-    // 같은 DTO로 통일한 것과 동일한 이유로, 계좌 한 건이 목록/상세에서 내려주는 필드가 같다.
+    // 계좌 목록·검색(ADMIN_API_BACKEND_HANDOFF.md 3.4). 원래는 AdminAccountDetailResponse를 목록·상세가 같이
+    // 썼는데, 상세에 보유 종목·수익률을 넣으면서(feat/admin-improvements) 목록은 계좌마다 추가 조회가 없는
+    // AdminAccountListResponse로 분리했다.
     @Transactional(readOnly = true)
-    public Page<AdminAccountDetailResponse> getAccounts(String query, AccountStatus status, Pageable pageable) {
-        return accountRepository.searchAccountsWithUser(blankToNull(query), status, pageable)
-                .map(AdminAccountDetailResponse::from);
+    public Page<AdminAccountListResponse> getAccounts(AdminSearchConditionDto search, AccountStatus status, Pageable pageable) {
+        return accountRepository.searchAccountsWithUser(search.query(), search.pattern(), search.queryId(), search.field(),
+                        search.exact(), status, pageable)
+                .map(AdminAccountListResponse::from);
     }
 
-    private String blankToNull(String value) {
-        return (value == null || value.isBlank()) ? null : value;
+    // 계좌 상세 = 계좌 필드 + 보유 종목 + 총 자산·수익률(마이페이지와 같은 ProfitResponse.calculate() 식).
+    private AdminAccountDetailResponse toDetail(Account account) {
+        Long accountId = account.getAccountId();
+        List<HoldingValuationDto> valuations = holdingValuationService.getHoldingValuations(accountId);
+        List<HoldingResponse> holdings = valuations.stream().map(HoldingResponse::of).toList();
+        // 주문은 최근 N건 + 전체 건수(회원 상세와 같은 방식), 충전 요청은 최근 N건. 잔고 변동 내역은 건수가 많아
+        // 상세에 넣지 않고 기존 페이지 API(GET .../{accountId}/transactions)로 따로 본다.
+        List<OrderHistoryResponse> recentOrders = orderRepository
+                .findRecentByAccountIdIn(List.of(accountId), PageRequest.of(0, RECENT_ORDER_LIMIT)).stream()
+                .map(OrderHistoryResponse::from)
+                .toList();
+        long orderCount = orderRepository.countByAccountIdIn(List.of(accountId));
+        List<AdminChargeRequestResponse> recentChargeRequests = chargeRequestRepository
+                .findAllByAccountId(accountId, PageRequest.of(0, RECENT_CHARGE_REQUEST_LIMIT)).stream()
+                .map(AdminChargeRequestResponse::from)
+                .toList();
+        List<AuditLogResponse> suspensionHistory = auditLogRepository
+                .findAllByActionAndTargetTypeAndTargetIdOrderByCreatedAtDesc(AuditLogService.ACTION_ACCOUNT_STATUS_CHANGE,
+                        AuditLogService.TARGET_ACCOUNT, accountId).stream()
+                .map(AuditLogResponse::from)
+                .toList();
+        return AdminAccountDetailResponse.of(account, holdings, ProfitResponse.calculate(account, valuations),
+                recentOrders, orderCount, recentChargeRequests, suspensionHistory, statsOf(accountId));
     }
+
+    // 계좌 누적 통계 — 잔고 내역 유형별 합계(차감·수수료는 음수로 쌓여 있어 양수로 바꾼다)와 실현 손익 합계.
+    private AdminAccountStatsResponse statsOf(Long accountId) {
+        long totalCharged = accountTransactionRepository.sumAmountByAccountIdAndTypeIn(accountId,
+                List.of(AccountTransactionType.AUTO_CHARGE, AccountTransactionType.ADMIN_CHARGE));
+        long totalDeducted = -accountTransactionRepository.sumAmountByAccountIdAndTypeIn(accountId,
+                List.of(AccountTransactionType.ADMIN_DEDUCTION, AccountTransactionType.AUTO_DEDUCTION));
+        long totalFee = -accountTransactionRepository.sumAmountByAccountIdAndTypeIn(accountId,
+                List.of(AccountTransactionType.TRADE_FEE));
+        return new AdminAccountStatsResponse(totalCharged, totalDeducted, totalFee, realizedProfitOf(List.of(accountId)));
+    }
+
+    // 체결 기록이 맞지 않아 실현 손익을 계산할 수 없으면(예: 테스트로 직접 넣은 데이터) 상세 조회를 막지 않고 null.
+    private Long realizedProfitOf(List<Long> accountIds) {
+        List<OrderHistoryResponse> executedOrders = orderRepository.findExecutedByAccountIdIn(accountIds).stream()
+                .map(OrderHistoryResponse::from)
+                .toList();
+        try {
+            return RealizedReturnService.sumRealizedProfit(executedOrders);
+        } catch (CustomException e) {
+            return null;
+        }
+    }
+
 
     @Transactional
     public AdminAccountDetailResponse updateAccountStatus(Long adminUserId, Long accountId, AdminAccountStatusRequest request) {
@@ -83,7 +159,7 @@ public class AdminAccountService {
             notificationService.notify(account.getUser().getUserId(), NotificationType.ACCOUNT, title,
                     String.format("%s 계좌의 거래 상태가 변경되었습니다. 사유: %s", account.getAccountName(), request.reason()));
         }
-        return AdminAccountDetailResponse.from(account);
+        return toDetail(account);
     }
 
     private Account findAccount(Long accountId) {
@@ -147,7 +223,7 @@ public class AdminAccountService {
                 String.format("%s 계좌 잔고가 %,d원 조정되었습니다. 사유: %s", account.getAccountName(),
                         request.amount(), request.reason()));
 
-        return AdminAccountDetailResponse.from(account);
+        return toDetail(account);
     }
 
     private Account findAccountForUpdate(Long accountId) {

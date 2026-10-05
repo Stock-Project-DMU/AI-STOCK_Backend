@@ -195,11 +195,12 @@ class OrderRepositoryIntegrationTest {
         Order pendingOrder = newPendingLimitOrder(account);
 
         Page<Order> byLoginId = orderRepository.searchOrdersWithUser(
-                loginId, null, null, null, null, null, null, PageRequest.of(0, 10));
+                loginId, "%" + loginId + "%", null, "ALL", false, null, null, null, null, null, null, PageRequest.of(0, 10));
         Page<Order> byLoginIdAndExecuted = orderRepository.searchOrdersWithUser(
-                loginId, OrderStatus.EXECUTED, null, null, null, null, null, PageRequest.of(0, 10));
+                loginId, "%" + loginId + "%", null, "ALL", false, OrderStatus.EXECUTED, null, null, null, null, null, PageRequest.of(0, 10));
         Page<Order> noMatch = orderRepository.searchOrdersWithUser(
-                "no-such-login-id-" + uniqueSuffix, null, null, null, null, null, null, PageRequest.of(0, 10));
+                "no-such-login-id-" + uniqueSuffix, "%no-such-login-id-" + uniqueSuffix + "%", null, "ALL", false,
+                null, null, null, null, null, null, PageRequest.of(0, 10));
 
         assertThat(byLoginId.getTotalElements()).isEqualTo(2);
         assertThat(byLoginIdAndExecuted.getContent()).extracting(Order::getOrderId).containsExactly(executedOrder.getOrderId());

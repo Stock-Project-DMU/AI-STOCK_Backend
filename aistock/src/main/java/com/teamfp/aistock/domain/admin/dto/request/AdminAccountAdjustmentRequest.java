@@ -6,6 +6,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 
 /**
  * 관리자 계좌 잔고 수동 조정 요청 DTO(ADMIN_API_BACKEND_HANDOFF.md 4.3). type은
@@ -17,7 +18,9 @@ public record AdminAccountAdjustmentRequest(
         @Positive(message = "조정 금액은 0보다 커야 합니다.")
         @Max(value = AdminAccountAdjustmentRequest.MAX_ADJUSTMENT_AMOUNT, message = "1회 조정 금액은 최대 1조원입니다.")
         long amount,
-        @NotBlank(message = "조정 사유는 필수 입력 값입니다.") String reason
+        @NotBlank(message = "조정 사유는 필수 입력 값입니다.")
+        @Size(max = 500, message = "조정 사유는 500자를 넘을 수 없습니다.")
+        String reason
 ) {
 
     // 1회 조정 최대 금액(계좌 예치금 한도와 같은 1조원). 상한이 없으면 아주 큰 값으로 잔고 계산이 넘칠 수 있다.

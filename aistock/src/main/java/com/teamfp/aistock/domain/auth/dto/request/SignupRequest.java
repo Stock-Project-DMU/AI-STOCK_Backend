@@ -1,6 +1,5 @@
 package com.teamfp.aistock.domain.auth.dto.request;
 
-import com.teamfp.aistock.domain.user.entity.Role;
 import com.teamfp.aistock.global.util.MaxByteSize;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -40,10 +39,7 @@ public class SignupRequest {
     @NotNull(message = "생년월일은 필수 입력 값입니다.")
     private LocalDate birthdate;
 
-    // 미입력 시 서비스 계층에서 Role.USER로 처리
-    private Role role;
-
-    // role=ADMIN일 때만 필수 (서비스 계층에서 ADMIN_SIGNUP_CODE와 대조)
-    private String adminCode;
+    // 회원가입은 항상 일반 회원(USER)이다. 관리자는 최초 관리자 생성(POST /api/auth/initial-admin)이나
+    // 관리자 페이지의 관리자 계정 생성으로만 만든다(feat/admin-improvements).
     private com.teamfp.aistock.domain.user.entity.InvestmentLevel investmentLevel;
 }

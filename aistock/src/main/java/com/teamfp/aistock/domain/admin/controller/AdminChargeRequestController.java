@@ -14,6 +14,12 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.teamfp.aistock.domain.account.entity.ChargeRequestStatus;
 import com.teamfp.aistock.domain.admin.dto.request.AdminChargeDecisionRequest;
+import com.teamfp.aistock.domain.admin.dto.request.AdminChargeRequestSearchField;
+import com.teamfp.aistock.domain.admin.dto.request.AdminChargeRequestSortColumn;
+import com.teamfp.aistock.domain.admin.dto.request.AdminSearchConditionDto;
+import com.teamfp.aistock.domain.admin.dto.request.AdminSearchMatchType;
+import com.teamfp.aistock.domain.admin.dto.request.AdminSortType;
+import com.teamfp.aistock.domain.admin.dto.response.AdminChargeRequestDetailResponse;
 import com.teamfp.aistock.domain.admin.dto.response.AdminChargeRequestResponse;
 import com.teamfp.aistock.domain.admin.service.AdminChargeRequestService;
 import com.teamfp.aistock.global.response.ApiResponse;
@@ -37,14 +43,22 @@ public class AdminChargeRequestController {
     @GetMapping
     public ApiResponse<Page<AdminChargeRequestResponse>> getChargeRequests(
             @RequestParam(required = false) String query,
-            @RequestParam(required = false) ChargeRequestStatus status,
-            @PageableDefault(size = 20, sort = "requestedAt", direction = Sort.Direction.DESC) Pageable pageable
+            @RequestParam(defaultValue = "ALL") AdminChargeRequestSearchField field,
+            @RequestParam(defaultValue = "CONTAINS") AdminSearchMatchType matchType,
+            // feat/admin-improvements: "충전 요청" 탭은 처리할 일(대기 건)만 보여주고, 처리 끝난 승인·거절 건은
+            // "충전·차감 이력"(GET /api/admin/account-transactions)으로 본다 — 그래서 기본값이 PENDING이다.
+            @RequestParam(defaultValue = "PENDING") ChargeRequestStatus status,
+            @RequestParam(defaultValue = "LATEST") AdminSortType sortBy,
+            @RequestParam(required = false) AdminChargeRequestSortColumn sortColumn,
+            @RequestParam(defaultValue = "DESC") Sort.Direction direction,
+            @PageableDefault(size = 20) Pageable pageable
     ) {
-        return ApiResponse.success(adminChargeRequestService.getRequests(query, status, pageable));
+        return ApiResponse.success(adminChargeRequestService.getRequests(AdminSearchConditionDto.of(query, field, matchType), status,
+                AdminSortSupport.chargeRequests(pageable, sortBy, sortColumn, direction)));
     }
 
     @GetMapping("/{requestId}")
-    public ApiResponse<AdminChargeRequestResponse> getChargeRequestDetail(@PathVariable Long requestId) {
+    public ApiResponse<AdminChargeRequestDetailResponse> getChargeRequestDetail(@PathVariable Long requestId) {
         return ApiResponse.success(adminChargeRequestService.getRequestDetail(requestId));
     }
 

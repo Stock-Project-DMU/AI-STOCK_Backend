@@ -16,12 +16,16 @@ public class RedisAuthCodeService {
     private static final String EMAIL_VERIFIED_KEY = "auth:email_verified:";
     private static final String EMAIL_SEND_COOLDOWN_KEY = "auth:email_send_cooldown:";
     private static final String LOGIN_FAIL_KEY     = "auth:login_fail:";
+    // 관리자 인증 코드 틀린 횟수(feat/admin-improvements) — 3번 틀리면 10분 잠금
+    private static final String ADMIN_CODE_FAIL_KEY = "auth:admin_code_fail:";
 
     private static final long EMAIL_CODE_TTL_MINUTES     = 5;
     private static final long EMAIL_VERIFIED_TTL_MINUTES = 30;
     private static final long EMAIL_SEND_COOLDOWN_SECONDS = 60;
     private static final long LOGIN_FAIL_TTL_MINUTES     = 10;
     private static final int  MAX_LOGIN_FAIL             = 5;
+    private static final long ADMIN_CODE_LOCK_MINUTES    = 10;
+    public static final int   MAX_ADMIN_CODE_FAIL        = 3;
     private static final org.springframework.data.redis.core.script.DefaultRedisScript<Long> VERIFY_EMAIL_SCRIPT =
             new org.springframework.data.redis.core.script.DefaultRedisScript<>("""
                 local failures = tonumber(redis.call('GET', KEYS[4]) or '0')
@@ -139,5 +143,31 @@ public class RedisAuthCodeService {
     // 로그인 성공 시 실패 카운터 초기화
     public void resetLoginFail(String loginId) {
         redisTemplate.delete(LOGIN_FAIL_KEY + loginId);
+    }
+
+    /**
+     * 관리자 인증 코드 틀린 횟수 증가(feat/admin-improvements). subject는 무엇을 기준으로 셀지 — 최초 관리자 생성은
+     * "initial"(누가 시도하든 합쳐서), 관리자 계정 폐기는 "user:{userId}". 첫 실패부터 10분 유지되고, 3번째 실패
+     * 시점에 다시 10분으로 늘려 그때부터 10분 동안 잠근다. 반환값은 지금까지 틀린 횟수.
+     */
+    public long incrementAdminCodeFail(String subject) {
+        String key = ADMIN_CODE_FAIL_KEY + subject;
+        Long count = redisTemplate.opsForValue().increment(key);
+        long failures = count != null ? count : 1;
+        if (failures == 1 || failures >= MAX_ADMIN_CODE_FAIL) {
+            redisTemplate.expire(key, Duration.ofMinutes(ADMIN_CODE_LOCK_MINUTES));
+        }
+        return failures;
+    }
+
+    // 관리자 인증 코드 잠금 여부(3번 이상 틀렸고 아직 10분이 안 지남)
+    public boolean isAdminCodeLocked(String subject) {
+        String count = redisTemplate.opsForValue().get(ADMIN_CODE_FAIL_KEY + subject);
+        return count != null && Integer.parseInt(count) >= MAX_ADMIN_CODE_FAIL;
+    }
+
+    // 관리자 인증 코드를 맞히면 틀린 횟수 초기화
+    public void resetAdminCodeFail(String subject) {
+        redisTemplate.delete(ADMIN_CODE_FAIL_KEY + subject);
     }
 }

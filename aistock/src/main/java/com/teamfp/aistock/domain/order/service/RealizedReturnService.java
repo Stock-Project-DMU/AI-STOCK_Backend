@@ -13,6 +13,16 @@ public class RealizedReturnService {
     public List<RealizedReturnResponse> getReturns(Long userId, Long accountId) {
         return calculateReturns(orderService.getMyOrderHistory(userId, accountId));
     }
+    // 관리자 계좌·회원 상세의 실현 손익 합계(feat/admin-improvements) — 계좌별로 calculateReturns()를 돌려 더한다.
+    // 체결 기록이 맞지 않아 계산할 수 없으면 calculateReturns()와 같이 CustomException을 던진다(호출 쪽에서 처리).
+    public static long sumRealizedProfit(List<OrderHistoryResponse> orders) {
+        return orders.stream()
+                .collect(java.util.stream.Collectors.groupingBy(OrderHistoryResponse::accountId))
+                .values().stream()
+                .flatMap(accountOrders -> calculateReturns(accountOrders).stream())
+                .mapToLong(RealizedReturnResponse::profitAmount)
+                .sum();
+    }
     public static List<RealizedReturnResponse> calculateReturns(List<OrderHistoryResponse> orders) {
         Map<String, long[]> holdings = new HashMap<>();
         List<RealizedReturnResponse> returns = new ArrayList<>();

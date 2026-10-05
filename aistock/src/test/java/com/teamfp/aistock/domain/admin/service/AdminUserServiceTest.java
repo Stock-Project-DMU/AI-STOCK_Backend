@@ -20,6 +20,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import com.teamfp.aistock.domain.account.entity.Account;
 import com.teamfp.aistock.domain.account.repository.AccountRepository;
+import com.teamfp.aistock.domain.admin.dto.request.AdminSearchConditionDto;
 import com.teamfp.aistock.domain.admin.dto.request.AdminUserStatusRequest;
 import com.teamfp.aistock.domain.admin.dto.response.AdminUserDetailResponse;
 import com.teamfp.aistock.domain.admin.dto.response.AdminUserListResponse;
@@ -73,6 +74,31 @@ class AdminUserServiceTest {
     @Mock
     private HoldingValuationService holdingValuationService;
 
+    @Mock
+    private com.teamfp.aistock.domain.user.repository.SocialAccountRepository socialAccountRepository;
+
+    @Mock
+    private com.teamfp.aistock.domain.user.repository.InvestmentProfileRepository investmentProfileRepository;
+
+    @Mock
+    private com.teamfp.aistock.domain.account.repository.ChargeRequestRepository chargeRequestRepository;
+
+    @Mock
+    private com.teamfp.aistock.domain.inquiry.repository.InquiryRepository inquiryRepository;
+
+    @Mock
+    private com.teamfp.aistock.domain.stock.repository.WatchlistRepository watchlistRepository;
+
+    @Mock
+    private com.teamfp.aistock.domain.stock.repository.RecentViewedRepository recentViewedRepository;
+
+    @Mock
+    private com.teamfp.aistock.domain.admin.repository.AuditLogRepository auditLogRepository;
+
+
+    @Mock
+    private com.teamfp.aistock.domain.ai.repository.NewsBriefingSettingRepository newsBriefingSettingRepository;
+
     private AdminUserService adminUserService;
 
     private static final Long USER_ID = 1L;
@@ -84,7 +110,12 @@ class AdminUserServiceTest {
 
     @BeforeEach
     void setUp() {
-        adminUserService = new AdminUserService(userRepository, accountRepository, passwordEncoder, auditLogService, orderRepository, holdingValuationService);
+        adminUserService = new AdminUserService(userRepository, accountRepository, passwordEncoder, auditLogService, orderRepository,
+                holdingValuationService, socialAccountRepository, investmentProfileRepository, chargeRequestRepository,
+                inquiryRepository, watchlistRepository, recentViewedRepository, newsBriefingSettingRepository,
+                auditLogRepository);
+        // 상세 응답을 만드는 모든 경로가 받은 알림·관리자 처리 이력을 페이지로 조회한다 — 기본은 빈 페이지.
+        org.mockito.Mockito.lenient().when(auditLogRepository.findActionsForUser(any(), any(), any())).thenReturn(Page.empty());
 
         user = User.builder()
                 .loginId("tester")
@@ -126,13 +157,13 @@ class AdminUserServiceTest {
     void getUsers_noFilter_passesAllNull() {
         Pageable pageable = PageRequest.of(0, 10);
         Page<User> page = new PageImpl<>(List.of(user), pageable, 1);
-        when(userRepository.searchUsers(null, null, null, pageable)).thenReturn(page);
+        when(userRepository.searchUsers(null, null, null, "ALL", false, null, null, pageable)).thenReturn(page);
 
-        Page<AdminUserListResponse> result = adminUserService.getUsers(null, null, null, pageable);
+        Page<AdminUserListResponse> result = adminUserService.getUsers(AdminSearchConditionDto.of(null, null, null), null, null, pageable);
 
         assertThat(result.getContent()).hasSize(1);
         assertThat(result.getContent().get(0).userId()).isEqualTo(USER_ID);
-        verify(userRepository).searchUsers(null, null, null, pageable);
+        verify(userRepository).searchUsers(null, null, null, "ALL", false, null, null, pageable);
     }
 
     @Test
@@ -140,11 +171,11 @@ class AdminUserServiceTest {
     void getUsers_blankQuery_normalizedToNull() {
         Pageable pageable = PageRequest.of(0, 10);
         Page<User> page = new PageImpl<>(List.of(user), pageable, 1);
-        when(userRepository.searchUsers(null, UserStatus.ACTIVE, null, pageable)).thenReturn(page);
+        when(userRepository.searchUsers(null, null, null, "ALL", false, UserStatus.ACTIVE, null, pageable)).thenReturn(page);
 
-        adminUserService.getUsers("   ", UserStatus.ACTIVE, null, pageable);
+        adminUserService.getUsers(AdminSearchConditionDto.of("   ", null, null), UserStatus.ACTIVE, null, pageable);
 
-        verify(userRepository).searchUsers(null, UserStatus.ACTIVE, null, pageable);
+        verify(userRepository).searchUsers(null, null, null, "ALL", false, UserStatus.ACTIVE, null, pageable);
     }
 
     @Test
@@ -152,12 +183,12 @@ class AdminUserServiceTest {
     void getUsers_withFilters_delegatesToSearchUsers() {
         Pageable pageable = PageRequest.of(0, 10);
         Page<User> page = new PageImpl<>(List.of(user), pageable, 1);
-        when(userRepository.searchUsers("tester", UserStatus.ACTIVE, Role.USER, pageable)).thenReturn(page);
+        when(userRepository.searchUsers("tester", "%tester%", null, "ALL", false, UserStatus.ACTIVE, Role.USER, pageable)).thenReturn(page);
 
-        Page<AdminUserListResponse> result = adminUserService.getUsers("tester", UserStatus.ACTIVE, Role.USER, pageable);
+        Page<AdminUserListResponse> result = adminUserService.getUsers(AdminSearchConditionDto.of("tester", null, null), UserStatus.ACTIVE, Role.USER, pageable);
 
         assertThat(result.getContent()).hasSize(1);
-        verify(userRepository).searchUsers("tester", UserStatus.ACTIVE, Role.USER, pageable);
+        verify(userRepository).searchUsers("tester", "%tester%", null, "ALL", false, UserStatus.ACTIVE, Role.USER, pageable);
     }
 
     @Test
@@ -175,14 +206,19 @@ class AdminUserServiceTest {
 
         Order orderA = orderOf(accountA, "005930");
         Order orderB = orderOf(accountB, "000660");
-        when(orderRepository.findAllByAccountIdInOrderByOrderedAtDesc(List.of(ACCOUNT_ID_A, ACCOUNT_ID_B)))
+        when(orderRepository.findRecentByAccountIdIn(List.of(ACCOUNT_ID_A, ACCOUNT_ID_B),
+                PageRequest.of(0, AdminUserService.RECENT_ORDER_LIMIT)))
                 .thenReturn(List.of(orderB, orderA));
+        when(orderRepository.countByAccountIdIn(List.of(ACCOUNT_ID_A, ACCOUNT_ID_B))).thenReturn(57L);
+        when(chargeRequestRepository.findAllByAccountId(any(), any())).thenReturn(Page.empty());
 
         AdminUserDetailResponse result = adminUserService.getUserDetail(USER_ID);
 
         assertThat(result.accounts()).hasSize(2);
         assertThat(result.holdings()).hasSize(2);
         assertThat(result.orders()).hasSize(2);
+        // 주문 목록은 최근 N건만이고, 전체 건수는 DB count 결과를 그대로 쓴다.
+        assertThat(result.orderCount()).isEqualTo(57L);
         // 계좌를 여러 개 합쳐서 보여주는 응답이라, 각 항목이 어느 계좌 소속인지 accountId로 구분할 수 있어야 한다.
         assertThat(result.holdings()).extracting("accountId").containsExactlyInAnyOrder(ACCOUNT_ID_A, ACCOUNT_ID_B);
         // 배치 조회 쿼리가 이미 정렬해서 반환한 순서를 그대로 유지해야 한다(서비스가 재정렬하지 않음).
@@ -192,8 +228,77 @@ class AdminUserServiceTest {
         // 계좌별 단건 조회(N+1)가 아니라 배치 조회 메서드가 정확히 1번만 호출됐는지 검증한다.
         verify(holdingValuationService, times(1)).getHoldingValuations(List.of(ACCOUNT_ID_A, ACCOUNT_ID_B));
         verify(holdingValuationService, never()).getHoldingValuations(anyLong());
-        verify(orderRepository, times(1)).findAllByAccountIdInOrderByOrderedAtDesc(List.of(ACCOUNT_ID_A, ACCOUNT_ID_B));
+        verify(orderRepository, times(1)).findRecentByAccountIdIn(List.of(ACCOUNT_ID_A, ACCOUNT_ID_B),
+                PageRequest.of(0, AdminUserService.RECENT_ORDER_LIMIT));
         verify(orderRepository, never()).findAllByAccountIdOrderByOrderedAtDesc(anyLong());
+    }
+
+    @Test
+    @DisplayName("회원 상세에는 개인정보·소셜 연동·투자 성향·합산 자산/수익률·최근 충전 요청·문의가 함께 담긴다")
+    void getUserDetail_containsEnrichedSections() {
+        Account account = accountOf(ACCOUNT_ID_A);
+        ReflectionTestUtils.setField(user, "birthdate", LocalDate.of(1999, 1, 2));
+        when(userRepository.findByUserIdAndIsActiveTrue(USER_ID)).thenReturn(Optional.of(user));
+        when(accountRepository.findAllByUserId(USER_ID)).thenReturn(List.of(account));
+        com.teamfp.aistock.domain.user.entity.SocialAccount social = org.mockito.Mockito.mock(
+                com.teamfp.aistock.domain.user.entity.SocialAccount.class);
+        when(social.getProvider()).thenReturn(com.teamfp.aistock.domain.user.entity.SocialProvider.KAKAO);
+        when(socialAccountRepository.findAllByUser_UserId(USER_ID)).thenReturn(List.of(social));
+        when(investmentProfileRepository.findByUserId(USER_ID)).thenReturn(Optional.of(
+                com.teamfp.aistock.domain.user.entity.InvestmentProfile.builder().user(user).investmentTendency(3)
+                        .fundTendency(2).investmentLevel(com.teamfp.aistock.domain.user.entity.InvestmentLevel.INTERMEDIATE)
+                        .build()));
+        // 보유 10주 × 현재가 12만원 = 120만원, 현금 100만원 → 총 자산 220만원, 원금 100만원 → 손익 120만원(120%)
+        when(holdingValuationService.getHoldingValuations(List.of(ACCOUNT_ID_A))).thenReturn(List.of(
+                new HoldingValuationDto(ACCOUNT_ID_A, "005930", "삼성전자", 10, 100_000L, 120_000L)));
+        com.teamfp.aistock.domain.account.entity.ChargeRequest chargeRequest =
+                com.teamfp.aistock.domain.account.entity.ChargeRequest.builder().account(account).amount(5_000_000L).reason("추가").build();
+        ReflectionTestUtils.setField(chargeRequest, "requestId", 77L);
+        when(chargeRequestRepository.findAllByAccountId(ACCOUNT_ID_A,
+                PageRequest.of(0, AdminUserService.RECENT_CHARGE_REQUEST_LIMIT))).thenReturn(new PageImpl<>(List.of(chargeRequest)));
+        com.teamfp.aistock.domain.inquiry.entity.Inquiry inquiry = org.mockito.Mockito.mock(
+                com.teamfp.aistock.domain.inquiry.entity.Inquiry.class);
+        when(inquiry.getUser()).thenReturn(user);
+        when(inquiryRepository.findAllByUserIdOrderByCreatedAtDesc(USER_ID)).thenReturn(List.of(inquiry, inquiry, inquiry,
+                inquiry, inquiry, inquiry));
+
+        user.recordLogin(java.time.LocalDateTime.of(2026, 10, 5, 9, 30));
+        when(watchlistRepository.findAllByUserId(USER_ID)).thenReturn(List.of(
+                com.teamfp.aistock.domain.stock.entity.Watchlist.builder().user(user).stockCode("005930").stockName("삼성전자").build()));
+        com.teamfp.aistock.domain.stock.entity.RecentViewed viewed = com.teamfp.aistock.domain.stock.entity.RecentViewed.builder()
+                .user(user).stockCode("000660").stockName("SK하이닉스").build();
+        when(recentViewedRepository.findAllByUserIdOrderByViewedAtDesc(USER_ID))
+                .thenReturn(java.util.Collections.nCopies(AdminUserService.RECENT_VIEWED_LIMIT + 3, viewed));
+        com.teamfp.aistock.domain.admin.entity.AuditLog suspendLog = com.teamfp.aistock.domain.admin.entity.AuditLog.builder()
+                .adminUserId(ADMIN_ID).adminLoginId("admin").action("USER_STATUS_CHANGE").targetType("USER")
+                .targetId(USER_ID).beforeValue("ACTIVE").afterValue("SUSPENDED").reason("도배").build();
+        when(auditLogRepository.findSuspensionHistory(USER_ID, List.of(ACCOUNT_ID_A))).thenReturn(List.of(suspendLog));
+        when(auditLogRepository.findActionsForUser(USER_ID, List.of(ACCOUNT_ID_A),
+                PageRequest.of(0, AdminUserService.RECENT_ADMIN_ACTION_LIMIT)))
+                .thenReturn(new PageImpl<>(List.of(suspendLog), PageRequest.of(0, 1), 3));
+        AdminUserDetailResponse result = adminUserService.getUserDetail(USER_ID);
+
+        assertThat(result.birthdate()).isEqualTo(LocalDate.of(1999, 1, 2));
+        assertThat(result.socialAccounts()).extracting("provider")
+                .containsExactly(com.teamfp.aistock.domain.user.entity.SocialProvider.KAKAO);
+        assertThat(result.investmentProfile().investmentTendency()).isEqualTo(3);
+        assertThat(result.totalAsset()).isEqualTo(2_200_000L);
+        assertThat(result.profitAmount()).isEqualTo(1_200_000L);
+        assertThat(result.profitRate()).isEqualTo(120.0);
+        assertThat(result.recentChargeRequests()).extracting("requestId").containsExactly(77L);
+        // 문의는 전체 건수와 최근 RECENT_INQUIRY_LIMIT건만
+        assertThat(result.inquiryCount()).isEqualTo(6L);
+        assertThat(result.recentInquiries()).hasSize(AdminUserService.RECENT_INQUIRY_LIMIT);
+        // 2차 보강: 마지막 로그인·관심 종목·최근 본 종목(최근 N건)·시뮬레이션·AI 상담·뉴스 브리핑 설정
+        assertThat(result.lastLoginAt()).isEqualTo(java.time.LocalDateTime.of(2026, 10, 5, 9, 30));
+        assertThat(result.watchlist()).extracting("stockCode").containsExactly("005930");
+        assertThat(result.recentViewed()).hasSize(AdminUserService.RECENT_VIEWED_LIMIT);
+        // 3차 보강: 정지 이력·관리자 처리 이력(건수 + 최근 N건)·실현 손익 합계
+        assertThat(result.suspensionHistory()).extracting("reason").containsExactly("도배");
+        assertThat(result.adminActionCount()).isEqualTo(3L);
+        assertThat(result.recentAdminActions()).hasSize(1);
+        assertThat(result.realizedProfit()).isZero();
+        assertThat(result.newsBriefingSetting()).isNull();
     }
 
     @Test
@@ -207,8 +312,10 @@ class AdminUserServiceTest {
         assertThat(result.accounts()).isEmpty();
         assertThat(result.holdings()).isEmpty();
         assertThat(result.orders()).isEmpty();
+        assertThat(result.orderCount()).isZero();
         verify(holdingValuationService, never()).getHoldingValuations(anyList());
-        verify(orderRepository, never()).findAllByAccountIdInOrderByOrderedAtDesc(anyList());
+        verify(orderRepository, never()).findRecentByAccountIdIn(anyList(), any());
+        verify(orderRepository, never()).countByAccountIdIn(anyList());
     }
 
     @Test
@@ -469,9 +576,9 @@ class AdminUserServiceTest {
         ReflectionTestUtils.setField(user, "createdAt", java.time.LocalDateTime.of(2026, 8, 1, 12, 0));
         Pageable pageable = PageRequest.of(0, Integer.MAX_VALUE, Sort.by(Sort.Direction.DESC, "createdAt"));
         Page<User> page = new PageImpl<>(List.of(user), pageable, 1);
-        when(userRepository.searchUsers(null, null, null, pageable)).thenReturn(page);
+        when(userRepository.searchUsers(null, null, null, "ALL", false, null, null, pageable)).thenReturn(page);
 
-        byte[] csv = adminUserService.exportUsersCsv(null, null, null, Sort.by(Sort.Direction.DESC, "createdAt"));
+        byte[] csv = adminUserService.exportUsersCsv(AdminSearchConditionDto.of(null, null, null), null, null, Sort.by(Sort.Direction.DESC, "createdAt"));
 
         assertThat(csv[0]).isEqualTo((byte) 0xEF);
         assertThat(csv[1]).isEqualTo((byte) 0xBB);

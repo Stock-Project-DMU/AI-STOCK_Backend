@@ -27,7 +27,9 @@ import lombok.NoArgsConstructor;
 
 @Entity
 @Table(name = "notifications", indexes = {
-        @Index(name = "idx_user_noti", columnList = "user_id, is_read")
+        @Index(name = "idx_user_noti", columnList = "user_id, is_read"),
+        // 공지 단위 조회·삭제(관리자 알림 관리, feat/admin-improvements)
+        @Index(name = "idx_noti_notice", columnList = "notice_id")
 })
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -59,17 +61,25 @@ public class Notification {
     @Column(name = "is_read", nullable = false)
     private boolean isRead;
 
+    // 관리자 공지로 받은 알림이면 그 공지(feat/admin-improvements). 팝업 여부·기한은 공지(Notice.popupEndDate)를 따른다.
+    // 주문 체결·충전 처리 같은 시스템 알림은 null이다.
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "notice_id")
+    private Notice notice;
+
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
     @Builder
-    private Notification(User user, NotificationType type, String title, String content, Long relatedOrderId) {
+    private Notification(User user, NotificationType type, String title, String content, Long relatedOrderId,
+            Notice notice) {
         this.user = user;
         this.type = type;
         this.title = title;
         this.content = content;
         this.relatedOrderId = relatedOrderId;
+        this.notice = notice;
         this.isRead = false;
     }
 

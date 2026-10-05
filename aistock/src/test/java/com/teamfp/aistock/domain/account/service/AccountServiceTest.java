@@ -13,6 +13,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.teamfp.aistock.domain.account.dto.request.ChargeBalanceRequest;
+import com.teamfp.aistock.domain.account.dto.request.DeductBalanceRequest;
+import com.teamfp.aistock.domain.account.dto.response.AccountInfoResponse;
 import com.teamfp.aistock.domain.account.dto.response.ProfitResponse;
 import com.teamfp.aistock.domain.account.entity.Account;
 import com.teamfp.aistock.domain.account.repository.AccountRepository;
@@ -254,6 +256,214 @@ class AccountServiceTest {
 
             assertThatThrownBy(() -> accountService.chargeBalance(USER_ID, ACCOUNT_ID, new ChargeBalanceRequest(1_000L)))
                     .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.ACCOUNT_SUSPENDED_CHARGE);
+        }
+
+        @Test
+        @DisplayName("일반 사용자는 1회 1억원을 넘게 충전할 수 없다")
+        void fail_whenAmountExceedsMaxForUser() {
+            when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
+
+            assertThatThrownBy(() -> accountService.chargeBalance(USER_ID, ACCOUNT_ID,
+                    new ChargeBalanceRequest(ChargeBalanceRequest.MAX_CHARGE_AMOUNT + 1)))
+                    .isInstanceOf(CustomException.class)
+                    .hasMessage(ChargeBalanceRequest.MAX_CHARGE_AMOUNT_MESSAGE)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.INVALID_INPUT);
+            assertThat(account.getBalance()).isEqualTo(10_000_000L);
+        }
+    }
+
+    @Nested
+    @DisplayName("충전 가능 금액(chargeableAmount)")
+    class ChargeableAmount {
+
+        @Test
+        @DisplayName("직접 충전 횟수가 남은 일반 사용자는 1회 상한 1억원")
+        void user_withRemainingCount_isCappedAtSelfChargeMax() {
+            assertThat(AccountInfoResponse.from(account).chargeableAmount()).isEqualTo(ChargeBalanceRequest.MAX_CHARGE_AMOUNT);
+        }
+
+        @Test
+        @DisplayName("예치금 한도까지 남은 금액이 1억원보다 작으면 남은 금액")
+        void user_nearDepositLimit_isCappedAtRemaining() {
+            org.springframework.test.util.ReflectionTestUtils.setField(account, "balance", Account.MAX_DEPOSIT_AMOUNT - 30_000_000L);
+
+            assertThat(AccountInfoResponse.from(account).chargeableAmount()).isEqualTo(30_000_000L);
+        }
+
+        @Test
+        @DisplayName("직접 충전 3회를 다 쓴 일반 사용자는 충전 요청 기준(1조원 한도까지 남은 금액)")
+        void user_withoutRemainingCount_usesRequestMax() {
+            org.springframework.test.util.ReflectionTestUtils.setField(account, "chargeCount", Account.MAX_CHARGE_COUNT);
+
+            assertThat(AccountInfoResponse.from(account).chargeableAmount()).isEqualTo(Account.MAX_DEPOSIT_AMOUNT - 10_000_000L);
+        }
+
+        @Test
+        @DisplayName("예치금이 이미 한도를 넘었거나 정지된 계좌는 0")
+        void zero_whenOverLimitOrSuspended() {
+            org.springframework.test.util.ReflectionTestUtils.setField(account, "balance", Account.MAX_DEPOSIT_AMOUNT + 1);
+            assertThat(AccountInfoResponse.from(account).chargeableAmount()).isZero();
+
+            org.springframework.test.util.ReflectionTestUtils.setField(account, "balance", 10_000_000L);
+            account.suspend();
+            assertThat(AccountInfoResponse.from(account).chargeableAmount()).isZero();
+        }
+    }
+
+    @Nested
+    @DisplayName("관리자 계정 직접 충전")
+    class AdminChargeBalance {
+
+        private Account adminAccount;
+
+        @BeforeEach
+        void setUpAdmin() {
+            User admin = User.builder()
+                    .loginId("admin")
+                    .name("관리자")
+                    .role(Role.ADMIN)
+                    .isActive(true)
+                    .build();
+            adminAccount = Account.builder()
+                    .user(admin)
+                    .accountName("관리자계좌")
+                    .accountNumber("ACC-0002")
+                    .openedAt(LocalDate.now())
+                    .baseBalance(10_000_000L)
+                    .balance(10_000_000L)
+                    .build();
+            when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(adminAccount));
+        }
+
+        @Test
+        @DisplayName("관리자 계좌의 chargeableAmount는 999조원까지 남은 금액이다")
+        void response_chargeableAmountForAdmin() {
+            AccountInfoResponse response = accountService.chargeBalance(USER_ID, ACCOUNT_ID, new ChargeBalanceRequest(1_000L));
+
+            assertThat(response.unlimitedCharge()).isTrue();
+            assertThat(response.chargeableAmount()).isEqualTo(Account.ADMIN_MAX_DEPOSIT_AMOUNT - 10_001_000L);
+        }
+
+        @Test
+        @DisplayName("횟수 제한 없이 충전되고 chargeCount는 올라가지 않는다")
+        void success_noChargeCountLimit() {
+            for (int i = 0; i < Account.MAX_CHARGE_COUNT + 2; i++) {
+                accountService.chargeBalance(USER_ID, ACCOUNT_ID, new ChargeBalanceRequest(1_000L));
+            }
+
+            assertThat(adminAccount.getChargeCount()).isZero();
+            assertThat(adminAccount.getBalance()).isEqualTo(10_005_000L);
+        }
+
+        @Test
+        @DisplayName("1회 1억원·예치금 1조원 한도 없이 예치금 999조원까지 충전된다")
+        void success_upToAdminDepositLimit() {
+            long amount = Account.ADMIN_MAX_DEPOSIT_AMOUNT - 10_000_000L;
+
+            accountService.chargeBalance(USER_ID, ACCOUNT_ID, new ChargeBalanceRequest(amount));
+
+            assertThat(adminAccount.getBalance()).isEqualTo(Account.ADMIN_MAX_DEPOSIT_AMOUNT);
+            assertThat(adminAccount.getBaseBalance()).isEqualTo(Account.ADMIN_MAX_DEPOSIT_AMOUNT);
+        }
+
+        @Test
+        @DisplayName("충전 후 예치금이 999조원을 넘으면 DEPOSIT_LIMIT_EXCEEDED(999조 문구)로 거절하고 잔고는 그대로다")
+        void fail_whenAdminDepositLimitExceeded() {
+            long amount = Account.ADMIN_MAX_DEPOSIT_AMOUNT - 10_000_000L + 1;
+
+            assertThatThrownBy(() -> accountService.chargeBalance(USER_ID, ACCOUNT_ID, new ChargeBalanceRequest(amount)))
+                    .isInstanceOf(CustomException.class)
+                    .hasMessage("계좌 예치금은 최대 999조원까지 보유할 수 있습니다. (충전 가능 금액: 998,999,990,000,000원)")
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.DEPOSIT_LIMIT_EXCEEDED);
+            assertThat(adminAccount.getBalance()).isEqualTo(10_000_000L);
+        }
+    }
+
+    @Nested
+    @DisplayName("관리자 계정 직접 차감")
+    class DeductBalance {
+
+        private Account adminAccount;
+
+        @BeforeEach
+        void setUpAdmin() {
+            User admin = User.builder()
+                    .loginId("admin")
+                    .name("관리자")
+                    .role(Role.ADMIN)
+                    .isActive(true)
+                    .build();
+            adminAccount = Account.builder()
+                    .user(admin)
+                    .accountName("관리자계좌")
+                    .accountNumber("ACC-0002")
+                    .openedAt(LocalDate.now())
+                    .baseBalance(10_000_000L)
+                    .balance(10_000_000L)
+                    .build();
+        }
+
+        @Test
+        @DisplayName("balance·baseBalance를 함께 줄이고 사유 '직접 차감'으로 AUTO_DEDUCTION 원장 기록을 남긴다")
+        void success_recordsAdminDeduction() {
+            when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(adminAccount));
+
+            AccountInfoResponse response = accountService.deductBalance(USER_ID, ACCOUNT_ID, new DeductBalanceRequest(4_000_000L));
+
+            org.mockito.Mockito.verify(accountTransactionService).record(
+                    org.mockito.ArgumentMatchers.eq(adminAccount),
+                    org.mockito.ArgumentMatchers.eq(com.teamfp.aistock.domain.account.entity.AccountTransactionType.AUTO_DEDUCTION),
+                    org.mockito.ArgumentMatchers.eq(-4_000_000L),
+                    org.mockito.ArgumentMatchers.eq(10_000_000L),
+                    org.mockito.ArgumentMatchers.isNull(),
+                    org.mockito.ArgumentMatchers.isNull(),
+                    org.mockito.ArgumentMatchers.eq(USER_ID),
+                    org.mockito.ArgumentMatchers.eq("직접 차감"));
+            assertThat(adminAccount.getBalance()).isEqualTo(6_000_000L);
+            assertThat(adminAccount.getBaseBalance()).isEqualTo(6_000_000L);
+            assertThat(response.deductibleAmount()).isEqualTo(6_000_000L);
+        }
+
+        @Test
+        @DisplayName("차감 가능 금액(balance·baseBalance 중 작은 값)을 넘으면 INSUFFICIENT_BALANCE로 거절하고 잔고는 그대로다")
+        void fail_whenExceedsDeductibleAmount() {
+            org.springframework.test.util.ReflectionTestUtils.setField(adminAccount, "baseBalance", 7_000_000L);
+            when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(adminAccount));
+
+            assertThatThrownBy(() -> accountService.deductBalance(USER_ID, ACCOUNT_ID, new DeductBalanceRequest(7_000_001L)))
+                    .isInstanceOf(CustomException.class)
+                    .hasMessage("차감 가능 금액을 초과했습니다. (차감 가능 금액: 7,000,000원)")
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.INSUFFICIENT_BALANCE);
+            assertThat(adminAccount.getBalance()).isEqualTo(10_000_000L);
+        }
+
+        @Test
+        @DisplayName("일반 사용자 계좌는 ACCESS_DENIED로 거절하고 응답의 deductibleAmount는 0이다")
+        void fail_whenNotAdmin() {
+            when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
+
+            assertThatThrownBy(() -> accountService.deductBalance(USER_ID, ACCOUNT_ID, new DeductBalanceRequest(1_000L)))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.ACCESS_DENIED);
+            assertThat(account.getBalance()).isEqualTo(10_000_000L);
+            assertThat(AccountInfoResponse.from(account).deductibleAmount()).isZero();
+        }
+
+        @Test
+        @DisplayName("정지된 계좌는 차감할 수 없다")
+        void fail_whenAccountSuspended() {
+            adminAccount.suspend();
+            when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(adminAccount));
+
+            assertThatThrownBy(() -> accountService.deductBalance(USER_ID, ACCOUNT_ID, new DeductBalanceRequest(1_000L)))
+                    .isInstanceOf(CustomException.class)
+                    .hasMessage("거래가 정지된 계좌는 차감할 수 없습니다.")
                     .extracting(e -> ((CustomException) e).getErrorCode())
                     .isEqualTo(ErrorCode.ACCOUNT_SUSPENDED_CHARGE);
         }

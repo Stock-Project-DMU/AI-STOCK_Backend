@@ -11,8 +11,14 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.teamfp.aistock.domain.inquiry.entity.Inquiry;
+import com.teamfp.aistock.domain.inquiry.entity.InquiryStatus;
 
 public interface InquiryRepository extends JpaRepository<Inquiry, Long> {
+
+    // 관리자 "전체 활동 기록"(AdminActivityService, feat/admin-improvements) — 한 페이지에 나온 문의 등록·답변을
+    // 작성자·답변 관리자까지 한 번에 조회
+    @Query("select i from Inquiry i join fetch i.user left join fetch i.answeredBy where i.inquiryId in :inquiryIds")
+    List<Inquiry> findAllWithUserByInquiryIdIn(@Param("inquiryIds") List<Long> inquiryIds);
 
     @Query("select i from Inquiry i where i.user.userId = :userId order by i.createdAt desc")
     List<Inquiry> findAllByUserIdOrderByCreatedAtDesc(@Param("userId") Long userId);
@@ -24,14 +30,27 @@ public interface InquiryRepository extends JpaRepository<Inquiry, Long> {
     // 정렬해야 미답변(PENDING) 문의가 관리자 전체 목록에서 먼저 노출된다.
     List<Inquiry> findAllByOrderByStatusDescCreatedAtDesc();
 
-    // AdminTradeService.findAllOrdersWithUser와 동일한 이유로 user까지 fetch join한다 —
-    // 파생 쿼리 그대로 두면 AdminInquiryResponse.from()이 매 건마다 inquiry.getUser()를
-    // LAZY 로딩하며 N+1이 발생한다(코드리뷰 반영). @Query를 쓰면 메서드 이름의 OrderBy는 더
-    // 이상 자동 파싱되지 않으므로(Pageable에 정렬 조건이 없으면 무정렬 조회가 된다),
-    // 원래 정렬 기준을 JPQL의 order by로 그대로 옮겨 적는다.
-    @Query(value = "select i from Inquiry i join fetch i.user order by i.status desc, i.createdAt desc",
-            countQuery = "select count(i) from Inquiry i")
-    Page<Inquiry> findAllByOrderByStatusDescCreatedAtDesc(Pageable pageable);
+    // 관리자 문의 목록 검색(feat/admin-improvements) — 다른 관리자 목록(ChargeRequestRepository.searchWithAccountAndUser)과
+    // 같은 검색 규칙. 파라미터는 AdminSearchConditionDto가 만든다 — INQUIRY_ID는 queryId와 정확히 일치할 때만, 문자열
+    // 항목은 exact면 =, 아니면 LIKE(:pattern, '!' 이스케이프). status는 선택 필터, 정렬은 Pageable(AdminSortSupport.inquiries).
+    // 작성자·답변 관리자까지 fetch join해 AdminInquiryResponse.from()의 N+1을 막는다.
+    @Query(value = "select i from Inquiry i join fetch i.user u left join fetch i.answeredBy where (:query is null "
+            + "or (((:field = 'ALL' or :field = 'INQUIRY_ID') and i.inquiryId = :queryId) or ((:field = 'ALL' "
+            + "or :field = 'LOGIN_ID') and ((:exact = true and u.loginId = :query) or (:exact = false and "
+            + "u.loginId like :pattern escape '!'))) or ((:field = 'ALL' or :field = 'NAME') and ((:exact = "
+            + "true and u.name = :query) or (:exact = false and u.name like :pattern escape '!'))) or ((:field "
+            + "= 'ALL' or :field = 'TITLE') and ((:exact = true and i.title = :query) or (:exact = false and "
+            + "i.title like :pattern escape '!'))))) and (:status is null or i.status = :status)",
+            countQuery = "select count(i) from Inquiry i join i.user u where (:query is null or (((:field = 'ALL' or "
+            + ":field = 'INQUIRY_ID') and i.inquiryId = :queryId) or ((:field = 'ALL' or :field = 'LOGIN_ID') "
+            + "and ((:exact = true and u.loginId = :query) or (:exact = false and u.loginId like :pattern "
+            + "escape '!'))) or ((:field = 'ALL' or :field = 'NAME') and ((:exact = true and u.name = :query) "
+            + "or (:exact = false and u.name like :pattern escape '!'))) or ((:field = 'ALL' or :field = "
+            + "'TITLE') and ((:exact = true and i.title = :query) or (:exact = false and i.title like :pattern "
+            + "escape '!'))))) and (:status is null or i.status = :status)")
+    Page<Inquiry> searchWithUser(@Param("query") String query, @Param("pattern") String pattern,
+            @Param("queryId") Long queryId, @Param("field") String field, @Param("exact") boolean exact,
+            @Param("status") InquiryStatus status, Pageable pageable);
 
     @Modifying
     @Query("delete from Inquiry i where i.user.userId = :userId")

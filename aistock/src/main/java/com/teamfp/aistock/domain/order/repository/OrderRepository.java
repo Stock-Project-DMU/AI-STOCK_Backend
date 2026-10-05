@@ -30,8 +30,13 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     // 한 번에 조회하기 위한 배치 조회. IN 절 하나로 전체 계좌의 주문을 합쳐서 정렬까지
     // DB에서 끝내므로, 계좌별로 나눠 조회한 뒤 애플리케이션 레벨에서 다시 정렬할 필요가 없다
     // (feature/admin-user 코드리뷰 반영, NAMING.md 8-17 참고).
-    @Query("select o from Order o where o.account.accountId in :accountIds order by o.orderedAt desc")
-    List<Order> findAllByAccountIdInOrderByOrderedAtDesc(@Param("accountIds") List<Long> accountIds);
+    // feat/admin-improvements: 이전에는 주문 전체를 개수 제한 없이 가져왔는데(주문이 많은 회원은 상세를 열 때마다
+    // 무거움), 화면은 개수와 최근 주문만 쓰므로 Pageable로 최근 N건만 가져오고 개수는 countByAccountIdIn으로 센다.
+    @Query("select o from Order o where o.account.accountId in :accountIds order by o.orderedAt desc, o.orderId desc")
+    List<Order> findRecentByAccountIdIn(@Param("accountIds") List<Long> accountIds, Pageable pageable);
+
+    @Query("select count(o) from Order o where o.account.accountId in :accountIds")
+    long countByAccountIdIn(@Param("accountIds") List<Long> accountIds);
 
     @Query("select o from Order o where o.orderId = :orderId and o.account.accountId = :accountId")
     Optional<Order> findByOrderIdAndAccountId(@Param("orderId") Long orderId, @Param("accountId") Long accountId);
@@ -48,41 +53,67 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     // 관리자 대시보드 — 최근 거래 20건
     List<Order> findTop20ByStatusOrderByExecutedAtDesc(OrderStatus status);
 
+    // 관리자 계좌·회원 상세의 실현 손익 합계(feat/admin-improvements) — 계좌들의 체결 주문 전체.
+    @Query("select o from Order o where o.account.accountId in :accountIds "
+            + "and o.status = com.teamfp.aistock.domain.order.entity.OrderStatus.EXECUTED")
+    List<Order> findExecutedByAccountIdIn(@Param("accountIds") List<Long> accountIds);
+
+    // 관리자 거래 상세의 매도 실현 손익(feat/admin-improvements) — 같은 계좌·종목의 체결 주문만 모아
+    // RealizedReturnService.calculateReturns()로 평단가를 다시 쌓는다(마이페이지 실현 손익과 같은 계산).
+    @Query("select o from Order o where o.account.accountId = :accountId and o.stockCode = :stockCode "
+            + "and o.status = com.teamfp.aistock.domain.order.entity.OrderStatus.EXECUTED")
+    List<Order> findExecutedByAccountIdAndStockCode(@Param("accountId") Long accountId, @Param("stockCode") String stockCode);
+
+    // 관리자 "전체 활동 기록"(AdminActivityService) — 한 페이지에 나온 주문들을 회원 정보까지 한 번에 조회
+    @Query("select o from Order o join fetch o.account a join fetch a.user where o.orderId in :orderIds")
+    List<Order> findAllWithUserByOrderIdIn(@Param("orderIds") List<Long> orderIds);
+
     // 관리자 전체 거래 목록 — account, account.user까지 fetch join + 페이징
     @Query(value = "select o from Order o join fetch o.account a join fetch a.user",
             countQuery = "select count(o) from Order o")
     Page<Order> findAllOrdersWithUser(Pageable pageable);
 
     // 관리자 거래 검색·필터(feature/admin-api-p0, ADMIN_API_BACKEND_HANDOFF.md 3.3). query는
-    // 주문번호/회원 아이디/계좌번호/종목코드/종목명 통합검색이고, status/orderType/priceType/
+    // 주문번호/회원 아이디/회원 이름(feat/admin-improvements 추가)/계좌번호/종목코드/종목명 검색이고, status/orderType/priceType/
     // stockCode(정확일치)/from~to(orderedAt 구간)는 선택 필터다. 파라미터가 null이면 해당 조건을
     // 걸지 않는다(컨트롤러가 빈 문자열을 null로 정규화). fetch join을 쓰는 페이징 쿼리라 count
     // 쿼리를 fetch join 없이 별도로 지정해야 한다 — findAllOrdersWithUser와 동일한 이유.
-    @Query(value = "select o from Order o join fetch o.account a join fetch a.user u where "
-            + "(:query is null or str(o.orderId) like concat('%', :query, '%') "
-            + "or u.loginId like concat('%', :query, '%') "
-            + "or a.accountNumber like concat('%', :query, '%') "
-            + "or o.stockCode like concat('%', :query, '%') "
-            + "or o.stockName like concat('%', :query, '%')) "
-            + "and (:status is null or o.status = :status) "
-            + "and (:orderType is null or o.orderType = :orderType) "
+    // feat/admin-improvements: 검색 항목(field)과 검색 방식(exact — 정확히 일치/포함)을 고를 수 있게 바꿨다.
+    // 파라미터는 AdminSearchConditionDto가 만든다 — ID 항목은 queryId와 정확히 일치할 때만, 문자열 항목은
+    // exact면 =, 아니면 LIKE(:pattern, %·_는 '!'로 이스케이프)로 찾는다.
+    @Query(value = "select o from Order o join fetch o.account a join fetch a.user u where (:query is null or (((:field = 'ALL' or :field = 'ORDER_ID') "
+            + "and o.orderId = :queryId) or ((:field = 'ALL' or :field = 'LOGIN_ID') "
+            + "and ((:exact = true and u.loginId = :query) "
+            + "or (:exact = false and u.loginId like :pattern escape '!'))) or ((:field = 'ALL' or :field = 'NAME') "
+            + "and ((:exact = true and u.name = :query) or (:exact = false and u.name like :pattern escape '!'))) "
+            + "or ((:field = 'ALL' or :field = 'ACCOUNT_NUMBER') and ((:exact = true and a.accountNumber = :query) "
+            + "or (:exact = false and a.accountNumber like :pattern escape '!'))) "
+            + "or ((:field = 'ALL' or :field = 'STOCK_CODE') and ((:exact = true and o.stockCode = :query) "
+            + "or (:exact = false and o.stockCode like :pattern escape '!'))) "
+            + "or ((:field = 'ALL' or :field = 'STOCK_NAME') and ((:exact = true and o.stockName = :query) "
+            + "or (:exact = false and o.stockName like :pattern escape '!'))))) "
+            + "and (:status is null or o.status = :status) and (:orderType is null or o.orderType = :orderType) "
             + "and (:priceType is null or o.priceType = :priceType) "
-            + "and (:stockCode is null or o.stockCode = :stockCode) "
-            + "and (:from is null or o.orderedAt >= :from) "
+            + "and (:stockCode is null or o.stockCode = :stockCode) and (:from is null or o.orderedAt >= :from) "
             + "and (:to is null or o.orderedAt <= :to)",
-            countQuery = "select count(o) from Order o join o.account a join a.user u where "
-            + "(:query is null or str(o.orderId) like concat('%', :query, '%') "
-            + "or u.loginId like concat('%', :query, '%') "
-            + "or a.accountNumber like concat('%', :query, '%') "
-            + "or o.stockCode like concat('%', :query, '%') "
-            + "or o.stockName like concat('%', :query, '%')) "
-            + "and (:status is null or o.status = :status) "
-            + "and (:orderType is null or o.orderType = :orderType) "
+            countQuery = "select count(o) from Order o join o.account a join a.user u where (:query is null or (((:field = 'ALL' or :field = 'ORDER_ID') "
+            + "and o.orderId = :queryId) or ((:field = 'ALL' or :field = 'LOGIN_ID') "
+            + "and ((:exact = true and u.loginId = :query) "
+            + "or (:exact = false and u.loginId like :pattern escape '!'))) or ((:field = 'ALL' or :field = 'NAME') "
+            + "and ((:exact = true and u.name = :query) or (:exact = false and u.name like :pattern escape '!'))) "
+            + "or ((:field = 'ALL' or :field = 'ACCOUNT_NUMBER') and ((:exact = true and a.accountNumber = :query) "
+            + "or (:exact = false and a.accountNumber like :pattern escape '!'))) "
+            + "or ((:field = 'ALL' or :field = 'STOCK_CODE') and ((:exact = true and o.stockCode = :query) "
+            + "or (:exact = false and o.stockCode like :pattern escape '!'))) "
+            + "or ((:field = 'ALL' or :field = 'STOCK_NAME') and ((:exact = true and o.stockName = :query) "
+            + "or (:exact = false and o.stockName like :pattern escape '!'))))) "
+            + "and (:status is null or o.status = :status) and (:orderType is null or o.orderType = :orderType) "
             + "and (:priceType is null or o.priceType = :priceType) "
-            + "and (:stockCode is null or o.stockCode = :stockCode) "
-            + "and (:from is null or o.orderedAt >= :from) "
+            + "and (:stockCode is null or o.stockCode = :stockCode) and (:from is null or o.orderedAt >= :from) "
             + "and (:to is null or o.orderedAt <= :to)")
-    Page<Order> searchOrdersWithUser(@Param("query") String query, @Param("status") OrderStatus status,
+    Page<Order> searchOrdersWithUser(@Param("query") String query, @Param("pattern") String pattern, @Param("queryId") Long queryId,
+            @Param("field") String field, @Param("exact") boolean exact,
+            @Param("status") OrderStatus status,
             @Param("orderType") OrderType orderType, @Param("priceType") PriceType priceType,
             @Param("stockCode") String stockCode, @Param("from") LocalDateTime from, @Param("to") LocalDateTime to,
             Pageable pageable);

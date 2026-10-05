@@ -5,6 +5,7 @@ import com.teamfp.aistock.global.util.MaxByteSize;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 
 /**
  * 관리자 신규 생성 요청 DTO(ADMIN_API_BACKEND_HANDOFF.md 5.1). "구현 전 결정이 필요한 정책" 6번
@@ -14,7 +15,10 @@ import jakarta.validation.constraints.Pattern;
  * password 정책은 `SignupRequest.password`와 동일하다.
  */
 public record AdminCreateRequest(
-        @NotBlank(message = "아이디는 필수 입력 값입니다.") String loginId,
+        @NotBlank(message = "아이디는 필수 입력 값입니다.")
+        @Size(max = 50, message = "아이디는 50자를 넘을 수 없습니다.")
+        @Pattern(regexp = "[A-Za-z0-9_]{4,50}", message = "아이디는 영문, 숫자, 밑줄 4~50자입니다.")
+        String loginId,
 
         @NotBlank(message = "비밀번호는 필수 입력 값입니다.")
         @Pattern(
@@ -24,10 +28,13 @@ public record AdminCreateRequest(
         @MaxByteSize(max = 72, message = "비밀번호는 72바이트를 초과할 수 없습니다.")
         String password,
 
-        @NotBlank(message = "이름은 필수 입력 값입니다.") String name,
+        @NotBlank(message = "이름은 필수 입력 값입니다.")
+        @Size(max = 50, message = "이름은 50자를 넘을 수 없습니다.")
+        String name,
 
         @NotBlank(message = "이메일은 필수 입력 값입니다.")
         @Email(message = "올바른 이메일 형식이 아닙니다.")
+        @Size(max = 100, message = "이메일은 100자를 넘을 수 없습니다.")
         String email
 ) {
 }

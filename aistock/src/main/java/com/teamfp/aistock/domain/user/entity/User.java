@@ -28,7 +28,9 @@ import java.time.LocalDateTime;
 @Table(name = "users", indexes = {
         @Index(name = "idx_email", columnList = "email"),
         @Index(name = "idx_active", columnList = "is_active"),
-        @Index(name = "idx_status", columnList = "status")
+        @Index(name = "idx_status", columnList = "status"),
+        // 관리자 "전체 활동 기록" 최신순 정렬용(feat/admin-improvements)
+        @Index(name = "idx_user_created_at", columnList = "created_at")
 })
 @Getter
 @Builder
@@ -74,10 +76,19 @@ public class User {
     @Column(name = "suspended_until")
     private LocalDateTime suspendedUntil;
 
+    // 마지막 로그인 시각(feat/admin-improvements) — 관리자 회원 상세 표시용. 일반·소셜 로그인 모두 토큰을 발급할 때
+    // 갱신한다(AuthService.generateLoginResponse). 이 컬럼이 생기기 전에 가입·로그인한 회원은 null이다.
+    @Column(name = "last_login_at")
+    private LocalDateTime lastLoginAt;
+
     public UserStatus getStatus() {
         return status == UserStatus.SUSPENDED && suspendedUntil != null
                 && !suspendedUntil.isAfter(LocalDateTime.now(java.time.ZoneId.of("Asia/Seoul")))
                 ? UserStatus.ACTIVE : status;
+    }
+
+    public void recordLogin(LocalDateTime loggedInAt) {
+        this.lastLoginAt = loggedInAt;
     }
 
     public void setSuspensionDetails(String reason, LocalDateTime until) {

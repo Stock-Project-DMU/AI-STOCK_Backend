@@ -14,6 +14,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.teamfp.aistock.domain.admin.dto.request.AdminCreateRequest;
+import com.teamfp.aistock.domain.admin.dto.request.AdminSearchConditionDto;
+import com.teamfp.aistock.domain.admin.dto.request.AdminSearchMatchType;
+import com.teamfp.aistock.domain.admin.dto.request.AdminUserSearchField;
+import com.teamfp.aistock.domain.admin.dto.request.AdminUserSortColumn;
+import com.teamfp.aistock.domain.admin.dto.request.AdminUserSortType;
 import com.teamfp.aistock.domain.admin.dto.request.AdminUserStatusRequest;
 import com.teamfp.aistock.domain.admin.dto.response.AdminUserDetailResponse;
 import com.teamfp.aistock.domain.admin.dto.response.AdminUserListResponse;
@@ -47,10 +52,16 @@ public class AdminAdminController {
     @GetMapping
     public ApiResponse<Page<AdminUserListResponse>> getAdmins(
             @RequestParam(required = false) String query,
+            @RequestParam(defaultValue = "ALL") AdminUserSearchField field,
+            @RequestParam(defaultValue = "CONTAINS") AdminSearchMatchType matchType,
             @RequestParam(required = false) UserStatus status,
-            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
+            @RequestParam(defaultValue = "LATEST") AdminUserSortType sortBy,
+            @RequestParam(required = false) AdminUserSortColumn sortColumn,
+            @RequestParam(defaultValue = "DESC") Sort.Direction direction,
+            @PageableDefault(size = 20) Pageable pageable
     ) {
-        return ApiResponse.success(adminUserService.getUsers(query, status, Role.ADMIN, pageable));
+        return ApiResponse.success(adminUserService.getUsers(AdminSearchConditionDto.of(query, field, matchType), status, Role.ADMIN,
+                AdminSortSupport.users(pageable, sortBy, sortColumn, direction)));
     }
 
     @GetMapping("/{adminId}")

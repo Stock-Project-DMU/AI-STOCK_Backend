@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.teamfp.aistock.domain.account.dto.request.ChargeBalanceRequest;
 import com.teamfp.aistock.domain.account.dto.request.ChargeRequestCreateRequest;
 import com.teamfp.aistock.domain.account.dto.request.CreateAccountRequest;
+import com.teamfp.aistock.domain.account.dto.request.DeductBalanceRequest;
 import com.teamfp.aistock.domain.account.dto.response.AccountInfoResponse;
 import com.teamfp.aistock.domain.account.dto.response.AccountTransactionResponse;
 import com.teamfp.aistock.domain.account.dto.response.ChargeHistoryResponse;
@@ -53,6 +54,7 @@ public class AccountController {
 
     // 사용자 직접 충전 — 계좌당 3회(Account.MAX_CHARGE_COUNT)까지 관리자 승인 없이 입력한 금액이
     // 바로 충전된다. 3회를 다 쓴 뒤에는 아래 충전 요청(charge-requests)으로 관리자 승인을 받는다.
+    // 관리자 계정의 계좌는 횟수·금액 한도 없이 충전된다(AccountService.chargeBalance() 참고).
     @PostMapping("/{accountId}/charge")
     public ApiResponse<AccountInfoResponse> chargeBalance(
             @PathVariable Long accountId,
@@ -60,6 +62,16 @@ public class AccountController {
     ) {
         Long userId = SecurityUtil.getCurrentUserId();
         return ApiResponse.success("가상캐시가 충전되었습니다.", accountService.chargeBalance(userId, accountId, request));
+    }
+
+    // 관리자 계정 본인 계좌 직접 차감 — "가상계좌 관리"에서 잔고를 줄일 때 쓴다. 일반 사용자 계좌는 ACCESS_DENIED.
+    @PostMapping("/{accountId}/deduct")
+    public ApiResponse<AccountInfoResponse> deductBalance(
+            @PathVariable Long accountId,
+            @Valid @RequestBody DeductBalanceRequest request
+    ) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        return ApiResponse.success("가상캐시가 차감되었습니다.", accountService.deductBalance(userId, accountId, request));
     }
 
     @GetMapping("/{accountId}/profit")

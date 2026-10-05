@@ -76,9 +76,9 @@ class AccountRepositoryIntegrationTest {
                 .build());
         suspendedAccount.suspend();
 
-        Page<Account> byLoginId = accountRepository.searchAccountsWithUser(loginId, null, PageRequest.of(0, 10));
-        Page<Account> byLoginIdAndActive = accountRepository.searchAccountsWithUser(loginId, AccountStatus.ACTIVE, PageRequest.of(0, 10));
-        Page<Account> noMatch = accountRepository.searchAccountsWithUser("no-such-login-id-" + uniqueSuffix, null, PageRequest.of(0, 10));
+        Page<Account> byLoginId = accountRepository.searchAccountsWithUser(loginId, "%" + (loginId) + "%", null, "ALL", false, null, PageRequest.of(0, 10));
+        Page<Account> byLoginIdAndActive = accountRepository.searchAccountsWithUser(loginId, "%" + (loginId) + "%", null, "ALL", false, AccountStatus.ACTIVE, PageRequest.of(0, 10));
+        Page<Account> noMatch = accountRepository.searchAccountsWithUser("no-such-login-id-" + uniqueSuffix, "%" + ("no-such-login-id-" + uniqueSuffix) + "%", null, "ALL", false, null, PageRequest.of(0, 10));
 
         assertThat(byLoginId.getTotalElements()).isEqualTo(2);
         assertThat(byLoginIdAndActive.getContent()).extracting(Account::getAccountId).containsExactly(activeAccount.getAccountId());

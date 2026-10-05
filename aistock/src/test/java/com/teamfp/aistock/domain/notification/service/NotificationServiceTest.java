@@ -107,4 +107,21 @@ class NotificationServiceTest {
         verify(messagingTemplate).convertAndSendToUser(eq("1"), eq("/queue"), sent.capture());
         assertThat(((NotificationResponse) sent.getValue()).relatedOrderId()).isEqualTo(42L);
     }
+
+    @Test
+    @DisplayName("공지 알림은 그 공지를 가리키고 공지의 종류·제목·내용으로 저장된다")
+    void notifyNotice_linksNotice() {
+        com.teamfp.aistock.domain.notification.entity.Notice notice = com.teamfp.aistock.domain.notification.entity.Notice.builder()
+                .type(NotificationType.SYSTEM).title("점검 안내").content("내일 점검합니다.")
+                .targetType(com.teamfp.aistock.domain.notification.entity.NoticeTargetType.ALL)
+                .popupEndDate(java.time.LocalDate.now().plusDays(7)).build();
+
+        notificationService.notifyNotice(USER_ID, notice);
+
+        ArgumentCaptor<Notification> saved = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).save(saved.capture());
+        assertThat(saved.getValue().getNotice()).isSameAs(notice);
+        assertThat(saved.getValue().getTitle()).isEqualTo("점검 안내");
+        assertThat(saved.getValue().getType()).isEqualTo(NotificationType.SYSTEM);
+    }
 }

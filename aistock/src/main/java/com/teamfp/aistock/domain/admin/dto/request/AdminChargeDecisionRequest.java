@@ -4,6 +4,7 @@ import com.teamfp.aistock.domain.account.entity.ChargeRequestStatus;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 /**
  * 관리자 충전 요청 승인·거절 요청 DTO(ADMIN_API_BACKEND_HANDOFF.md 4.2). decision은 APPROVED
@@ -11,6 +12,8 @@ import jakarta.validation.constraints.NotNull;
  */
 public record AdminChargeDecisionRequest(
         @NotNull(message = "decision은 필수 입력 값입니다.") ChargeRequestStatus decision,
-        @NotBlank(message = "처리 사유는 필수 입력 값입니다.") String reason
+        @NotBlank(message = "처리 사유는 필수 입력 값입니다.")
+        @Size(max = 500, message = "처리 사유는 500자를 넘을 수 없습니다.")
+        String reason
 ) {
 }

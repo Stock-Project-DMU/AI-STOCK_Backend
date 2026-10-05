@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.teamfp.aistock.domain.notification.dto.response.NoticePopupResponse;
 import com.teamfp.aistock.domain.notification.dto.response.NotificationCountResponse;
 import com.teamfp.aistock.domain.notification.dto.response.NotificationResponse;
 import com.teamfp.aistock.domain.notification.service.NotificationService;
@@ -39,6 +40,13 @@ public class NotificationController {
     public ApiResponse<NotificationCountResponse> getUnreadCount() {
         Long userId = SecurityUtil.getCurrentUserId();
         return ApiResponse.success(notificationService.getUnreadCount(userId));
+    }
+
+    // 공지 팝업(feat/admin-improvements) — 로그인 직후 띄울 내 팝업 목록(팝업 기한이 오늘 이후인 받은 공지).
+    // 닫기는 화면에서만 처리하고 서버에 기록하지 않아, 기한까지는 로그인할 때마다 다시 뜬다.
+    @GetMapping("/popups")
+    public ApiResponse<List<NoticePopupResponse>> getActivePopups() {
+        return ApiResponse.success(notificationService.getActivePopups(SecurityUtil.getCurrentUserId()));
     }
 
     /**

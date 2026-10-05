@@ -83,20 +83,31 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
     Optional<Account> findAccountWithUserByIdForUpdate(@Param("accountId") Long accountId);
 
     // 관리자 계좌 목록·검색(feature/admin-api-p0, ADMIN_API_BACKEND_HANDOFF.md 3.4). query는
-    // 계좌 소유자 아이디/이름/계좌번호 통합검색이고, status는 선택 필터다. 파라미터가 null이면
+    // 계좌 ID/계좌 소유자 아이디/이름/계좌번호 검색이고, status는 선택 필터다. 파라미터가 null이면
     // 해당 조건을 걸지 않는다(컨트롤러가 빈 문자열을 null로 정규화). fetch join을 쓰는 페이징
     // 쿼리라 count 쿼리는 fetch join 없이 별도로 지정한다 — findAllOrdersWithUser와 동일한 이유.
-    @Query(value = "select a from Account a join fetch a.user u where "
-            + "(:query is null or u.loginId like concat('%', :query, '%') "
-            + "or u.name like concat('%', :query, '%') "
-            + "or a.accountNumber like concat('%', :query, '%')) "
+    // feat/admin-improvements: 검색 항목(field)과 검색 방식(exact — 정확히 일치/포함)을 고를 수 있게 바꿨다.
+    // 파라미터는 AdminSearchConditionDto가 만든다 — ID 항목은 queryId와 정확히 일치할 때만, 문자열 항목은
+    // exact면 =, 아니면 LIKE(:pattern, %·_는 '!'로 이스케이프)로 찾는다.
+    @Query(value = "select a from Account a join fetch a.user u where (:query is null or (((:field = 'ALL' or :field = 'ACCOUNT_ID') "
+            + "and a.accountId = :queryId) or ((:field = 'ALL' or :field = 'LOGIN_ID') "
+            + "and ((:exact = true and u.loginId = :query) "
+            + "or (:exact = false and u.loginId like :pattern escape '!'))) or ((:field = 'ALL' or :field = 'NAME') "
+            + "and ((:exact = true and u.name = :query) or (:exact = false and u.name like :pattern escape '!'))) "
+            + "or ((:field = 'ALL' or :field = 'ACCOUNT_NUMBER') and ((:exact = true and a.accountNumber = :query) "
+            + "or (:exact = false and a.accountNumber like :pattern escape '!'))))) "
             + "and (:status is null or a.status = :status)",
-            countQuery = "select count(a) from Account a join a.user u where "
-            + "(:query is null or u.loginId like concat('%', :query, '%') "
-            + "or u.name like concat('%', :query, '%') "
-            + "or a.accountNumber like concat('%', :query, '%')) "
+            countQuery = "select count(a) from Account a join a.user u where (:query is null or (((:field = 'ALL' or :field = 'ACCOUNT_ID') "
+            + "and a.accountId = :queryId) or ((:field = 'ALL' or :field = 'LOGIN_ID') "
+            + "and ((:exact = true and u.loginId = :query) "
+            + "or (:exact = false and u.loginId like :pattern escape '!'))) or ((:field = 'ALL' or :field = 'NAME') "
+            + "and ((:exact = true and u.name = :query) or (:exact = false and u.name like :pattern escape '!'))) "
+            + "or ((:field = 'ALL' or :field = 'ACCOUNT_NUMBER') and ((:exact = true and a.accountNumber = :query) "
+            + "or (:exact = false and a.accountNumber like :pattern escape '!'))))) "
             + "and (:status is null or a.status = :status)")
-    Page<Account> searchAccountsWithUser(@Param("query") String query, @Param("status") AccountStatus status, Pageable pageable);
+    Page<Account> searchAccountsWithUser(@Param("query") String query, @Param("pattern") String pattern, @Param("queryId") Long queryId,
+            @Param("field") String field, @Param("exact") boolean exact,
+            @Param("status") AccountStatus status, Pageable pageable);
 
     @Modifying
     @Query("delete from Account a where a.user.userId = :userId")
