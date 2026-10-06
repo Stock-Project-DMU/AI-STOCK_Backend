@@ -36,6 +36,35 @@ public class HoldingValuationService {
     // mock이면 로컬 시세 JSON, real이면 외부 시세 데이터 현재가 조회로 알아서 갈라진다.
     private final StockQuoteService stockQuoteService;
 
+    /**
+     * 종목을 1주 이상 보유한 계좌별 수량(accountId → quantity). 배당 권리 부여(feature/dividend)는
+     * 시세 평가가 필요 없어 수량만 돌려준다 — stock 도메인이 HoldingRepository를 직접 참조하지 않게
+     * 이 서비스를 거친다.
+     */
+    @Transactional(readOnly = true)
+    public Map<Long, Integer> getHoldingQuantitiesByStockCode(String stockCode) {
+        Map<Long, Integer> quantities = new HashMap<>();
+        for (Holding holding : holdingRepository.findAllByStockCodeAndQuantityGreaterThan(stockCode, 0)) {
+            quantities.merge(holding.getAccount().getAccountId(), holding.getQuantity(), Integer::sum);
+        }
+        return quantities;
+    }
+
+    /**
+     * 계좌들이 1주 이상 보유한 종목별 수량 합계(stockCode → quantity). 예정 배당 조회(feature/dividend)용으로,
+     * 시세 평가가 필요 없어 getHoldingValuations()와 달리 시세를 조회하지 않는다.
+     */
+    @Transactional(readOnly = true)
+    public Map<String, Integer> getHoldingQuantities(List<Long> accountIds) {
+        Map<String, Integer> quantities = new HashMap<>();
+        for (Holding holding : holdingRepository.findAllByAccountIdIn(accountIds)) {
+            if (holding.getQuantity() > 0) {
+                quantities.merge(holding.getStockCode(), holding.getQuantity(), Integer::sum);
+            }
+        }
+        return quantities;
+    }
+
     @Transactional(readOnly = true)
     public List<HoldingValuationDto> getHoldingValuations(Long accountId) {
         List<Holding> holdings = holdingRepository.findAllByAccountId(accountId);

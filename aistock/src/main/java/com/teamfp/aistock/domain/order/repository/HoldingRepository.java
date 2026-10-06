@@ -35,6 +35,9 @@ public interface HoldingRepository extends JpaRepository<Holding, Long> {
     @Query("select h from Holding h where h.account.accountId = :accountId and h.stockCode = :stockCode")
     Optional<Holding> findByAccountIdAndStockCode(@Param("accountId") Long accountId, @Param("stockCode") String stockCode);
 
+    // feature/dividend — 배당락일에 해당 종목을 1주 이상 보유한 모든 계좌(배당 권리 부여 대상)
+    List<Holding> findAllByStockCodeAndQuantityGreaterThan(String stockCode, int quantity);
+
     // 4주차 feature/stock-price StockNameResolver용 — stockCode만으로 이미 누군가 보유 중인
     // 종목의 stockName을 찾는다(계좌 무관, 어느 행이든 하나만 있으면 됨).
     Optional<Holding> findFirstByStockCode(String stockCode);

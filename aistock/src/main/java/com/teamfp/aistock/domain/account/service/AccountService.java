@@ -225,6 +225,22 @@ public class AccountService {
     }
 
     /**
+     * 보유 종목 현금배당 입금(feature/dividend). DividendEntitlementService.payEntitlement()가 권리 1건마다
+     * 자기 트랜잭션 안에서 호출한다 — 입금·원장 기록·권리 PAID 처리가 한 트랜잭션으로 묶여, 중간에
+     * 실패하면 셋 다 롤백된다. 주문 체결과 같은 계좌를 동시에 건드릴 수 있어 이자 지급과 같이
+     * 비관적 락으로 조회한다. 계좌가 없으면(탈퇴) ACCOUNT_NOT_FOUND를 던진다.
+     */
+    @Transactional
+    public void payDividend(Long accountId, long amount, String reason) {
+        Account account = accountRepository.findAccountWithUserByIdForUpdate(accountId)
+                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+        long balanceBefore = account.getBalance();
+        account.applyDividend(amount);
+        accountTransactionService.record(account, AccountTransactionType.DIVIDEND, amount, balanceBefore,
+                null, null, null, reason);
+    }
+
+    /**
      * accountId+userId로 계좌를 조회하고 소유권까지 함께 검증한다. AccountService/OrderService
      * 여러 메서드(getProfit, createMarketOrder, createLimitOrder, getMyOrderHistory,
      * getMyHoldings)가 각자 findByAccountIdAndUserId(...).orElseThrow(ACCOUNT_NOT_FOUND)를

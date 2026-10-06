@@ -1,5 +1,11 @@
 -- =====================================================
--- AI STOCK MySQL Schema (최종본 v18)
+-- AI STOCK MySQL Schema (최종본 v19)
+-- v19: 배당금 기능(feature/dividend, 2026-10-05, dividend_migration.sql — admin_improvements_migration.sql 다음에 적용).
+--   1. dividend_schedules 신규 (19번째 테이블) — 종목별 배당 회차. local-market-data-generator의
+--      dividends.json을 (stock_code, fiscal_year, period) 기준으로 UPSERT한다.
+--   2. dividend_entitlements 신규 (20번째 테이블) — 배당락일 06:00 기준 보유 수량으로 확정된 계좌별 배당
+--      권리. 지급일 09:00에 예수금(balance)으로 입금하고 PAID로 바꾼다.
+--   3. account_transactions.type ENUM에 'DIVIDEND' 추가(v18의 'AUTO_DEDUCTION' 다음).
 -- v18: 관리자 페이지 개선(feat/admin-improvements, 2026-10-04, admin_improvements_migration.sql).
 --   1. account_transactions.type ENUM에 'AUTO_DEDUCTION' 추가 — 관리자 계정 본인 계좌 직접 차감.
 --   2. users.created_at / orders.ordered_at / charge_requests.requested_at 인덱스 추가 — 관리자
@@ -849,7 +855,8 @@ CREATE TABLE account_transactions (
     type                      ENUM('INITIAL_GRANT','AUTO_CHARGE','ADMIN_CHARGE','ADMIN_DEDUCTION',
                                     'ORDER_BUY','ORDER_SELL','ORDER_REFUND',
                                     'INTEREST','TRADE_FEE',      -- v17 추가: 예치금 이자, 매도 거래 수수료
-                                    'AUTO_DEDUCTION')            -- v18 추가: 관리자 계정 본인 계좌 직접 차감
+                                    'AUTO_DEDUCTION',            -- v18 추가: 관리자 계정 본인 계좌 직접 차감
+                                    'DIVIDEND')                  -- v19 추가: 보유 종목 현금배당 입금
                                               NOT NULL,
     amount                    BIGINT          NOT NULL,     -- 증감액 (양수=증가, 음수=감소)
     balance_before             BIGINT          NOT NULL,
@@ -911,7 +918,75 @@ CREATE TABLE audit_logs (
 ) ENGINE=InnoDB;
 
 -- =====================================================
--- 테이블 관계 요약 (총 18개 — v13: charge_requests, account_transactions, audit_logs 추가)
+-- 19. 배당 스케줄 (dividend_schedules) — v19 신규
+-- =====================================================
+/*
+  [용도]
+  종목별 배당 회차(feature/dividend). local-market-data-generator의 dividend_collector.py가 LS t3202
+  (배당 기준일)와 DART(주당 현금배당금·지급일)를 합쳐 만든 dividends.json을 서버 기동 시와
+  POST /api/admin/dividend/reload 호출 시 (stock_code, fiscal_year, period) 기준으로 UPSERT한다.
+  파일에서 사라진 회차는 지우지 않는다(이미 만들어진 배당 권리가 참조할 수 있음).
+
+  [dps_cash / pay_date — NULL 허용]
+  배당결정 공시 전이면 NULL이다. 공시 후 파일을 다시 만들고 재적재하면 채워진다.
+  dps_cash가 NULL인 회차는 배당락일이 와도 배당 권리를 만들지 않는다.
+  pay_date가 NULL이면 지급일은 record_date + 45일로 대체한다(DividendSchedule.PAY_DATE_FALLBACK_DAYS).
+*/
+CREATE TABLE dividend_schedules (
+    dividend_schedule_id  BIGINT          NOT NULL AUTO_INCREMENT,
+    stock_code            VARCHAR(10)     NOT NULL,
+    fiscal_year           VARCHAR(4)      NOT NULL,
+    period                VARCHAR(10)     NOT NULL,     -- Q1~Q4 (분기 결산기준일 기준 회차)
+    dividend_kind         VARCHAR(20),                  -- ANNUAL / QUARTERLY
+    dps_cash              INT,                          -- 주당 현금배당금(원)
+    record_date           DATE,                         -- 배당 기준일
+    ex_dividend_date      DATE,                         -- 배당락일(기준일 직전 영업일)
+    pay_date              DATE,
+    dividend_yield        DECIMAL(5,2),
+    source                VARCHAR(50),
+    created_at            DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at            DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (dividend_schedule_id),
+    UNIQUE KEY uq_dividend_schedule (stock_code, fiscal_year, period),
+    INDEX idx_dividend_schedule_ex_date (ex_dividend_date)
+) ENGINE=InnoDB;
+
+-- =====================================================
+-- 20. 배당 권리 (dividend_entitlements) — v19 신규
+-- =====================================================
+/*
+  [용도]
+  배당락일 06:00(장 시작 전) 기준 보유 수량 = 전 거래일 종가 기준 보유 수량으로 확정된 계좌별 배당
+  권리(DividendEntitlementJob). 지급일 09:00에 DividendPaymentJob이 balance에 total_amount를 더하고
+  account_transactions에 DIVIDEND 원장을 남긴 뒤 PAID로 바꾼다. 배당은 이자와 달리 base_balance를
+  올리지 않는다(투자 수익이라 수익률에 반영).
+
+  [account_id — FK 아님]
+  account_transactions.related_order_id와 같은 단순 참조 ID다. 회원 탈퇴로 계좌가 지워져도 막히지
+  않으며, 지급 시점에 계좌가 없으면 SKIPPED로 닫는다.
+*/
+CREATE TABLE dividend_entitlements (
+    dividend_entitlement_id  BIGINT       NOT NULL AUTO_INCREMENT,
+    account_id               BIGINT       NOT NULL,     -- FK 아님, 참조용 (accounts.account_id)
+    dividend_schedule_id     BIGINT       NOT NULL,
+    stock_code               VARCHAR(10)  NOT NULL,
+    quantity                 INT          NOT NULL,     -- 배당락일 기준 보유 수량
+    dps_cash                 INT          NOT NULL,
+    total_amount             BIGINT       NOT NULL,     -- quantity × dps_cash
+    status                   ENUM('PENDING','PAID','SKIPPED') NOT NULL DEFAULT 'PENDING',
+    ex_dividend_date         DATE         NOT NULL,
+    pay_date                 DATE,                      -- 권리 생성 시점 공시 지급일, NULL이면 대체 지급일 적용
+    paid_at                  DATETIME,
+    created_at               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (dividend_entitlement_id),
+    UNIQUE KEY uq_dividend_entitlement (account_id, dividend_schedule_id),
+    INDEX idx_dividend_entitlement_status (status),
+    INDEX idx_dividend_entitlement_account (account_id, status),
+    FOREIGN KEY (dividend_schedule_id) REFERENCES dividend_schedules(dividend_schedule_id)
+) ENGINE=InnoDB;
+
+-- =====================================================
+-- 테이블 관계 요약 (총 20개 — v13: charge_requests, account_transactions, audit_logs 추가 / v19: dividend_schedules, dividend_entitlements 추가)
 -- =====================================================
 /*
   users 1:1  → investment_profile
@@ -933,9 +1008,11 @@ CREATE TABLE audit_logs (
   accounts 1:N → charge_requests (v13)
   accounts 1:N → account_transactions (v13)
   ai_planning_sessions 1:N → ai_planning_messages
+  dividend_schedules 1:N → dividend_entitlements (v19)
 
   ※ audit_logs는 FK 없이 admin_user_id/target_id를 참조 ID로만 저장한다(위 [admin_user_id
     / admin_login_id — FK 아님 + 스냅샷] 참고) — 다른 테이블과 관계선을 긋지 않는다.
+  ※ dividend_entitlements.account_id도 FK 없는 참조 ID다(v19, 20번 테이블 주석 참고).
 */
 
 -- =====================================================
