@@ -1612,6 +1612,7 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 > - `AdminAccountService.adjustBalance()` → ADMIN_CHARGE 또는 ADMIN_DEDUCTION
 > - `AccountService.payMonthlyInterest()`(매월 1일 예치금 이자, mypage-improvement) → INTEREST
 > - `OrderService.createMarketOrder()`/`OrderExecutionService.executeSell()`(매도 체결 직후 수수료 차감, mypage-improvement) → TRADE_FEE
+> - `AccountService.payDividend()`(배당 지급일 현금배당 입금, `DividendEntitlementService.payEntitlement()`가 호출, feature/dividend) → DIVIDEND
 >
 > 주문 관련 원장 사유(reason)에는 mypage-improvement부터 `Order.describeStockAndQuantity()`("종목명 N주")를 앞에 붙인다.
 >
@@ -1712,6 +1713,38 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 >   충전한다(정지 계좌 불가). 3회를 다 쓴 계좌만 `POST /api/accounts/{accountId}/charge-requests`로 관리자 승인
 >   충전을 요청할 수 있다(남아 있으면 `CHARGE_REQUEST_NOT_ALLOWED`).
 > - **계좌번호**: "110" + 랜덤 9자리 숫자(12자리)를 하이픈 없이 저장한다. 화면에서 `110-123-456789`처럼 표시한다.
+
+### 8-29. feature/dividend (2026-10-05 신규 — 보유 종목 배당금 가상 지급, 새 테이블 2개)
+
+`dividend_schedules`, `dividend_entitlements` 테이블 신규 생성(사용자 요청 — 2026-10-05 배당금 기능 명세).
+local-market-data-generator의 `dividend_collector.py`가 만든 `dividends.json`을 적재하고, 배당락일에 보유 계좌별
+권리를 만든 뒤 지급일에 예수금(balance)으로 입금한다. 실제 돈이 아닌 가상 캐시다.
+
+| 구분 | 이름 |
+|---|---|
+| Entity | `DividendSchedule`(domain/stock/entity) — dividendScheduleId, stockCode, fiscalYear, period(Q1~Q4), dividendKind(ANNUAL/QUARTERLY), dpsCash(`Integer`, 공시 전 null), recordDate, exDividendDate, payDate(공시 전 null), dividendYield(`BigDecimal`), source, createdAt, updatedAt. 상수 `PAY_DATE_FALLBACK_DAYS`(45). 메서드 `refresh(String dividendKind, Integer dpsCash, LocalDate recordDate, LocalDate exDividendDate, LocalDate payDate, BigDecimal dividendYield, String source)`(값이 바뀌었으면 true), `resolvePayDate()`(payDate, 없으면 recordDate + 45일), `isPayDateEstimated()` |
+| Entity | `DividendEntitlement`(domain/stock/entity) — dividendEntitlementId, accountId(FK 아닌 참조 ID), dividendSchedule(`@ManyToOne`), stockCode, quantity, dpsCash, totalAmount(`long`), status, exDividendDate, payDate, paidAt, createdAt. 메서드 `resolvePayDate()`, `isPending()`, `markPaid(LocalDateTime paidAt)`, `markSkipped()` |
+| Enum | `DividendEntitlementStatus`(domain/stock/entity) — PENDING / PAID / SKIPPED |
+| Repository | `DividendScheduleRepository` — `findAllByExDividendDate(LocalDate)`, `findAllByStockCodeInAndExDividendDateGreaterThanEqual(Collection<String>, LocalDate)`, `search(String stockCode, String fiscalYear)` / `DividendEntitlementRepository` — `findAccountIdsByDividendScheduleId(Long)`, `findByIdForUpdate(Long)`(`@Lock(PESSIMISTIC_WRITE)` — 지급·건너뜀 중복 처리 방지), `findAllWithScheduleByStatus(DividendEntitlementStatus)`, `findAllWithScheduleByAccountIdInAndStatus(Collection<Long>, DividendEntitlementStatus)` |
+| Infra | `DividendScheduleReader`(infra/marketdata) — `readDividendSchedules()`, 상수 `DIVIDEND_FILE_NAME`("dividends.json"). `market-data.local-path` 디렉토리의 파일을 호출 때마다 새로 읽고, 없거나 깨지면 빈 목록 / DTO `DividendScheduleDto`(infra/marketdata/dto, record) |
+| Service | `DividendScheduleService`(domain/stock/service) — `reloadSchedules()`, `getSchedules(String stockCode, String year)`, `getMyDividends(Long userId)`, `getUpcomingDividends(Long userId)`, `resolveStockName(String stockCode)`(stocks.json → `StockNameResolver` → 종목코드) |
+| Service | `DividendEntitlementService`(domain/stock/service) — `grantEntitlements(Long dividendScheduleId)`, `getDueEntitlementIds(LocalDate today)`, `payEntitlement(Long dividendEntitlementId)`, `skipEntitlement(Long dividendEntitlementId)` |
+| Scheduler | `DividendEntitlementJob`(domain/stock/service) — `grantTodayEntitlements()`(`@Scheduled(cron = "0 0 6 * * *", zone = "Asia/Seoul")`), `initializeOnStartup()`(`@Async("batchTaskExecutor")` + `@EventListener(ApplicationReadyEvent.class)` — 스케줄 적재 후, 09:00 전 기동이면 오늘 권리 부여 보충) / `DividendPaymentJob`(domain/stock/service) — `payDueDividends()`(`@Scheduled(cron = "0 0 9 * * *", zone = "Asia/Seoul")`, 지급일 <= 오늘인 PENDING 전부), `payMissedDividends()`(09:00 이후 기동 시 보충), private `skipQuietly(Long)`(SKIPPED 처리 실패가 반복을 멈추지 않게) |
+| Account | `Account.applyDividend(long amount)`(balance만 증가 — baseBalance는 그대로라 수익률에 반영), `AccountService.payDividend(Long accountId, long amount, String reason)`, `AccountTransactionType.DIVIDEND` |
+| Order(보유종목) | `HoldingRepository.findAllByStockCodeAndQuantityGreaterThan(String stockCode, int quantity)`, `HoldingValuationService.getHoldingQuantitiesByStockCode(String stockCode)`(accountId → 수량), `HoldingValuationService.getHoldingQuantities(List<Long> accountIds)`(stockCode → 수량) |
+| 사용자 엔드포인트 | `GET /api/dividends/schedule?stockCode=&year=`, `GET /api/dividends/my`, `GET /api/dividends/upcoming` — `DividendController`(domain/stock/controller) `getSchedules`, `getMyDividends`, `getUpcomingDividends` |
+| 관리자 엔드포인트 | `POST /api/admin/dividend/reload` — `AdminDividendController.reloadSchedules`(domain/admin/controller) |
+| Response DTO | `DividendScheduleResponse`, `DividendEntitlementResponse`, `UpcomingDividendResponse`(isEntitled, isPayDateEstimated, expectedAmount — 정적 팩토리 `ofEntitlement`, `ofSchedule`), `DividendScheduleReloadResponse`(totalCount, createdCount, updatedCount) |
+| Migration | `dividend_migration.sql`(저장소 루트, schema.sql v19) |
+| Test | `DividendScheduleReaderTest`(infra/marketdata), `DividendFlowIntegrationTest`(domain/stock/service — 실제 MySQL) |
+
+> - **배당 권리**: 매일 06:00(KST) 그날이 배당락일인 회차마다 1주 이상 보유한 계좌에 PENDING 권리를 만든다(06:00 보유 수량 =
+>   전 거래일 종가 기준). dpsCash가 null(미공시)인 회차는 건너뛴다. `uq_dividend_entitlement`와 기존 권리 조회로 재실행해도 중복이 없다.
+> - **지급**: 매일 09:00(KST) 지급일(공시 지급일, 없으면 기준일 + 45일)이 오늘 이전인 PENDING 권리를 권리 1건당 한 트랜잭션으로
+>   입금(DIVIDEND 원장) + PAID 처리한다. 계좌가 없으면(탈퇴) SKIPPED로 닫는다.
+> - **도메인 배치**: 별도 dividend 도메인 폴더를 만들지 않고(CLAUDE.md 10번 — 새 폴더는 사전 확인 필요) 종목 이벤트라 stock 도메인에
+>   두었다. 잡은 기존 `AccountInterestJob`처럼 service 패키지의 `XxxJob`이다. 보유종목은 order 도메인 `HoldingValuationService`, 입금은
+>   account 도메인 `AccountService`를 거친다.
 
 ---
 

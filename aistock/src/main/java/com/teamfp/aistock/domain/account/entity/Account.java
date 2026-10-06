@@ -223,6 +223,15 @@ public class Account {
     }
 
     /**
+     * 보유 종목 현금배당 입금(feature/dividend). 이자(applyInterest)와 달리 baseBalance는 올리지 않는다 —
+     * 배당은 매도 차익처럼 주식 투자로 얻은 수익이라 수익률 계산식 (총자산-baseBalance)/baseBalance에
+     * 수익으로 잡혀야 한다.
+     */
+    public void applyDividend(long amount) {
+        this.balance += amount;
+    }
+
+    /**
      * 관리자에 의한 계좌 거래 정지. 로그인은 그대로 가능하고 매수·매도 주문만 막는다
      * (차단 로직 자체는 OrderService 쪽에서 처리 — 이 메서드는 상태 전환만 담당).
      */
