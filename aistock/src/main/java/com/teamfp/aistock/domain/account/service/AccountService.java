@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.teamfp.aistock.domain.account.dto.request.ChargeBalanceRequest;
 import com.teamfp.aistock.domain.account.dto.request.CreateAccountRequest;
+import com.teamfp.aistock.domain.account.dto.request.DeductBalanceRequest;
 import com.teamfp.aistock.domain.account.dto.response.AccountInfoResponse;
 import com.teamfp.aistock.domain.account.dto.response.ProfitResponse;
 import com.teamfp.aistock.domain.account.entity.Account;
@@ -44,6 +45,13 @@ public class AccountService {
     // 시뮬레이션이 "내 보유종목 + 예수금"을 계좌 하나로 특정해야 해서 1개로 줄였다(2026-10-01,
     // accounts.uq_account_user — account_single_migration.sql 참고).
     private static final int MAX_ACCOUNT_COUNT = 1;
+    // 관리자 계정 계좌의 예치금 한도(Account.ADMIN_MAX_DEPOSIT_AMOUNT) 초과 메시지 — ErrorCode.DEPOSIT_LIMIT_EXCEEDED의
+    // 기본 문구는 일반 사용자 한도(1조원) 기준이라 관리자에게는 이 문구로 바꿔 내려준다. 얼마까지 더 넣을 수 있는지
+    // 바로 알 수 있게 남은 충전 가능 금액(Account.getRemainingDepositAmount)을 함께 붙인다.
+    // 관리자 직접 차감(deductBalance) 문구 — ErrorCode 기본 문구는 충전 기준이라 차감에 맞게 바꿔 내려준다.
+    private static final String SUSPENDED_DEDUCT_MESSAGE = "거래가 정지된 계좌는 차감할 수 없습니다.";
+    private static final String DEDUCT_LIMIT_MESSAGE = "차감 가능 금액을 초과했습니다. (차감 가능 금액: %,d원)";
+    private static final String ADMIN_DEPOSIT_LIMIT_MESSAGE = "계좌 예치금은 최대 999조원까지 보유할 수 있습니다. (충전 가능 금액: %,d원)";
 
     private final AccountRepository accountRepository;
     private final UserRepository userRepository;
@@ -110,6 +118,9 @@ public class AccountService {
      * 순서대로 처리했다면 정상 처리됐을 요청까지 OPTIMISTIC_LOCK_CONFLICT(409)로 실패해버린다.
      * 비관적 락으로 두 요청을 순서대로 처리하면, 나중 요청은 먼저 커밋된 chargeCount를 다시 보고
      * 정확히 CHARGE_LIMIT_EXCEEDED 여부를 판단하게 된다.
+     *
+     * 관리자 계정의 계좌(Account.isChargeUnlimited)는 횟수·1회 금액 제한을 건너뛰고, 예치금 한도만
+     * 1조 대신 999조(Account.ADMIN_MAX_DEPOSIT_AMOUNT)로 검사한다(feat/admin-improvements).
      */
     @Transactional
     public AccountInfoResponse chargeBalance(Long userId, Long accountId, ChargeBalanceRequest request) {
@@ -118,16 +129,54 @@ public class AccountService {
         if (account.getStatus() == AccountStatus.SUSPENDED) {
             throw new CustomException(ErrorCode.ACCOUNT_SUSPENDED_CHARGE);
         }
-        if (!account.hasRemainingChargeCount()) {
-            throw new CustomException(ErrorCode.CHARGE_LIMIT_EXCEEDED);
+        if (!account.isChargeUnlimited()) {
+            if (request.amount() > ChargeBalanceRequest.MAX_CHARGE_AMOUNT) {
+                throw new CustomException(ErrorCode.INVALID_INPUT, ChargeBalanceRequest.MAX_CHARGE_AMOUNT_MESSAGE);
+            }
+            if (!account.hasRemainingChargeCount()) {
+                throw new CustomException(ErrorCode.CHARGE_LIMIT_EXCEEDED);
+            }
         }
         if (!account.canDeposit(request.amount())) {
-            throw new CustomException(ErrorCode.DEPOSIT_LIMIT_EXCEEDED);
+            throw account.isChargeUnlimited()
+                    ? new CustomException(ErrorCode.DEPOSIT_LIMIT_EXCEEDED, String.format(ADMIN_DEPOSIT_LIMIT_MESSAGE,
+                            account.getRemainingDepositAmount()))
+                    : new CustomException(ErrorCode.DEPOSIT_LIMIT_EXCEEDED);
         }
         long balanceBefore = account.getBalance();
         account.chargeBalance(request.amount());
         accountTransactionService.record(account, AccountTransactionType.AUTO_CHARGE, request.amount(), balanceBefore,
                 null, null, null, "직접 충전");
+        return AccountInfoResponse.from(account);
+    }
+
+    /**
+     * 관리자 계정 본인 계좌 직접 차감(feat/admin-improvements). 관리자는 "가상계좌 관리"에서 충전뿐 아니라
+     * 잔고를 줄일 수도 있어야 해서 추가했다. 일반 사용자 계좌는 ACCESS_DENIED로 막는다.
+     *
+     * 관리자 잔고 차감 조정(AdminAccountService)과 같은 Account.applyAdminDeduction()으로 balance와 baseBalance를
+     * 함께 낮춘다. 원장은 관리자가 사용자 계좌에서 빼는 ADMIN_DEDUCTION과 계좌 내역에서 구분되도록
+     * AUTO_DEDUCTION(사유 "직접 차감")으로 남긴다(admin_improvements_migration.sql). 동시 요청은
+     * chargeBalance()와 같은 이유로 비관적 락으로 순서대로 처리한다.
+     */
+    @Transactional
+    public AccountInfoResponse deductBalance(Long userId, Long accountId, DeductBalanceRequest request) {
+        Account account = accountRepository.findByAccountIdAndUserIdForUpdate(accountId, userId)
+                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+        if (!account.isChargeUnlimited()) {
+            throw new CustomException(ErrorCode.ACCESS_DENIED);
+        }
+        if (account.getStatus() == AccountStatus.SUSPENDED) {
+            throw new CustomException(ErrorCode.ACCOUNT_SUSPENDED_CHARGE, SUSPENDED_DEDUCT_MESSAGE);
+        }
+        if (request.amount() > account.getDeductibleAmount()) {
+            throw new CustomException(ErrorCode.INSUFFICIENT_BALANCE,
+                    String.format(DEDUCT_LIMIT_MESSAGE, account.getDeductibleAmount()));
+        }
+        long balanceBefore = account.getBalance();
+        account.applyAdminDeduction(request.amount());
+        accountTransactionService.record(account, AccountTransactionType.AUTO_DEDUCTION, -request.amount(), balanceBefore,
+                null, null, userId, "직접 차감");
         return AccountInfoResponse.from(account);
     }
 
@@ -214,17 +263,6 @@ public class AccountService {
     @Transactional(readOnly = true)
     public ProfitResponse getProfit(Long userId, Long accountId) {
         Account account = getOwnedAccount(userId, accountId);
-
-        long stockValuation = holdingValuationService.getHoldingValuations(accountId).stream()
-                .mapToLong(valuation -> valuation.currentPrice() * valuation.quantity())
-                .sum();
-
-        long totalAsset = account.getBalance() + account.getFrozenBalance() + stockValuation;
-        long profitAmount = totalAsset - account.getBaseBalance();
-        double profitRate = account.getBaseBalance() == 0
-                ? 0.0
-                : profitAmount * 100.0 / account.getBaseBalance();
-
-        return ProfitResponse.of(totalAsset, profitAmount, profitRate);
+        return ProfitResponse.calculate(account, holdingValuationService.getHoldingValuations(accountId));
     }
 }

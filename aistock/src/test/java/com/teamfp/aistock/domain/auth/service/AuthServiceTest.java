@@ -52,7 +52,6 @@ import static org.mockito.Mockito.verify;
 @ExtendWith(MockitoExtension.class)
 class AuthServiceTest {
 
-    private static final String ADMIN_SIGNUP_CODE = "ADMIN-SECRET-CODE";
 
     @Mock
     private UserRepository userRepository;
@@ -184,21 +183,18 @@ class AuthServiceTest {
                 recoveryEmailService,
                 mailClient,
                 accountService,
-                List.of(),
-                ADMIN_SIGNUP_CODE
+                List.of()
         );
         ReflectionTestUtils.setField(authService, "investmentProfileRepository", investmentProfileRepository);
     }
 
-    private SignupRequest createSignupRequest(Role role, String adminCode) {
+    private SignupRequest createSignupRequest() {
         SignupRequest request = new SignupRequest();
         ReflectionTestUtils.setField(request, "loginId", "tester01");
         ReflectionTestUtils.setField(request, "password", "raw-password");
         ReflectionTestUtils.setField(request, "name", "테스터");
         ReflectionTestUtils.setField(request, "email", "tester01@example.com");
         ReflectionTestUtils.setField(request, "birthdate", LocalDate.of(2000, 1, 1));
-        ReflectionTestUtils.setField(request, "role", role);
-        ReflectionTestUtils.setField(request, "adminCode", adminCode);
         return request;
     }
 
@@ -218,7 +214,7 @@ class AuthServiceTest {
 
         @Test
         void signupWithInvestmentLevelUsesThreeStageProfitDefault() {
-            SignupRequest request = createSignupRequest(Role.USER, null);
+            SignupRequest request = createSignupRequest();
             ReflectionTestUtils.setField(request, "investmentLevel", InvestmentLevel.BEGINNER);
             given(redisAuthCodeService.consumeEmailVerified(request.getEmail())).willReturn(true);
             given(passwordEncoder.encode(request.getPassword())).willReturn("encoded-password");
@@ -234,7 +230,7 @@ class AuthServiceTest {
         @Test
         @DisplayName("일반 유저로 정상 가입하면 계좌가 자동 생성되고 SignupResponse를 반환한다")
         void signup_success_createsAccountAndReturnsResponse() {
-            SignupRequest request = createSignupRequest(Role.USER, null);
+            SignupRequest request = createSignupRequest();
             given(userRepository.existsByLoginId(request.getLoginId())).willReturn(false);
             given(userRepository.existsByEmail(request.getEmail())).willReturn(false);
             given(redisAuthCodeService.consumeEmailVerified(request.getEmail())).willReturn(true);
@@ -242,7 +238,7 @@ class AuthServiceTest {
             stubUserSaveWithGeneratedId(1L);
             given(accountService.createAccount(eq(1L), any(CreateAccountRequest.class)))
                     .willReturn(new AccountInfoResponse(10L, "기본 계좌", "110000000000",
-                            10_000_000L, 0L, 10_000_000L, 0, 3, new java.math.BigDecimal("0.50"), 0L, AccountStatus.ACTIVE));
+                            10_000_000L, 0L, 10_000_000L, 0, 3, false, 100_000_000L, 0L, new java.math.BigDecimal("0.50"), 0L, AccountStatus.ACTIVE));
 
             SignupResponse response = authService.signup(request);
 
@@ -258,7 +254,7 @@ class AuthServiceTest {
         @Test
         @DisplayName("아이디가 이미 존재하면 DUPLICATE_LOGIN_ID 예외를 던진다")
         void signup_duplicateLoginId_throwsException() {
-            SignupRequest request = createSignupRequest(Role.USER, null);
+            SignupRequest request = createSignupRequest();
             given(userRepository.existsByLoginId(request.getLoginId())).willReturn(true);
 
             assertThatThrownBy(() -> authService.signup(request))
@@ -273,7 +269,7 @@ class AuthServiceTest {
         @Test
         @DisplayName("이메일이 이미 존재하면 DUPLICATE_EMAIL 예외를 던진다")
         void signup_duplicateEmail_throwsException() {
-            SignupRequest request = createSignupRequest(Role.USER, null);
+            SignupRequest request = createSignupRequest();
             given(userRepository.existsByLoginId(request.getLoginId())).willReturn(false);
             given(userRepository.existsByEmail(request.getEmail())).willReturn(true);
 
@@ -286,24 +282,9 @@ class AuthServiceTest {
         }
 
         @Test
-        @DisplayName("role=ADMIN인데 adminCode가 일치하지 않으면 INVALID_ADMIN_CODE 예외를 던진다")
-        void signup_adminRoleWithWrongCode_throwsException() {
-            SignupRequest request = createSignupRequest(Role.ADMIN, "wrong-code");
-            given(userRepository.existsByLoginId(request.getLoginId())).willReturn(false);
-            given(userRepository.existsByEmail(request.getEmail())).willReturn(false);
-
-            assertThatThrownBy(() -> authService.signup(request))
-                    .isInstanceOf(CustomException.class)
-                    .extracting(e -> ((CustomException) e).getErrorCode())
-                    .isEqualTo(ErrorCode.INVALID_ADMIN_CODE);
-
-            verify(userRepository, never()).save(any());
-        }
-
-        @Test
         @DisplayName("existsByLoginId 체크 통과 후 save()에서 UNIQUE 제약 위반(동시 가입 경합)이 나면 원인을 재조회해 DUPLICATE_LOGIN_ID를 던진다")
         void signup_raceOnSave_duplicateLoginId_throwsException() {
-            SignupRequest request = createSignupRequest(Role.USER, null);
+            SignupRequest request = createSignupRequest();
             given(userRepository.existsByLoginId(request.getLoginId()))
                     .willReturn(false)  // 최초 체크 시점엔 아직 미존재
                     .willReturn(true);  // save() 실패 후 재조회 시점엔 경합 상대가 먼저 커밋됨
@@ -324,7 +305,7 @@ class AuthServiceTest {
         @Test
         @DisplayName("existsByEmail 체크 통과 후 save()에서 UNIQUE 제약 위반(동시 가입 경합)이 나면 원인을 재조회해 DUPLICATE_EMAIL을 던진다")
         void signup_raceOnSave_duplicateEmail_throwsException() {
-            SignupRequest request = createSignupRequest(Role.USER, null);
+            SignupRequest request = createSignupRequest();
             given(userRepository.existsByLoginId(request.getLoginId())).willReturn(false);
             given(userRepository.existsByEmail(request.getEmail())).willReturn(false);
             given(redisAuthCodeService.consumeEmailVerified(request.getEmail())).willReturn(true);
@@ -343,7 +324,7 @@ class AuthServiceTest {
         @Test
         @DisplayName("이메일 인증을 거치지 않았으면(consumeEmailVerified=false) EMAIL_NOT_VERIFIED 예외를 던진다")
         void signup_emailNotVerified_throwsException() {
-            SignupRequest request = createSignupRequest(Role.USER, null);
+            SignupRequest request = createSignupRequest();
             given(userRepository.existsByLoginId(request.getLoginId())).willReturn(false);
             given(userRepository.existsByEmail(request.getEmail())).willReturn(false);
             given(redisAuthCodeService.consumeEmailVerified(request.getEmail())).willReturn(false);
@@ -355,24 +336,6 @@ class AuthServiceTest {
 
             verify(userRepository, never()).save(any());
             verify(accountService, never()).createAccount(anyLong(), any());
-        }
-
-        @Test
-        @DisplayName("role=ADMIN이고 adminCode가 ADMIN_SIGNUP_CODE와 일치하면 ADMIN으로 가입된다")
-        void signup_adminRoleWithCorrectCode_success() {
-            SignupRequest request = createSignupRequest(Role.ADMIN, ADMIN_SIGNUP_CODE);
-            given(userRepository.existsByLoginId(request.getLoginId())).willReturn(false);
-            given(userRepository.existsByEmail(request.getEmail())).willReturn(false);
-            given(redisAuthCodeService.consumeEmailVerified(request.getEmail())).willReturn(true);
-            given(passwordEncoder.encode(anyString())).willReturn("encoded-password");
-            stubUserSaveWithGeneratedId(2L);
-            given(accountService.createAccount(eq(2L), any(CreateAccountRequest.class)))
-                    .willReturn(new AccountInfoResponse(11L, "기본 계좌", "110000000001",
-                            10_000_000L, 0L, 10_000_000L, 0, 3, new java.math.BigDecimal("0.50"), 0L, AccountStatus.ACTIVE));
-
-            SignupResponse response = authService.signup(request);
-
-            assertThat(response.getRole()).isEqualTo(Role.ADMIN);
         }
     }
 

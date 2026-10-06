@@ -36,6 +36,11 @@ public class AuditLogService {
     public static final String ACTION_ORDER_CANCEL = "ORDER_CANCEL";
     public static final String ACTION_CHARGE_REQUEST_DECISION = "CHARGE_REQUEST_DECISION";
     public static final String ACTION_ADMIN_CREATE = "ADMIN_CREATE";
+    // 관리자 계정 폐기(feat/admin-improvements, UserWithdrawalService) — 처리 관리자·대상 모두 폐기한 관리자 본인
+    public static final String ACTION_ADMIN_DISPOSE = "ADMIN_DISPOSE";
+    // 관리자 알림 관리(feat/admin-improvements, AdminNoticeService) — 공지 팝업 기한 변경·종료, 공지 삭제
+    public static final String ACTION_NOTICE_POPUP_CHANGE = "NOTICE_POPUP_CHANGE";
+    public static final String ACTION_NOTICE_DELETE = "NOTICE_DELETE";
     // AdminAccountService.adjustBalance() 전용(코드리뷰 반영, 2026-09) — 잔고 수동 조정은
     // ACCOUNT_STATUS_CHANGE 못지않게 민감한데도 처음엔 감사 로그 기록이 누락돼 있었다.
     public static final String ACTION_ACCOUNT_ADJUSTMENT = "ACCOUNT_ADJUSTMENT";
@@ -45,6 +50,7 @@ public class AuditLogService {
     public static final String TARGET_ORDER = "ORDER";
     public static final String TARGET_CHARGE_REQUEST = "CHARGE_REQUEST";
     public static final String TARGET_ADMIN = "ADMIN";
+    public static final String TARGET_NOTICE = "NOTICE";
 
     private final AuditLogRepository auditLogRepository;
     private final UserRepository userRepository;

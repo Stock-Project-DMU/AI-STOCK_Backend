@@ -36,7 +36,9 @@ import lombok.NoArgsConstructor;
 @Entity
 @Table(name = "charge_requests", indexes = {
         @Index(name = "idx_charge_request_account", columnList = "account_id"),
-        @Index(name = "idx_charge_request_status", columnList = "status")
+        @Index(name = "idx_charge_request_status", columnList = "status"),
+        // 관리자 "전체 활동 기록" 최신순 정렬용(feat/admin-improvements)
+        @Index(name = "idx_charge_request_requested_at", columnList = "requested_at")
 })
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)

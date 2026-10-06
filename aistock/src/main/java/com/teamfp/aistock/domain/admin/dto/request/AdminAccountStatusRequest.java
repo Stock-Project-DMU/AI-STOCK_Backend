@@ -3,6 +3,7 @@ package com.teamfp.aistock.domain.admin.dto.request;
 import com.teamfp.aistock.domain.account.entity.AccountStatus;
 
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 /**
  * 관리자 — 계좌 거래 정지상태 변경 요청 DTO. SUSPENDED로 보내면 매수·매도 주문만 차단되고
@@ -18,6 +19,7 @@ public record AdminAccountStatusRequest(
         @NotNull(message = "변경할 상태값은 필수입니다.")
         AccountStatus status,
 
+        @Size(max = 500, message = "사유는 500자를 넘을 수 없습니다.")
         String reason
 ) {
 }

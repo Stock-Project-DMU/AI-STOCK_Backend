@@ -66,6 +66,8 @@ public class SecurityConfig {
     private static final String[] PUBLIC_URLS = {
             "/api/auth/login",
             "/api/auth/signup",
+            // 최초 관리자 계정 — 관리자 0명 확인·생성(관리자 인증 코드 필요). 관리자가 생기면 생성은 거절된다.
+            "/api/auth/initial-admin",
             "/api/auth/login-id/availability",
             "/api/auth/find-id",
             "/api/auth/recovery/send-code",

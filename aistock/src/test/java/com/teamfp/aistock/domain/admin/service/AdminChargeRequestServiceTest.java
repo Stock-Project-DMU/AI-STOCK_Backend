@@ -16,6 +16,7 @@ import com.teamfp.aistock.domain.account.entity.ChargeRequest;
 import com.teamfp.aistock.domain.account.entity.ChargeRequestStatus;
 import com.teamfp.aistock.domain.account.repository.ChargeRequestRepository;
 import com.teamfp.aistock.domain.admin.dto.request.AdminChargeDecisionRequest;
+import com.teamfp.aistock.domain.admin.dto.response.AdminChargeRequestDetailResponse;
 import com.teamfp.aistock.domain.admin.dto.response.AdminChargeRequestResponse;
 import com.teamfp.aistock.domain.notification.entity.NotificationType;
 import com.teamfp.aistock.domain.notification.service.NotificationService;
@@ -79,6 +80,30 @@ class AdminChargeRequestServiceTest {
         ChargeRequest chargeRequest = ChargeRequest.builder().account(account).amount(10_000_000L).reason("추가 충전 요청").build();
         ReflectionTestUtils.setField(chargeRequest, "requestId", REQUEST_ID);
         return chargeRequest;
+    }
+
+    @Test
+    @DisplayName("충전 요청 상세에는 계좌 잔고·한도까지 남은 금액·셀프 충전 횟수와 같은 계좌의 다른 요청 이력이 담긴다")
+    void getRequestDetail_containsAccountSnapshotAndHistory() {
+        ChargeRequest chargeRequest = chargeRequestOf();
+        ChargeRequest older = ChargeRequest.builder().account(account).amount(5_000_000L).reason("예전 요청").build();
+        ReflectionTestUtils.setField(older, "requestId", REQUEST_ID + 1);
+        ReflectionTestUtils.setField(account, "chargeCount", 3);
+        when(chargeRequestRepository.findWithAccountAndUserById(REQUEST_ID)).thenReturn(Optional.of(chargeRequest));
+        when(chargeRequestRepository.findAllByAccountId(10L,
+                org.springframework.data.domain.PageRequest.of(0, AdminChargeRequestDetailResponse.RECENT_REQUEST_LIMIT + 1)))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(java.util.List.of(chargeRequest, older)));
+
+        AdminChargeRequestDetailResponse result = adminChargeRequestService.getRequestDetail(REQUEST_ID);
+
+        assertThat(result.requestId()).isEqualTo(REQUEST_ID);
+        assertThat(result.userId()).isEqualTo(1L);
+        assertThat(result.accountBalance()).isEqualTo(1_000_000L);
+        assertThat(result.depositRemaining())
+                .isEqualTo(com.teamfp.aistock.domain.account.entity.Account.MAX_DEPOSIT_AMOUNT - 1_000_000L);
+        assertThat(result.chargeCount()).isEqualTo(3);
+        // 이 요청 자신은 이력에서 빠지고 다른 요청만 남는다.
+        assertThat(result.recentRequests()).extracting(AdminChargeRequestResponse::requestId).containsExactly(REQUEST_ID + 1);
     }
 
     @Test

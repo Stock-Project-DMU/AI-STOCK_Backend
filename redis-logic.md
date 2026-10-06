@@ -56,6 +56,9 @@
 | `auth:email_code:{email}` | 5분 | 이메일 인증 코드 |
 | `auth:email_verified:{email}` | 30분 | 이메일 인증 완료 마커 (`signup()`이 소비 후 삭제하는 1회용) |
 | `auth:login_fail:{loginId}` | 10분 | 로그인 실패 횟수 (5회 잠금) |
+| `auth:admin_code_fail:{initial \| user:{userId}}` | 10분 | 관리자 인증 코드 틀린 횟수 (3회 잠금 — 최초 관리자 생성은 `initial` 하나로 합쳐서, 관리자 계정 폐기는 계정별. feat/admin-improvements, 2026-10-06) |
+
+> `auth:admin_code_fail:*`(RedisAuthCodeService `incrementAdminCodeFail`/`isAdminCodeLocked`/`resetAdminCodeFail`): 첫 실패 때 TTL 10분, 3번째 실패 때 TTL을 다시 10분으로 늘려 그때부터 10분 잠근다. 맞히면 삭제한다. 최초 관리자 생성은 로그인 전 요청인데 서버가 프록시 뒤에서 실제 IP를 알 수 없어, IP 대신 `initial` 하나로 합쳐서 센다.
 | `stock:price:{stockCode}` | 5초 | 실시간 주가 캐시 |
 | `stock:hoga:{stockCode}` | 2초 | 호가창 데이터 캐시 |
 | `pending:orders:{stockCode}` | 없음 | 지정가 미체결 주문 목록 |

@@ -1,5 +1,7 @@
 package com.teamfp.aistock.domain.user.service;
 
+import com.teamfp.aistock.domain.admin.service.AuditLogService;
+import com.teamfp.aistock.domain.auth.service.InitialAdminService;
 import com.teamfp.aistock.domain.user.dto.request.PasswordVerifyRequest;
 import com.teamfp.aistock.domain.user.dto.request.UserWithdrawalRequest;
 import com.teamfp.aistock.domain.user.entity.*;
@@ -20,6 +22,10 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 @Service @RequiredArgsConstructor
 public class UserWithdrawalService {
+    static final String ADMIN_DISPOSE_REASON = "관리자 계정 폐기";
+    // 관리자 계정 폐기의 인증 코드 틀린 횟수 기준 — 계정별
+    static final String ADMIN_DISPOSE_LOCK_PREFIX = "user:";
+
     private final UserService userService;
     private final UserRepository userRepository;
     private final AccountRepository accountRepository;
@@ -28,6 +34,8 @@ public class UserWithdrawalService {
     private final RedisPendingOrderService redisPendingOrderService;
     private final RedisTokenService redisTokenService;
     private final EntityManager entityManager;
+    private final InitialAdminService initialAdminService;
+    private final AuditLogService auditLogService;
 
     @Transactional
     public void withdraw(Long userId, UserWithdrawalRequest request) {
@@ -44,9 +52,13 @@ public class UserWithdrawalService {
             }
             userService.verifyPassword(userId, new PasswordVerifyRequest(request.password()));
         }
-        if (user.getRole() == Role.ADMIN && userRepository
-                .findAllByRoleAndStatusAndIsActiveTrueForUpdate(Role.ADMIN, UserStatus.ACTIVE).size() <= 1) {
-            throw new CustomException(ErrorCode.LAST_ADMIN_SUSPEND_NOT_ALLOWED);
+        // 관리자 계정 폐기(feat/admin-improvements) — 본인 확인에 더해 관리자 인증 코드가 맞아야 한다(계정별로 3번 틀리면
+        // 10분 잠금). 마지막 관리자도 폐기할 수 있고, 그러면 관리자가 0명이 되어 회원가입 화면에서 최초 관리자
+        // 만들기(InitialAdminService)가 다시 열린다.
+        if (user.getRole() == Role.ADMIN) {
+            initialAdminService.verifyAdminCode(ADMIN_DISPOSE_LOCK_PREFIX + userId, request.adminCode());
+            auditLogService.record(userId, AuditLogService.ACTION_ADMIN_DISPOSE, AuditLogService.TARGET_ADMIN, userId,
+                    null, user.getLoginId(), ADMIN_DISPOSE_REASON);
         }
         var accounts = accountRepository.findAllByUserIdForUpdate(userId);
         var pendingOrders = accounts.stream().flatMap(account -> orderRepository

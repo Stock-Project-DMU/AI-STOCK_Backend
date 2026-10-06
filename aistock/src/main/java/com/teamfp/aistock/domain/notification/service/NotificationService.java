@@ -1,5 +1,6 @@
 package com.teamfp.aistock.domain.notification.service;
 
+import java.time.LocalDate;
 import java.util.List;
 
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -10,6 +11,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import com.teamfp.aistock.domain.notification.dto.response.NotificationCountResponse;
 import com.teamfp.aistock.domain.notification.dto.response.NotificationResponse;
+import com.teamfp.aistock.domain.notification.dto.response.NoticePopupResponse;
+import com.teamfp.aistock.domain.notification.entity.Notice;
 import com.teamfp.aistock.domain.notification.entity.Notification;
 import com.teamfp.aistock.domain.notification.entity.NotificationType;
 import com.teamfp.aistock.domain.notification.repository.NotificationRepository;
@@ -74,15 +77,36 @@ public class NotificationService {
      */
     @Transactional
     public void notify(Long userId, NotificationType type, String title, String content) {
-        saveAndSend(userId, type, title, content, null);
+        saveAndSend(userId, type, title, content, null, null);
+    }
+
+    /**
+     * 관리자 공지 발송용(feat/admin-improvements) — 받은 알림이 그 공지(notices)를 가리키게 저장한다. 공지가 팝업이면
+     * 기한까지 로그인할 때마다 팝업으로도 뜬다(getActivePopups). 알림함에는 일반 알림처럼 그대로 쌓인다.
+     */
+    @Transactional
+    public void notifyNotice(Long userId, Notice notice) {
+        saveAndSend(userId, notice.getType(), notice.getTitle(), notice.getContent(), null, notice);
     }
 
     @Transactional
     public void notifyOrder(Long userId, Long orderId, String title, String content) {
-        saveAndSend(userId, NotificationType.ORDER, title, content, orderId);
+        saveAndSend(userId, NotificationType.ORDER, title, content, orderId, null);
     }
 
-    private void saveAndSend(Long userId, NotificationType type, String title, String content, Long relatedOrderId) {
+    /**
+     * 로그인할 때 띄울 내 공지 팝업 — 받은 공지 중 팝업 기한이 오늘 이후(포함)인 것, 최신 공지순. 닫아도 따로 기록하지
+     * 않으므로 기한까지는 로그인할 때마다 다시 뜬다(어느 기기든 같다).
+     */
+    @Transactional(readOnly = true)
+    public List<NoticePopupResponse> getActivePopups(Long userId) {
+        return notificationRepository.findActivePopups(userId, LocalDate.now()).stream()
+                .map(NoticePopupResponse::from)
+                .toList();
+    }
+
+    private void saveAndSend(Long userId, NotificationType type, String title, String content, Long relatedOrderId,
+            Notice notice) {
         if (content.length() > 500) {
             content = content.substring(0, 497) + "...";
         }
@@ -93,6 +117,7 @@ public class NotificationService {
                 .title(title)
                 .content(content)
                 .relatedOrderId(relatedOrderId)
+                .notice(notice)
                 .build();
         notificationRepository.save(notification);
 

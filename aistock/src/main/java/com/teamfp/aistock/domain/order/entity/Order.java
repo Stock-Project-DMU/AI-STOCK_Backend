@@ -30,7 +30,9 @@ import lombok.NoArgsConstructor;
 @Entity
 @Table(name = "orders", indexes = {
         @Index(name = "idx_account_order", columnList = "account_id, ordered_at"),
-        @Index(name = "idx_stock_pending", columnList = "stock_code, status")
+        @Index(name = "idx_stock_pending", columnList = "stock_code, status"),
+        // 관리자 "전체 활동 기록" 최신순 정렬용(feat/admin-improvements)
+        @Index(name = "idx_order_ordered_at", columnList = "ordered_at")
 })
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)

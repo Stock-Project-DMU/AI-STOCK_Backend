@@ -221,6 +221,7 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
 | `auth:email_code:{email}` | 5분 | 이메일 인증코드 |
 | `auth:email_verified:{email}` | 30분 | 이메일 인증 완료 마커 (`signup()`이 소비 후 삭제하는 1회용) |
 | `auth:login_fail:{loginId}` | 10분 | 로그인 실패 카운터 (5회 잠금) |
+| `auth:admin_code_fail:{initial \| user:{userId}}` | 10분 | 관리자 인증 코드 틀린 횟수 (3회 잠금 — 최초 관리자 생성은 `initial` 하나로 합쳐서, 관리자 계정 폐기는 계정별. feat/admin-improvements, 2026-10-06) |
 | `stock:price:{stockCode}` | 5초 | 현재가 캐시 |
 | `stock:hoga:{stockCode}` | 2초 | 호가 캐시 |
 | `pending:orders:{stockCode}` | 없음 | 지정가 미체결 주문 |
@@ -337,8 +338,9 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
   `accounts.status`가 `SUSPENDED`면 `CustomException(ErrorCode.ACCOUNT_SUSPENDED)`를 던진다.
   로그인(`AuthService.login()`) 시 `users.status`가 `SUSPENDED`면 로그인 자체를 차단한다.
 - **환경변수/시크릿**: AWS Parameter Store 사용, 코드에 API 키 하드코딩 절대 금지
-- **관리자 가입**: 회원가입 시 `role=ADMIN` 선택 시 `adminCode`를 서버 환경변수
-  `ADMIN_SIGNUP_CODE`와 대조 후 일치할 때만 `Role.ADMIN`으로 가입 허용.
+- **관리자 가입**: 회원가입은 항상 `Role.USER`다(공개 API의 관리자 가입 경로는 feat/admin-improvements에서 제거).
+  관리자가 한 명도 없을 때만 `POST /api/auth/initial-admin`으로 첫 관리자를 만들 수 있고, 이때 관리자 인증 코드를
+  서버 환경변수 `ADMIN_SIGNUP_CODE`와 대조한다(`InitialAdminService`). 그 뒤 관리자는 관리자 페이지에서만 추가한다.
 - **CORS**: 환경변수 `CORS_ALLOWED_ORIGINS`(콤마로 여러 도메인 구분, 기본값
   `http://localhost:3000`) 하나를 REST(`SecurityConfig.corsConfigurationSource()`)와
   WebSocket(`WebSocketConfig.registerStompEndpoints()`의 `setAllowedOriginPatterns()`) 둘 다

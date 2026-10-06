@@ -34,6 +34,9 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     boolean existsByEmail(String email);
 
+    // 최초 관리자 생성(InitialAdminService) — 탈퇴하지 않은 관리자가 한 명이라도 있는지
+    boolean existsByRoleAndIsActiveTrue(Role role);
+
     Optional<User> findByUserIdAndIsActiveTrue(Long userId);
 
     long countByIsActiveTrue();
@@ -48,22 +51,25 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Page<User> findAllByIsActiveFalse(Pageable pageable);
 
     // 관리자 회원 검색·필터(feature/admin-api-p0, ADMIN_API_BACKEND_HANDOFF.md 3.2). query는
-    // 회원번호(userId)/아이디/이름/이메일 통합검색이고, status/role은 선택 필터다. 파라미터가
-    // null이면 해당 조건 자체를 걸지 않는다 — 컨트롤러가 빈 문자열을 null로 정규화해서 넘긴다.
-    // 이전처럼 findAllByIsActiveTrue(pageable)로 한 페이지만 가져온 뒤 애플리케이션에서
-    // 걸러내면 DB 전체가 아니라 그 페이지 안에서만 검색되는 문제가 있어(3.2 요구사항), 조건을
-    // 전부 쿼리 레벨로 내렸다. str(u.userId)는 "12"를 넣었을 때 userId=12뿐 아니라 120, 512처럼
-    // "12"를 포함하는 다른 회원번호까지 부분일치되는 것을 감안한 선택이다 — 회원번호 완전일치
-    // 검색이 필요해지면 별도로 분리해야 한다.
-    @Query("select u from User u where u.isActive = true "
-            + "and (:query is null or str(u.userId) like concat('%', :query, '%') "
-            + "or u.loginId like concat('%', :query, '%') "
-            + "or u.name like concat('%', :query, '%') "
-            + "or u.email like concat('%', :query, '%')) "
-            + "and (:status is null or u.status = :status) "
-            + "and (:role is null or u.role = :role)")
-    Page<User> searchUsers(@Param("query") String query, @Param("status") UserStatus status,
-            @Param("role") Role role, Pageable pageable);
+    // 회원번호(userId)/아이디/이름/이메일 검색이고, status/role은 선택 필터다. 파라미터가
+    // null이면 해당 조건 자체를 걸지 않는다. 이전처럼 findAllByIsActiveTrue(pageable)로 한 페이지만
+    // 가져온 뒤 애플리케이션에서 걸러내면 DB 전체가 아니라 그 페이지 안에서만 검색되는 문제가 있어
+    // (3.2 요구사항), 조건을 전부 쿼리 레벨로 내렸다. 회원번호는 이전에 부분일치라 "12"로 120, 512번까지
+    // 나왔는데, 이제 정확히 일치로만 찾는다.
+    // feat/admin-improvements: 검색 항목(field)과 검색 방식(exact — 정확히 일치/포함)을 고를 수 있게 바꿨다.
+    // 파라미터는 AdminSearchConditionDto가 만든다 — ID 항목은 queryId와 정확히 일치할 때만, 문자열 항목은
+    // exact면 =, 아니면 LIKE(:pattern, %·_는 '!'로 이스케이프)로 찾는다.
+    @Query("select u from User u where u.isActive = true and (:query is null or (((:field = 'ALL' or :field = 'USER_ID') "
+            + "and u.userId = :queryId) or ((:field = 'ALL' or :field = 'LOGIN_ID') "
+            + "and ((:exact = true and u.loginId = :query) "
+            + "or (:exact = false and u.loginId like :pattern escape '!'))) or ((:field = 'ALL' or :field = 'NAME') "
+            + "and ((:exact = true and u.name = :query) or (:exact = false and u.name like :pattern escape '!'))) "
+            + "or ((:field = 'ALL' or :field = 'EMAIL') and ((:exact = true and u.email = :query) "
+            + "or (:exact = false and u.email like :pattern escape '!'))))) "
+            + "and (:status is null or u.status = :status) and (:role is null or u.role = :role)")
+    Page<User> searchUsers(@Param("query") String query, @Param("pattern") String pattern, @Param("queryId") Long queryId,
+            @Param("field") String field, @Param("exact") boolean exact,
+            @Param("status") UserStatus status, @Param("role") Role role, Pageable pageable);
 
     // 마지막 남은 관리자인지 확인(check) + 정지 반영(act) 사이에 비관적 락으로 동시 요청을
     // 순서대로 처리한다(AdminUserService.validateSuspendable()용). 활성 ADMIN이 정확히 2명일 때

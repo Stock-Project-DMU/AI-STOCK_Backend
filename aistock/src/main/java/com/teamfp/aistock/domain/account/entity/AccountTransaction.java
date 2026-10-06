@@ -36,7 +36,9 @@ import lombok.NoArgsConstructor;
  */
 @Entity
 @Table(name = "account_transactions", indexes = {
-        @Index(name = "idx_account_transaction_account", columnList = "account_id, created_at")
+        @Index(name = "idx_account_transaction_account", columnList = "account_id, created_at"),
+        // 관리자 "충전·차감 이력"(전체 계좌, 유형 필터 + 최신순) 조회용(feat/admin-improvements)
+        @Index(name = "idx_account_transaction_type_created", columnList = "type, created_at")
 })
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)

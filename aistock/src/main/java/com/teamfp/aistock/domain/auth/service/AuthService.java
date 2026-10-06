@@ -28,7 +28,6 @@ import com.teamfp.aistock.infra.oauth.OAuthClient;
 import com.teamfp.aistock.infra.oauth.dto.SocialUserDto;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -39,6 +38,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -133,7 +133,6 @@ public class AuthService {
     private final MailClient mailClient;
     private final AccountService accountService;
     private final Map<SocialProvider, OAuthClient> oauthClients;
-    private final String adminSignupCode;
 
     public AuthService(
             UserRepository userRepository,
@@ -145,8 +144,7 @@ public class AuthService {
             RecoveryEmailService recoveryEmailService,
             MailClient mailClient,
             AccountService accountService,
-            List<OAuthClient> clientList,
-            @Value("${admin.signup-code}") String adminSignupCode
+            List<OAuthClient> clientList
     ) {
         this.userRepository = userRepository;
         this.socialAccountRepository = socialAccountRepository;
@@ -159,7 +157,6 @@ public class AuthService {
         this.accountService = accountService;
         this.oauthClients = clientList.stream()
                 .collect(Collectors.toMap(OAuthClient::getProvider, Function.identity()));
-        this.adminSignupCode = adminSignupCode;
     }
 
     // processSocialLogin()의 @Transactional(REQUIRES_NEW)은 Spring AOP 프록시를 거쳐야만 실제로
@@ -177,8 +174,10 @@ public class AuthService {
     private com.teamfp.aistock.domain.user.repository.InvestmentProfileRepository investmentProfileRepository;
 
     /**
-     * 일반 로그인
+     * 일반 로그인. 마지막 로그인 시각(User.lastLoginAt)을 기록해야 해서 클래스 기본값(readOnly)이 아닌 쓰기
+     * 트랜잭션으로 연다(feat/admin-improvements).
      */
+    @Transactional
     public LoginResponse login(LoginRequest request) {
         // 같은 아이디로 짧은 시간에 반복적으로 로그인을 시도하는 것을 막기 위한 잠금 검사.
         // 10분 내 5회 비밀번호 실패 시 잠기며, 로그인에 성공하면 카운터가 초기화된다.
@@ -350,8 +349,9 @@ public class AuthService {
     }
 
     /**
-     * 일반 회원가입. role(기본값 USER)이 ADMIN이면 adminCode가 서버 환경변수
-     * ADMIN_SIGNUP_CODE와 일치해야만 가입을 허용한다. 가입과 동시에 첫 계좌를
+     * 일반 회원가입 — 항상 일반 회원(USER)으로 가입한다. 관리자 가입 경로(role=ADMIN + adminCode)는
+     * 공개 API로 관리자를 만들 수 있는 구멍이라 없앴다(feat/admin-improvements) — 최초 관리자는
+     * InitialAdminService, 그 뒤 관리자는 관리자 페이지에서 만든다. 가입과 동시에 첫 계좌를
      * AccountService.createAccount()로 자동 생성한다(mypage-account에서 만들어진 로직 재사용).
      */
     @Transactional
@@ -363,13 +363,8 @@ public class AuthService {
             throw new CustomException(ErrorCode.DUPLICATE_EMAIL);
         }
 
-        Role role = request.getRole() != null ? request.getRole() : Role.USER;
-        if (role == Role.ADMIN && !isValidAdminCode(request.getAdminCode())) {
-            throw new CustomException(ErrorCode.INVALID_ADMIN_CODE);
-        }
-
         // 이메일 인증(verifyEmailCode())을 먼저 통과한 이메일인지 확인 후 소비(1회용).
-        // 다른 검증(중복 아이디/이메일, 관리자 코드)을 전부 통과한 뒤 실제 저장 직전에 소비해야,
+        // 다른 검증(중복 아이디/이메일)을 전부 통과한 뒤 실제 저장 직전에 소비해야,
         // 그 전 단계에서 실패했을 때 인증을 헛되이 날리지 않는다.
         if (!redisAuthCodeService.consumeEmailVerified(request.getEmail())) {
             throw new CustomException(ErrorCode.EMAIL_NOT_VERIFIED);
@@ -381,7 +376,7 @@ public class AuthService {
                 .name(request.getName())
                 .email(request.getEmail())
                 .birthdate(request.getBirthdate())
-                .role(role)
+                .role(Role.USER)
                 .isActive(true)
                 .build();
 
@@ -411,10 +406,6 @@ public class AuthService {
                 .loginId(user.getLoginId())
                 .role(user.getRole())
                 .build();
-    }
-
-    private boolean isValidAdminCode(String adminCode) {
-        return adminCode != null && !adminCode.isBlank() && adminCode.equals(adminSignupCode);
     }
 
     /**
@@ -449,6 +440,8 @@ public class AuthService {
     }
 
     private LoginResponse generateLoginResponse(User user) {
+        // 일반·소셜 로그인이 모두 여기서 토큰을 받으므로 마지막 로그인 시각도 여기서 한 번에 갱신한다.
+        user.recordLogin(LocalDateTime.now());
         String accessToken = jwtProvider.createAccessToken(user.getUserId(), user.getRole());
         String refreshToken = jwtProvider.createRefreshToken(user.getUserId());
 

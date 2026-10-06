@@ -13,11 +13,17 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.teamfp.aistock.domain.account.entity.AccountStatus;
 import com.teamfp.aistock.domain.account.dto.response.AccountTransactionResponse;
+import com.teamfp.aistock.domain.account.entity.AccountStatus;
 import com.teamfp.aistock.domain.admin.dto.request.AdminAccountAdjustmentRequest;
+import com.teamfp.aistock.domain.admin.dto.request.AdminAccountSearchField;
+import com.teamfp.aistock.domain.admin.dto.request.AdminAccountSortColumn;
+import com.teamfp.aistock.domain.admin.dto.request.AdminAccountSortType;
 import com.teamfp.aistock.domain.admin.dto.request.AdminAccountStatusRequest;
+import com.teamfp.aistock.domain.admin.dto.request.AdminSearchConditionDto;
+import com.teamfp.aistock.domain.admin.dto.request.AdminSearchMatchType;
 import com.teamfp.aistock.domain.admin.dto.response.AdminAccountDetailResponse;
+import com.teamfp.aistock.domain.admin.dto.response.AdminAccountListResponse;
 import com.teamfp.aistock.domain.admin.service.AdminAccountService;
 import com.teamfp.aistock.global.response.ApiResponse;
 import com.teamfp.aistock.global.util.SecurityUtil;
@@ -36,15 +42,21 @@ public class AdminAccountController {
 
     private final AdminAccountService adminAccountService;
 
-    // query(계좌 소유자 아이디/이름/계좌번호 통합검색), status는 선택 파라미터다.
-    // 기본 정렬은 createdAt 내림차순 — 클라이언트가 sort를 직접 지정하면 그 값이 우선 적용된다.
+    // query(계좌 ID/계좌 소유자 아이디/이름/계좌번호 검색 — field로 항목, matchType으로 일치/포함 선택), status는 선택 파라미터다.
+    // 정렬은 sortBy로만 고른다(feat/admin-improvements, AdminSortSupport).
     @GetMapping
-    public ApiResponse<Page<AdminAccountDetailResponse>> getAccounts(
+    public ApiResponse<Page<AdminAccountListResponse>> getAccounts(
             @RequestParam(required = false) String query,
+            @RequestParam(defaultValue = "ALL") AdminAccountSearchField field,
+            @RequestParam(defaultValue = "CONTAINS") AdminSearchMatchType matchType,
             @RequestParam(required = false) AccountStatus status,
-            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
+            @RequestParam(defaultValue = "LATEST") AdminAccountSortType sortBy,
+            @RequestParam(required = false) AdminAccountSortColumn sortColumn,
+            @RequestParam(defaultValue = "DESC") Sort.Direction direction,
+            @PageableDefault(size = 20) Pageable pageable
     ) {
-        return ApiResponse.success(adminAccountService.getAccounts(query, status, pageable));
+        return ApiResponse.success(adminAccountService.getAccounts(AdminSearchConditionDto.of(query, field, matchType), status,
+                AdminSortSupport.accounts(pageable, sortBy, sortColumn, direction)));
     }
 
     @GetMapping("/{accountId}")

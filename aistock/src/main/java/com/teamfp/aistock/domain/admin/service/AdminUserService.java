@@ -1,5 +1,6 @@
 package com.teamfp.aistock.domain.admin.service;
 
+import java.util.Comparator;
 import java.util.List;
 
 import org.springframework.dao.DataIntegrityViolationException;
@@ -12,24 +13,47 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.teamfp.aistock.domain.account.dto.response.AccountInfoResponse;
+import com.teamfp.aistock.domain.account.dto.response.ProfitResponse;
 import com.teamfp.aistock.domain.account.entity.Account;
+import com.teamfp.aistock.domain.account.entity.ChargeRequest;
 import com.teamfp.aistock.domain.account.repository.AccountRepository;
+import com.teamfp.aistock.domain.account.repository.ChargeRequestRepository;
 import com.teamfp.aistock.domain.admin.dto.request.AdminCreateRequest;
+import com.teamfp.aistock.domain.admin.dto.request.AdminSearchConditionDto;
 import com.teamfp.aistock.domain.admin.dto.request.AdminUserStatusRequest;
+import com.teamfp.aistock.domain.admin.dto.response.AdminChargeRequestResponse;
+import com.teamfp.aistock.domain.admin.dto.response.AdminInquiryResponse;
+import com.teamfp.aistock.domain.admin.dto.response.AdminInvestmentProfileResponse;
+import com.teamfp.aistock.domain.admin.dto.response.AdminNewsBriefingSettingResponse;
+import com.teamfp.aistock.domain.admin.dto.response.AdminSocialAccountResponse;
 import com.teamfp.aistock.domain.admin.dto.response.AdminUserDetailResponse;
 import com.teamfp.aistock.domain.admin.dto.response.AdminUserListResponse;
 import com.teamfp.aistock.domain.admin.dto.response.AdminWithdrawnUserResponse;
+import com.teamfp.aistock.domain.admin.dto.response.AuditLogResponse;
+import com.teamfp.aistock.domain.admin.entity.AuditLog;
+import com.teamfp.aistock.domain.admin.repository.AuditLogRepository;
+import com.teamfp.aistock.domain.ai.repository.NewsBriefingSettingRepository;
+import com.teamfp.aistock.domain.inquiry.entity.Inquiry;
+import com.teamfp.aistock.domain.inquiry.repository.InquiryRepository;
+import com.teamfp.aistock.domain.order.dto.HoldingValuationDto;
 import com.teamfp.aistock.domain.order.dto.response.HoldingResponse;
 import com.teamfp.aistock.domain.order.dto.response.OrderHistoryResponse;
 import com.teamfp.aistock.domain.order.repository.OrderRepository;
 import com.teamfp.aistock.domain.order.service.HoldingValuationService;
+import com.teamfp.aistock.domain.order.service.RealizedReturnService;
+import com.teamfp.aistock.domain.stock.dto.response.RecentViewedResponse;
+import com.teamfp.aistock.domain.stock.dto.response.WatchlistResponse;
+import com.teamfp.aistock.domain.stock.repository.RecentViewedRepository;
+import com.teamfp.aistock.domain.stock.repository.WatchlistRepository;
 import com.teamfp.aistock.domain.user.entity.Role;
 import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.entity.UserStatus;
+import com.teamfp.aistock.domain.user.repository.InvestmentProfileRepository;
+import com.teamfp.aistock.domain.user.repository.SocialAccountRepository;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
-import com.teamfp.aistock.global.util.CsvWriter;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
+import com.teamfp.aistock.global.util.CsvWriter;
 
 import lombok.RequiredArgsConstructor;
 
@@ -44,27 +68,42 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class AdminUserService {
 
+    // 회원·관리자 상세에 함께 내려주는 최근 주문 건수(feat/admin-improvements). 전체 건수는 orderCount로 따로 준다.
+    static final int RECENT_ORDER_LIMIT = 20;
+    // 회원 상세에 함께 내려주는 최근 충전 요청·문의 건수(feat/admin-improvements).
+    static final int RECENT_CHARGE_REQUEST_LIMIT = 10;
+    static final int RECENT_INQUIRY_LIMIT = 5;
+    static final int RECENT_VIEWED_LIMIT = 10;
+    static final int RECENT_ADMIN_ACTION_LIMIT = 20;
+
     private final UserRepository userRepository;
     private final AccountRepository accountRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuditLogService auditLogService;
     private final OrderRepository orderRepository;
     private final HoldingValuationService holdingValuationService;
+    // 회원 상세 보강(feat/admin-improvements) — 소셜 연동·투자 성향·충전 요청·문의 이력
+    private final SocialAccountRepository socialAccountRepository;
+    private final InvestmentProfileRepository investmentProfileRepository;
+    private final ChargeRequestRepository chargeRequestRepository;
+    private final InquiryRepository inquiryRepository;
+    // 회원 상세 보강 2차(feat/admin-improvements) — 관심 종목·최근 본 종목·뉴스 브리핑 설정·정지/관리자 처리 이력
+    private final WatchlistRepository watchlistRepository;
+    private final RecentViewedRepository recentViewedRepository;
+    private final NewsBriefingSettingRepository newsBriefingSettingRepository;
+    private final AuditLogRepository auditLogRepository;
 
     // 회원 검색·필터(ADMIN_API_BACKEND_HANDOFF.md 3.2). query/status/role이 전부 비어 있으면
     // 기존 findAllByIsActiveTrue(pageable)와 동일하게 전체 목록을 반환한다 — searchUsers()가
     // null 파라미터를 "조건 없음"으로 처리하므로 별도 분기가 필요 없다. 탈퇴(deactivate)한
     // 유저는 searchUsers() 쿼리 자체가 isActive=true로 걸러 목록에서 제외한다.
     @Transactional(readOnly = true)
-    public Page<AdminUserListResponse> getUsers(String query, UserStatus status, Role role, Pageable pageable) {
-        return userRepository.searchUsers(blankToNull(query), status, role, pageable).map(AdminUserListResponse::from);
+    public Page<AdminUserListResponse> getUsers(AdminSearchConditionDto search, UserStatus status, Role role, Pageable pageable) {
+        return userRepository.searchUsers(search.query(), search.pattern(), search.queryId(), search.field(), search.exact(), status, role, pageable).map(AdminUserListResponse::from);
     }
 
     // 빈 문자열은 "조건 없음"으로 취급한다(3.2 요구사항) — searchUsers()의 "query is null" 분기를
     // 그대로 타게 하기 위해 컨트롤러에서 넘어온 빈 문자열을 여기서 null로 정규화한다.
-    private String blankToNull(String value) {
-        return (value == null || value.isBlank()) ? null : value;
-    }
 
     private static final List<String> USER_CSV_HEADERS = List.of("회원번호", "아이디", "이름", "이메일", "역할", "상태", "가입일");
 
@@ -77,8 +116,9 @@ public class AdminUserService {
      * 적용되지 않는다.
      */
     @Transactional(readOnly = true)
-    public byte[] exportUsersCsv(String query, UserStatus status, Role role, Sort sort) {
-        List<User> users = userRepository.searchUsers(blankToNull(query), status, role, PageRequest.of(0, Integer.MAX_VALUE, sort))
+    public byte[] exportUsersCsv(AdminSearchConditionDto search, UserStatus status, Role role, Sort sort) {
+        List<User> users = userRepository.searchUsers(search.query(), search.pattern(), search.queryId(), search.field(), search.exact(), status, role,
+                        PageRequest.of(0, Integer.MAX_VALUE, sort))
                 .getContent();
         List<List<String>> rows = users.stream()
                 .map(u -> List.of(
@@ -246,26 +286,112 @@ public class AdminUserService {
      * 내림차순으로 정렬되므로 애플리케이션 레벨에서 다시 정렬할 필요가 없다.
      */
     private AdminUserDetailResponse buildDetail(User user) {
-        List<Account> accounts = accountRepository.findAllByUserId(user.getUserId());
+        Long userId = user.getUserId();
+        boolean suspended = user.getStatus() == UserStatus.SUSPENDED;
+        // 문의·관심 종목·최근 본 종목은 회원당 건수가 적어 전체를 읽고 건수와 최근 N건을 함께 만든다.
+        List<Inquiry> inquiries = inquiryRepository.findAllByUserIdOrderByCreatedAtDesc(userId);
+        AdminUserDetailResponse.AdminUserDetailResponseBuilder builder = AdminUserDetailResponse.builder()
+                .userId(userId)
+                .loginId(user.getLoginId())
+                .name(user.getName())
+                .email(user.getEmail())
+                .birthdate(user.getBirthdate())
+                .role(user.getRole())
+                .status(user.getStatus())
+                .createdAt(user.getCreatedAt())
+                .updatedAt(user.getUpdatedAt())
+                .lastLoginAt(user.getLastLoginAt())
+                .suspensionReason(suspended ? user.getSuspensionReason() : null)
+                .suspendedUntil(suspended ? user.getSuspendedUntil() : null)
+                .socialAccounts(socialAccountRepository.findAllByUser_UserId(userId).stream()
+                        .map(AdminSocialAccountResponse::from)
+                        .toList())
+                .investmentProfile(investmentProfileRepository.findByUserId(userId)
+                        .map(AdminInvestmentProfileResponse::from)
+                        .orElse(null))
+                .inquiryCount(inquiries.size())
+                .recentInquiries(inquiries.stream().limit(RECENT_INQUIRY_LIMIT).map(AdminInquiryResponse::from).toList())
+                .watchlist(watchlistRepository.findAllByUserId(userId).stream().map(WatchlistResponse::from).toList())
+                .recentViewed(recentViewedRepository.findAllByUserIdOrderByViewedAtDesc(userId).stream()
+                        .limit(RECENT_VIEWED_LIMIT)
+                        .map(RecentViewedResponse::from)
+                        .toList())
+                .newsBriefingSetting(newsBriefingSettingRepository.findByUserId(userId)
+                        .map(AdminNewsBriefingSettingResponse::from)
+                        .orElse(null));
+
+        List<Account> accounts = accountRepository.findAllByUserId(userId);
+        List<Long> accountIds = accounts.stream().map(Account::getAccountId).toList();
+        // 감사 로그 조회는 계좌 ID IN 조건이 있어, 계좌가 없으면 존재하지 않는 ID(-1)로 대신한다(IN ()은 SQL 오류).
+        List<Long> auditAccountIds = accountIds.isEmpty() ? List.of(-1L) : accountIds;
+        Page<AuditLog> adminActions = auditLogRepository.findActionsForUser(userId, auditAccountIds,
+                PageRequest.of(0, RECENT_ADMIN_ACTION_LIMIT));
+        builder.suspensionHistory(auditLogRepository.findSuspensionHistory(userId, auditAccountIds).stream()
+                        .map(AuditLogResponse::from)
+                        .toList())
+                .adminActionCount(adminActions.getTotalElements())
+                .recentAdminActions(adminActions.getContent().stream().map(AuditLogResponse::from).toList());
+
         if (accounts.isEmpty()) {
-            return AdminUserDetailResponse.of(user, List.of(), List.of(), List.of());
+            return builder.accounts(List.of())
+                    .totalAsset(0L).profitAmount(0L).profitRate(0.0).realizedProfit(0L)
+                    .holdings(List.of()).orders(List.of()).orderCount(0L).recentChargeRequests(List.of())
+                    .build();
         }
 
-        List<AccountInfoResponse> accountResponses = accounts.stream()
-                .map(AccountInfoResponse::from)
+        List<HoldingValuationDto> valuations = holdingValuationService.getHoldingValuations(accountIds);
+        ProfitResponse profit = sumProfit(accounts, valuations);
+        // 계좌는 회원당 1개(account_single_migration)지만, 여러 개여도 맞도록 계좌별 최근 요청을 모아 최신순으로 자른다.
+        List<AdminChargeRequestResponse> recentChargeRequests = accounts.stream()
+                .flatMap(account -> chargeRequestRepository
+                        .findAllByAccountId(account.getAccountId(), PageRequest.of(0, RECENT_CHARGE_REQUEST_LIMIT)).stream())
+                .sorted(Comparator.comparing(ChargeRequest::getRequestedAt, Comparator.nullsLast(Comparator.reverseOrder())))
+                .limit(RECENT_CHARGE_REQUEST_LIMIT)
+                .map(AdminChargeRequestResponse::from)
                 .toList();
+        return builder.accounts(accounts.stream().map(AccountInfoResponse::from).toList())
+                .totalAsset(profit.totalAsset())
+                .profitAmount(profit.profitAmount())
+                .profitRate(profit.profitRate())
+                .realizedProfit(realizedProfitOf(accountIds))
+                .holdings(valuations.stream().map(HoldingResponse::of).toList())
+                // 주문은 최근 RECENT_ORDER_LIMIT건만 내려주고 전체 건수는 DB에서 센다 — 주문 전체를 매번 가져오지 않는다.
+                .orders(orderRepository.findRecentByAccountIdIn(accountIds, PageRequest.of(0, RECENT_ORDER_LIMIT)).stream()
+                        .map(OrderHistoryResponse::from)
+                        .toList())
+                .orderCount(orderRepository.countByAccountIdIn(accountIds))
+                .recentChargeRequests(recentChargeRequests)
+                .build();
+    }
 
-        List<Long> accountIds = accounts.stream().map(Account::getAccountId).toList();
-
-        List<HoldingResponse> holdings = holdingValuationService.getHoldingValuations(accountIds).stream()
-                .map(HoldingResponse::of)
-                .toList();
-
-        List<OrderHistoryResponse> orders = orderRepository.findAllByAccountIdInOrderByOrderedAtDesc(accountIds).stream()
+    // 실현 손익 합계 — 체결 기록이 맞지 않아 계산할 수 없으면(예: 테스트로 직접 넣은 데이터) 상세 조회를 막지 않고 null.
+    private Long realizedProfitOf(List<Long> accountIds) {
+        List<OrderHistoryResponse> executedOrders = orderRepository.findExecutedByAccountIdIn(accountIds).stream()
                 .map(OrderHistoryResponse::from)
                 .toList();
+        try {
+            return RealizedReturnService.sumRealizedProfit(executedOrders);
+        } catch (CustomException e) {
+            return null;
+        }
+    }
 
-        return AdminUserDetailResponse.of(user, accountResponses, holdings, orders);
+    // 전체 계좌 합산 총 자산·손익·수익률 — 계좌마다 ProfitResponse.calculate()로 구한 뒤 더하고, 수익률은 합산 원금 기준으로 다시 낸다.
+    private ProfitResponse sumProfit(List<Account> accounts, List<HoldingValuationDto> valuations) {
+        long totalAsset = 0L;
+        long profitAmount = 0L;
+        long baseBalance = 0L;
+        for (Account account : accounts) {
+            List<HoldingValuationDto> accountValuations = valuations.stream()
+                    .filter(valuation -> account.getAccountId().equals(valuation.accountId()))
+                    .toList();
+            ProfitResponse profit = ProfitResponse.calculate(account, accountValuations);
+            totalAsset += profit.totalAsset();
+            profitAmount += profit.profitAmount();
+            baseBalance += account.getBaseBalance();
+        }
+        double profitRate = baseBalance == 0 ? 0.0 : profitAmount * 100.0 / baseBalance;
+        return ProfitResponse.of(totalAsset, profitAmount, profitRate);
     }
 
     // 탈퇴(deactivate) 유저는 목록뿐 아니라 상세 조회·상태변경에서도 막는다 — getUsers()의

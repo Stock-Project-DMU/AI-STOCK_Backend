@@ -10,14 +10,23 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.teamfp.aistock.domain.account.dto.response.AccountTransactionResponse;
+import com.teamfp.aistock.domain.account.repository.AccountTransactionRepository;
 import com.teamfp.aistock.domain.admin.dto.request.AdminOrderCancelRequest;
+import com.teamfp.aistock.domain.admin.dto.request.AdminSearchConditionDto;
+import com.teamfp.aistock.domain.admin.dto.response.AdminTradeDetailResponse;
 import com.teamfp.aistock.domain.admin.dto.response.AdminTradeResponse;
+import com.teamfp.aistock.domain.admin.entity.AuditLog;
+import com.teamfp.aistock.domain.admin.repository.AuditLogRepository;
+import com.teamfp.aistock.domain.order.dto.response.OrderHistoryResponse;
+import com.teamfp.aistock.domain.order.dto.response.RealizedReturnResponse;
 import com.teamfp.aistock.domain.order.entity.Order;
 import com.teamfp.aistock.domain.order.entity.OrderStatus;
 import com.teamfp.aistock.domain.order.entity.OrderType;
 import com.teamfp.aistock.domain.order.entity.PriceType;
 import com.teamfp.aistock.domain.order.repository.OrderRepository;
 import com.teamfp.aistock.domain.order.service.OrderService;
+import com.teamfp.aistock.domain.order.service.RealizedReturnService;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.util.CsvWriter;
@@ -39,30 +48,29 @@ public class AdminTradeService {
     // pending:orders 정리 등 order 도메인 고유 로직을 이 서비스에서 중복 구현하지 않기 위해
     // AdminAccountService와 동일한 패턴으로 OrderService를 재사용한다(CLAUDE.md 4번).
     private final OrderService orderService;
+    // 거래 상세에 관리자 강제 취소 정보(사유·처리 관리자·시각)를 채우는 데 쓴다(feat/admin-improvements).
+    private final AuditLogRepository auditLogRepository;
+    // 거래 상세의 잔고 변화(이 주문으로 생긴 잔고 내역)를 채우는 데 쓴다(feat/admin-improvements).
+    private final AccountTransactionRepository accountTransactionRepository;
 
     // 거래 검색·필터(ADMIN_API_BACKEND_HANDOFF.md 3.3). 전부 비어 있으면 searchOrdersWithUser()가
     // null 파라미터를 "조건 없음"으로 처리해 기존 findAllOrdersWithUser(pageable)와 동일하게
     // 전체 목록을 반환한다.
     @Transactional(readOnly = true)
-    public Page<AdminTradeResponse> getTrades(String query, OrderStatus status, OrderType orderType,
+    public Page<AdminTradeResponse> getTrades(AdminSearchConditionDto search, OrderStatus status, OrderType orderType,
             PriceType priceType, String stockCode, LocalDateTime from, LocalDateTime to, Pageable pageable) {
-        return orderRepository.searchOrdersWithUser(blankToNull(query), status, orderType, priceType, stockCode, from, to, pageable)
+        return orderRepository.searchOrdersWithUser(search.query(), search.pattern(), search.queryId(), search.field(), search.exact(), status, orderType, priceType, stockCode, from, to, pageable)
                 .map(AdminTradeResponse::from);
     }
 
-    private String blankToNull(String value) {
-        return (value == null || value.isBlank()) ? null : value;
-    }
 
     // 주문 강제취소(ADMIN_API_BACKEND_HANDOFF.md 3.3). 실제 취소는 OrderService.
     // adminCancelOrder()에 위임하고, 이 메서드는 취소 후 최신 상태를 account.user까지 fetch
     // join된 형태로 다시 조회해 응답한다(getTradeDetail()과 동일한 조회 메서드 재사용).
     @Transactional
-    public AdminTradeResponse cancelTrade(Long adminUserId, Long orderId, AdminOrderCancelRequest request) {
+    public AdminTradeDetailResponse cancelTrade(Long adminUserId, Long orderId, AdminOrderCancelRequest request) {
         orderService.adminCancelOrder(adminUserId, orderId, request.reason());
-        return orderRepository.findOrderWithUserById(orderId)
-                .map(AdminTradeResponse::from)
-                .orElseThrow(() -> new CustomException(ErrorCode.ORDER_NOT_FOUND));
+        return getTradeDetail(orderId);
     }
 
     private static final List<String> TRADE_CSV_HEADERS = List.of(
@@ -76,10 +84,10 @@ public class AdminTradeService {
      * /api/admin/trades로 구현돼 있어(NAMING.md 8-15) 같은 리소스 경로 아래 /export로 둔다.
      */
     @Transactional(readOnly = true)
-    public byte[] exportTradesCsv(String query, OrderStatus status, OrderType orderType, PriceType priceType,
+    public byte[] exportTradesCsv(AdminSearchConditionDto search, OrderStatus status, OrderType orderType, PriceType priceType,
             String stockCode, LocalDateTime from, LocalDateTime to, Sort sort) {
         List<Order> orders = orderRepository.searchOrdersWithUser(
-                        blankToNull(query), status, orderType, priceType, stockCode, from, to,
+                        search.query(), search.pattern(), search.queryId(), search.field(), search.exact(), status, orderType, priceType, stockCode, from, to,
                         PageRequest.of(0, Integer.MAX_VALUE, sort))
                 .getContent();
         List<List<String>> rows = orders.stream()
@@ -103,9 +111,41 @@ public class AdminTradeService {
     }
 
     @Transactional(readOnly = true)
-    public AdminTradeResponse getTradeDetail(Long orderId) {
-        return orderRepository.findOrderWithUserById(orderId)
-                .map(AdminTradeResponse::from)
+    public AdminTradeDetailResponse getTradeDetail(Long orderId) {
+        Order order = orderRepository.findOrderWithUserById(orderId)
                 .orElseThrow(() -> new CustomException(ErrorCode.ORDER_NOT_FOUND));
+        // 관리자 강제 취소는 감사 로그(ORDER_CANCEL)에만 사유·처리자가 남는다 — 취소된 주문일 때만 찾아본다.
+        AuditLog cancelLog = order.getStatus() == OrderStatus.CANCELLED
+                ? auditLogRepository.findFirstByActionAndTargetTypeAndTargetIdOrderByCreatedAtDesc(
+                        AuditLogService.ACTION_ORDER_CANCEL, AuditLogService.TARGET_ORDER, orderId).orElse(null)
+                : null;
+        List<AccountTransactionResponse> balanceChanges = accountTransactionRepository
+                .findAllByRelatedOrderIdOrderByCreatedAtAscTransactionIdAsc(orderId).stream()
+                .map(AccountTransactionResponse::from)
+                .toList();
+        return AdminTradeDetailResponse.of(order, cancelLog, realizedProfitOf(order), balanceChanges);
+    }
+
+    /**
+     * 체결된 매도 주문의 실현 손익. 같은 계좌·종목의 체결 주문을 체결 순서대로 다시 쌓아 매도 시점 평단가를 구한다 —
+     * 마이페이지 실현 손익(RealizedReturnService.calculateReturns)과 같은 계산이다. 이전 매수 기록이 맞지 않아
+     * 계산할 수 없으면(예: 테스트로 직접 넣은 데이터) 상세 조회 자체를 막지 않고 null을 돌려준다.
+     */
+    private RealizedReturnResponse realizedProfitOf(Order order) {
+        if (order.getOrderType() != OrderType.SELL || order.getStatus() != OrderStatus.EXECUTED) {
+            return null;
+        }
+        List<OrderHistoryResponse> executedOrders = orderRepository
+                .findExecutedByAccountIdAndStockCode(order.getAccount().getAccountId(), order.getStockCode()).stream()
+                .map(OrderHistoryResponse::from)
+                .toList();
+        try {
+            return RealizedReturnService.calculateReturns(executedOrders).stream()
+                    .filter(realized -> realized.orderId().equals(order.getOrderId()))
+                    .findFirst()
+                    .orElse(null);
+        } catch (CustomException e) {
+            return null;
+        }
     }
 }

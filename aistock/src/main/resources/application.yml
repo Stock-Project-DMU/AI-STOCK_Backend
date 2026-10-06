@@ -22,7 +22,7 @@ jwt:
   access-token-expiration: 3600000
   refresh-token-expiration: 604800000
 
-# 회원가입 시 role=ADMIN 선택 시 대조할 관리자 가입 코드
+# 최초 관리자 계정 생성(POST /api/auth/initial-admin) 때 대조할 관리자 인증 코드 — 비어 있으면 최초 관리자를 만들 수 없다
 admin:
   signup-code: ${ADMIN_SIGNUP_CODE:}
 

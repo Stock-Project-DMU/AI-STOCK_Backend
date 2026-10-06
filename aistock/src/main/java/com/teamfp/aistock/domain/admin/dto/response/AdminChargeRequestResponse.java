@@ -13,6 +13,8 @@ public record AdminChargeRequestResponse(
         Long requestId,
         Long accountId,
         String accountNumber,
+        // feat/admin-improvements: 회원 상세로 이동할 수 있게 회원번호 추가
+        Long userId,
         String loginId,
         String userName,
         long amount,
@@ -29,6 +31,7 @@ public record AdminChargeRequestResponse(
                 chargeRequest.getRequestId(),
                 chargeRequest.getAccount().getAccountId(),
                 chargeRequest.getAccount().getAccountNumber(),
+                chargeRequest.getAccount().getUser().getUserId(),
                 chargeRequest.getAccount().getUser().getLoginId(),
                 chargeRequest.getAccount().getUser().getName(),
                 chargeRequest.getAmount(),

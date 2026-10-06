@@ -9,6 +9,7 @@ import org.hibernate.annotations.ColumnDefault;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
+import com.teamfp.aistock.domain.user.entity.Role;
 import com.teamfp.aistock.domain.user.entity.User;
 
 import jakarta.persistence.Column;
@@ -51,6 +52,9 @@ public class Account {
     // 계좌 예치금(현금 = balance + frozenBalance) 최대 보유액 1조원. 충전(직접 충전·관리자 승인 충전·관리자
     // 증액)으로는 이 한도를 넘길 수 없다. 매도 대금·이자처럼 투자 결과로 늘어나는 건 막지 않는다.
     public static final long MAX_DEPOSIT_AMOUNT = 1_000_000_000_000L;
+    // 관리자 계정 계좌(isChargeUnlimited)의 예치금 최대 보유액 999조원(feat/admin-improvements). 프론트 JS Number가
+    // 정확히 표현할 수 있는 2^53(약 9,007조) 안쪽으로 잡아 화면에서 금액 끝자리가 틀어지지 않게 한다.
+    public static final long ADMIN_MAX_DEPOSIT_AMOUNT = 999_000_000_000_000L;
     // 예치금 이자율(연 %). 계좌 개설 시점에 이 값으로 고정된다.
     public static final BigDecimal DEFAULT_INTEREST_RATE = new BigDecimal("0.50");
     // 연이율(%)을 월 이자로 바꿀 때의 분모 — 100(퍼센트) × 12(개월).
@@ -150,12 +154,44 @@ public class Account {
     }
 
     /**
-     * amount를 충전해도 예치금(balance + frozenBalance)이 MAX_DEPOSIT_AMOUNT 이하인지 여부.
+     * amount를 충전해도 예치금(balance + frozenBalance)이 예치금 한도(getMaxDepositAmount) 이하인지 여부.
      */
     public boolean canDeposit(long amount) {
         // balance + frozenBalance + amount를 그대로 더하면 아주 큰 amount에서 long이 넘쳐 음수가 돼 검사를
         // 통과해버린다(코드리뷰 반영). 남은 한도와 비교하는 방식은 넘침이 없다.
-        return amount <= MAX_DEPOSIT_AMOUNT - this.balance - this.frozenBalance;
+        return amount <= getMaxDepositAmount() - this.balance - this.frozenBalance;
+    }
+
+    /**
+     * 이 계좌의 예치금 한도 — 관리자 계정 계좌는 ADMIN_MAX_DEPOSIT_AMOUNT(999조), 그 외는 MAX_DEPOSIT_AMOUNT(1조).
+     */
+    public long getMaxDepositAmount() {
+        return isChargeUnlimited() ? ADMIN_MAX_DEPOSIT_AMOUNT : MAX_DEPOSIT_AMOUNT;
+    }
+
+    /**
+     * 예치금 한도까지 더 충전할 수 있는 금액(원). 매도 대금·이자로 한도를 넘긴 경우에도 음수가 아니라 0을 돌려준다.
+     */
+    public long getRemainingDepositAmount() {
+        return Math.max(0L, getMaxDepositAmount() - this.balance - this.frozenBalance);
+    }
+
+    /**
+     * 셀프 충전 횟수(MAX_CHARGE_COUNT)·1회 금액(ChargeBalanceRequest.MAX_CHARGE_AMOUNT) 제한을 적용하지 않는
+     * 계좌인지 여부 — 관리자 계정의 계좌만 해당한다(feat/admin-improvements). 관리자는 서비스 화면에서 기능을
+     * 확인할 때 잔고 걱정 없이 충전할 수 있어야 해서다. 예치금 한도는 없애지 않고 ADMIN_MAX_DEPOSIT_AMOUNT로 올린다.
+     */
+    public boolean isChargeUnlimited() {
+        return this.user.getRole() == Role.ADMIN;
+    }
+
+    /**
+     * 직접 차감(관리자 계정 전용)으로 지금 뺄 수 있는 최대 금액. applyAdminDeduction()이 balance와 baseBalance를
+     * 같은 금액만큼 낮추므로 둘 중 작은 값까지만 뺄 수 있다 — baseBalance가 음수가 되면 수익률 계산식
+     * (총자산-baseBalance)/baseBalance가 깨진다. 지정가 주문에 묶인 frozenBalance는 빼지 않는다.
+     */
+    public long getDeductibleAmount() {
+        return Math.max(0L, Math.min(this.balance, this.baseBalance));
     }
 
     /**
@@ -234,11 +270,14 @@ public class Account {
      * (총자산-baseBalance)/baseBalance에 그대로 섞여 들어가 실제 투자 성과보다 수익률이
      * 부풀어 보이는 문제가 생긴다. 최대 충전 횟수(MAX_CHARGE_COUNT) 검증은 이 메서드가 아니라
      * AccountService.chargeBalance()에서 한다 — Entity는 잔고/횟수 필드를 바꾸는 책임만 갖는다.
+     * 횟수 제한이 없는 관리자 계좌(isChargeUnlimited)는 chargeCount를 올리지 않는다.
      */
     public void chargeBalance(long chargeAmount) {
         this.balance += chargeAmount;
         this.baseBalance += chargeAmount;
-        this.chargeCount += 1;
+        if (!isChargeUnlimited()) {
+            this.chargeCount += 1;
+        }
     }
 
     /**

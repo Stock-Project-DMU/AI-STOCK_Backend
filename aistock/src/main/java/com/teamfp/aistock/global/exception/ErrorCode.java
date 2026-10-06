@@ -19,7 +19,7 @@ public enum ErrorCode {
     INSUFFICIENT_HOLDING(HttpStatus.BAD_REQUEST, "INSUFFICIENT_HOLDING", "보유 주식이 부족합니다."),
     ACCOUNT_SUSPENDED(HttpStatus.BAD_REQUEST, "ACCOUNT_SUSPENDED", "정지된 계좌는 주문할 수 없습니다."),
     ACCOUNT_SUSPENDED_CHARGE(HttpStatus.BAD_REQUEST, "ACCOUNT_SUSPENDED_CHARGE", "거래가 정지된 계좌는 충전할 수 없습니다."),
-    INVALID_ADMIN_CODE(HttpStatus.BAD_REQUEST, "INVALID_ADMIN_CODE", "관리자 코드가 일치하지 않습니다."),
+    INVALID_ADMIN_CODE(HttpStatus.BAD_REQUEST, "INVALID_ADMIN_CODE", "관리자 인증 코드가 일치하지 않습니다."),
     ACCOUNT_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "ACCOUNT_LIMIT_EXCEEDED", "계좌는 1개만 만들 수 있습니다."),
     CHARGE_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "CHARGE_LIMIT_EXCEEDED", "직접 충전 가능 횟수(3회)를 모두 사용했습니다. 충전 요청으로 관리자에게 요청해 주세요."),
     DEPOSIT_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "DEPOSIT_LIMIT_EXCEEDED", "계좌 예치금은 최대 1조원까지 보유할 수 있습니다."),
@@ -53,6 +53,7 @@ public enum ErrorCode {
     CHARGE_REQUEST_NOT_FOUND(HttpStatus.NOT_FOUND, "CHARGE_REQUEST_NOT_FOUND", "충전 요청을 찾을 수 없습니다."),
     AUDIT_LOG_NOT_FOUND(HttpStatus.NOT_FOUND, "AUDIT_LOG_NOT_FOUND", "감사 로그를 찾을 수 없습니다."),
     NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "NOTIFICATION_NOT_FOUND", "알림을 찾을 수 없습니다."),
+    NOTICE_NOT_FOUND(HttpStatus.NOT_FOUND, "NOTICE_NOT_FOUND", "공지를 찾을 수 없습니다."),
     AI_SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "AI_SESSION_NOT_FOUND", "AI 상담 세션을 찾을 수 없습니다."),
     SIMULATION_NOT_FOUND(HttpStatus.NOT_FOUND, "SIMULATION_NOT_FOUND", "시뮬레이션을 찾을 수 없습니다."),
     SIMULATION_EXPIRED(HttpStatus.NOT_FOUND, "SIMULATION_EXPIRED", "시뮬레이션 결과 보관 시간(30분)이 지났습니다. 다시 실행한 뒤 저장해 주세요."),
@@ -66,9 +67,11 @@ public enum ErrorCode {
     ORDER_ALREADY_PROCESSED(HttpStatus.CONFLICT, "ORDER_ALREADY_PROCESSED", "이미 체결되었거나 취소된 주문입니다."),
     CHARGE_REQUEST_ALREADY_PROCESSED(HttpStatus.CONFLICT, "CHARGE_REQUEST_ALREADY_PROCESSED", "이미 승인되었거나 거절된 충전 요청입니다."),
     SIMULATION_ALREADY_SAVED(HttpStatus.CONFLICT, "SIMULATION_ALREADY_SAVED", "이미 저장한 시뮬레이션 결과입니다. 저장 목록에서 확인해 주세요."),
+    INITIAL_ADMIN_ALREADY_EXISTS(HttpStatus.CONFLICT, "INITIAL_ADMIN_ALREADY_EXISTS", "이미 관리자 계정이 있습니다. 관리자 계정은 관리자 페이지에서 추가해 주세요."),
 
     // 423 Locked
     LOGIN_LOCKED(HttpStatus.LOCKED, "LOGIN_LOCKED", "로그인 시도 횟수 초과로 계정이 잠겼습니다."),
+    ADMIN_CODE_LOCKED(HttpStatus.LOCKED, "ADMIN_CODE_LOCKED", "관리자 인증 코드를 3번 틀려 10분 동안 입력할 수 없습니다. 잠시 후 다시 시도해 주세요."),
     USER_SUSPENDED(HttpStatus.LOCKED, "USER_SUSPENDED", "관리자에 의해 정지된 계정입니다."),
 
     // 429 Too Many Requests

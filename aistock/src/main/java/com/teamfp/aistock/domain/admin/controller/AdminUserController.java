@@ -15,6 +15,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.teamfp.aistock.domain.admin.dto.request.AdminSearchConditionDto;
+import com.teamfp.aistock.domain.admin.dto.request.AdminSearchMatchType;
+import com.teamfp.aistock.domain.admin.dto.request.AdminUserSearchField;
+import com.teamfp.aistock.domain.admin.dto.request.AdminUserSortColumn;
+import com.teamfp.aistock.domain.admin.dto.request.AdminUserSortType;
 import com.teamfp.aistock.domain.admin.dto.request.AdminUserStatusRequest;
 import com.teamfp.aistock.domain.admin.dto.response.AdminUserDetailResponse;
 import com.teamfp.aistock.domain.admin.dto.response.AdminUserListResponse;
@@ -39,17 +44,22 @@ public class AdminUserController {
 
     private final AdminUserService adminUserService;
 
-    // query(회원번호/아이디/이름/이메일 통합검색), status, role은 전부 선택 파라미터다.
-    // 기본 정렬은 createdAt 내림차순(3.2 요구사항) — 클라이언트가 sort를 직접 지정하면
-    // PageableDefault 값 대신 그 값이 우선 적용된다(Spring Data Web 기본 동작).
+    // query(회원번호/아이디/이름/이메일 검색 — field로 항목, matchType으로 일치/포함 선택), status, role은 전부 선택 파라미터다.
+    // 정렬은 sortBy(최신 가입순 기본 / 오래된 가입순 / 이름순)로만 고른다(feat/admin-improvements, AdminSortSupport).
     @GetMapping
     public ApiResponse<Page<AdminUserListResponse>> getUsers(
             @RequestParam(required = false) String query,
+            @RequestParam(defaultValue = "ALL") AdminUserSearchField field,
+            @RequestParam(defaultValue = "CONTAINS") AdminSearchMatchType matchType,
             @RequestParam(required = false) UserStatus status,
             @RequestParam(required = false) Role role,
-            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
+            @RequestParam(defaultValue = "LATEST") AdminUserSortType sortBy,
+            @RequestParam(required = false) AdminUserSortColumn sortColumn,
+            @RequestParam(defaultValue = "DESC") Sort.Direction direction,
+            @PageableDefault(size = 20) Pageable pageable
     ) {
-        return ApiResponse.success(adminUserService.getUsers(query, status, role, pageable));
+        return ApiResponse.success(adminUserService.getUsers(AdminSearchConditionDto.of(query, field, matchType), status, role,
+                AdminSortSupport.users(pageable, sortBy, sortColumn, direction)));
     }
 
     // 화면과 동일한 검색·필터 조건(query/status/role)을 그대로 받는다(6.2 요구사항). sort는
@@ -57,11 +67,14 @@ public class AdminUserController {
     @GetMapping("/export")
     public ResponseEntity<byte[]> exportUsers(
             @RequestParam(required = false) String query,
+            @RequestParam(defaultValue = "ALL") AdminUserSearchField field,
+            @RequestParam(defaultValue = "CONTAINS") AdminSearchMatchType matchType,
             @RequestParam(required = false) UserStatus status,
             @RequestParam(required = false) Role role,
             @RequestParam(defaultValue = "createdAt,desc") String sort
     ) {
-        byte[] csv = adminUserService.exportUsersCsv(query, status, role, parseSort(sort));
+        byte[] csv = adminUserService.exportUsersCsv(AdminSearchConditionDto.of(query, field, matchType), status, role,
+                parseSort(sort));
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=admin-users.csv")
                 .contentType(MediaType.parseMediaType("text/csv; charset=UTF-8"))

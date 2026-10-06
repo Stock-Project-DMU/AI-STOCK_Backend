@@ -1,5 +1,13 @@
 -- =====================================================
--- AI STOCK MySQL Schema (최종본 v17)
+-- AI STOCK MySQL Schema (최종본 v18)
+-- v18: 관리자 페이지 개선(feat/admin-improvements, 2026-10-04, admin_improvements_migration.sql).
+--   1. account_transactions.type ENUM에 'AUTO_DEDUCTION' 추가 — 관리자 계정 본인 계좌 직접 차감.
+--   2. users.created_at / orders.ordered_at / charge_requests.requested_at 인덱스 추가 — 관리자
+--      "전체 활동 기록"(GET /api/admin/activities)이 4개 테이블을 발생 시각 최신순으로 합쳐 페이지 단위로 조회한다.
+--   3. account_transactions(type, created_at) 인덱스 추가 — 관리자 충전·차감 이력(GET /api/admin/account-transactions).
+--   4. users.last_login_at 추가 — 마지막 로그인 시각(일반·소셜 로그인 시 갱신, 관리자 회원 상세 표시용).
+--   5. notices 테이블 신규 + notifications.notice_id 추가 — 관리자 "알림 관리"(보낸 공지 한 건 단위 조회·팝업 기한
+--      변경·삭제). 팝업 공지는 popup_end_date(포함)까지 받은 회원이 로그인할 때마다 팝업으로 뜬다.
 -- v17: 마이페이지 계좌 정보 보완(feature/mypage-improvement, 2026-10-01, mypage_account_migration.sql).
 --   1. accounts.interest_rate 추가 — 예치금 연이율(%) 0.50 고정, 매월 1일 balance 기준 이자 지급
 --      (AccountInterestJob). 이자는 baseBalance도 함께 올려 수익률에 잡히지 않는다.
@@ -187,13 +195,15 @@ CREATE TABLE users (
                                 NOT NULL DEFAULT 'ACTIVE',  -- v7 추가: 관리자에 의한 로그인 차단
     is_active   TINYINT(1)      NOT NULL DEFAULT 1,  -- 1=활성, 0=탈퇴 (본인 탈퇴 여부)
     deleted_at  DATETIME        NULL,                -- 탈퇴 시각 (활성 회원은 NULL)
+    last_login_at DATETIME(6)   NULL,                -- v18 추가: 마지막 로그인 시각 (관리자 회원 상세 표시용)
     created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP
                                          ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (user_id),
     INDEX idx_email  (email),
     INDEX idx_active (is_active),
-    INDEX idx_status (status)                        -- v7 추가: 관리자 페이지 정지 회원 필터링용
+    INDEX idx_status (status),                       -- v7 추가: 관리자 페이지 정지 회원 필터링용
+    INDEX idx_user_created_at (created_at)           -- v18 추가: 관리자 전체 활동 기록 최신순 정렬용
 ) ENGINE=InnoDB;
 
 -- =====================================================
@@ -431,6 +441,7 @@ CREATE TABLE orders (
     PRIMARY KEY (order_id),
     INDEX idx_account_order (account_id, ordered_at),
     INDEX idx_stock_pending (stock_code, status),   -- 지정가 체결 조건 체크용
+    INDEX idx_order_ordered_at (ordered_at),        -- v18 추가: 관리자 전체 활동 기록 최신순 정렬용
     FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
@@ -567,6 +578,29 @@ CREATE TABLE recent_viewed (
 ) ENGINE=InnoDB;
 
 -- =====================================================
+-- 관리자 공지 (notices) — v18 신규 (feat/admin-improvements)
+-- 관리자가 보낸 공지 한 건. 받은 회원마다 notifications 한 건이 생기고 notice_id로 이 공지를 가리킨다.
+-- popup_end_date(포함)까지 받은 회원이 로그인할 때마다 팝업으로 뜬다(NULL이면 일반 공지).
+-- =====================================================
+CREATE TABLE notices (
+    notice_id           BIGINT          NOT NULL AUTO_INCREMENT,
+    type                ENUM('SYSTEM','ORDER','AI','SIMULATION','NEWS','ACCOUNT') NOT NULL,
+    title               VARCHAR(100)    NOT NULL,
+    content             VARCHAR(500)    NOT NULL,
+    target_type         ENUM('SINGLE','ALL','SEARCH','SELECTED') NOT NULL,  -- 한 명 / 전체 / 검색 결과 / 고른 회원
+    target_count        INT             NOT NULL DEFAULT 0,
+    sent_count          INT             NOT NULL DEFAULT 0,
+    popup_end_date      DATE            NULL,
+    created_by          BIGINT          NULL,                -- 보낸 관리자 (탈퇴 시 SET NULL)
+    created_by_login_id VARCHAR(50)     NULL,                -- 보낸 시점 관리자 아이디 스냅샷
+    created_at          DATETIME(6)     NOT NULL,
+    updated_at          DATETIME(6)     NOT NULL,
+    PRIMARY KEY (notice_id),
+    INDEX idx_notice_created_at (created_at),
+    CONSTRAINT fk_notice_created_by FOREIGN KEY (created_by) REFERENCES users(user_id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- =====================================================
 -- 12. 알림 (notifications)
 -- =====================================================
 /*
@@ -583,9 +617,12 @@ CREATE TABLE notifications (
     related_order_id BIGINT      NULL,
     is_read     TINYINT(1)      NOT NULL DEFAULT 0,
     created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    notice_id   BIGINT          NULL,                -- v18 추가: 관리자 공지로 받은 알림이면 그 공지(notices)
     PRIMARY KEY (noti_id),
     INDEX idx_user_noti (user_id, is_read),
-    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+    INDEX idx_noti_notice (notice_id),
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    CONSTRAINT fk_notification_notice FOREIGN KEY (notice_id) REFERENCES notices(notice_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- =====================================================
@@ -780,6 +817,7 @@ CREATE TABLE charge_requests (
     PRIMARY KEY (request_id),
     INDEX idx_charge_request_account (account_id),
     INDEX idx_charge_request_status (status),
+    INDEX idx_charge_request_requested_at (requested_at),  -- v18 추가: 관리자 전체 활동 기록 최신순 정렬용
     FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE,
     FOREIGN KEY (decided_by) REFERENCES users(user_id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
@@ -810,7 +848,8 @@ CREATE TABLE account_transactions (
     account_id                BIGINT          NOT NULL,
     type                      ENUM('INITIAL_GRANT','AUTO_CHARGE','ADMIN_CHARGE','ADMIN_DEDUCTION',
                                     'ORDER_BUY','ORDER_SELL','ORDER_REFUND',
-                                    'INTEREST','TRADE_FEE')      -- v17 추가: 예치금 이자, 매도 거래 수수료
+                                    'INTEREST','TRADE_FEE',      -- v17 추가: 예치금 이자, 매도 거래 수수료
+                                    'AUTO_DEDUCTION')            -- v18 추가: 관리자 계정 본인 계좌 직접 차감
                                               NOT NULL,
     amount                    BIGINT          NOT NULL,     -- 증감액 (양수=증가, 음수=감소)
     balance_before             BIGINT          NOT NULL,
@@ -822,6 +861,7 @@ CREATE TABLE account_transactions (
     created_at                 DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (transaction_id),
     INDEX idx_account_transaction_account (account_id, created_at),
+    INDEX idx_account_transaction_type_created (type, created_at),  -- v18 추가: 관리자 충전·차감 이력(전체 계좌, 유형별 최신순)
     FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 

@@ -20,6 +20,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.teamfp.aistock.domain.account.entity.Account;
+import com.teamfp.aistock.domain.admin.dto.request.AdminSearchConditionDto;
 import com.teamfp.aistock.domain.admin.dto.response.AdminTradeResponse;
 import com.teamfp.aistock.domain.order.entity.Order;
 import com.teamfp.aistock.domain.order.entity.OrderStatus;
@@ -33,6 +34,7 @@ import com.teamfp.aistock.global.exception.CustomException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -50,6 +52,12 @@ class AdminTradeServiceTest {
     @Mock
     private com.teamfp.aistock.domain.order.service.OrderService orderService;
 
+    @Mock
+    private com.teamfp.aistock.domain.admin.repository.AuditLogRepository auditLogRepository;
+
+    @Mock
+    private com.teamfp.aistock.domain.account.repository.AccountTransactionRepository accountTransactionRepository;
+
     private AdminTradeService adminTradeService;
 
     private static final Long ORDER_ID = 100L;
@@ -57,7 +65,7 @@ class AdminTradeServiceTest {
 
     @BeforeEach
     void setUp() {
-        adminTradeService = new AdminTradeService(orderRepository, orderService);
+        adminTradeService = new AdminTradeService(orderRepository, orderService, auditLogRepository, accountTransactionRepository);
     }
 
     private Order orderOf() {
@@ -99,9 +107,9 @@ class AdminTradeServiceTest {
         Pageable pageable = PageRequest.of(0, 20);
         Order order = orderOf();
         Page<Order> page = new PageImpl<>(List.of(order), pageable, 1);
-        when(orderRepository.searchOrdersWithUser(null, null, null, null, null, null, null, pageable)).thenReturn(page);
+        when(orderRepository.searchOrdersWithUser(null, null, null, "ALL", false, null, null, null, null, null, null, pageable)).thenReturn(page);
 
-        Page<AdminTradeResponse> result = adminTradeService.getTrades(null, null, null, null, null, null, null, pageable);
+        Page<AdminTradeResponse> result = adminTradeService.getTrades(AdminSearchConditionDto.of(null, null, null), null, null, null, null, null, null, pageable);
 
         assertThat(result.getContent()).hasSize(1);
         AdminTradeResponse response = result.getContent().get(0);
@@ -115,12 +123,12 @@ class AdminTradeServiceTest {
     void getTrades_blankQuery_normalizedToNull() {
         Pageable pageable = PageRequest.of(0, 20);
         Page<Order> page = new PageImpl<>(List.of(), pageable, 0);
-        when(orderRepository.searchOrdersWithUser(null, OrderStatus.EXECUTED, null, null, null, null, null, pageable))
+        when(orderRepository.searchOrdersWithUser(null, null, null, "ALL", false, OrderStatus.EXECUTED, null, null, null, null, null, pageable))
                 .thenReturn(page);
 
-        adminTradeService.getTrades("   ", OrderStatus.EXECUTED, null, null, null, null, null, pageable);
+        adminTradeService.getTrades(AdminSearchConditionDto.of("   ", null, null), OrderStatus.EXECUTED, null, null, null, null, null, pageable);
 
-        verify(orderRepository).searchOrdersWithUser(null, OrderStatus.EXECUTED, null, null, null, null, null, pageable);
+        verify(orderRepository).searchOrdersWithUser(null, null, null, "ALL", false, OrderStatus.EXECUTED, null, null, null, null, null, pageable);
     }
 
     @Test
@@ -129,7 +137,7 @@ class AdminTradeServiceTest {
         Order order = orderOf();
         when(orderRepository.findOrderWithUserById(ORDER_ID)).thenReturn(Optional.of(order));
 
-        AdminTradeResponse result = adminTradeService.getTradeDetail(ORDER_ID);
+        com.teamfp.aistock.domain.admin.dto.response.AdminTradeDetailResponse result = adminTradeService.getTradeDetail(ORDER_ID);
 
         assertThat(result.order().orderId()).isEqualTo(ORDER_ID);
         assertThat(result.order().stockCode()).isEqualTo("005930");
@@ -154,9 +162,9 @@ class AdminTradeServiceTest {
         Sort sort = Sort.by(Sort.Direction.DESC, "orderedAt");
         Pageable pageable = PageRequest.of(0, Integer.MAX_VALUE, sort);
         Page<Order> page = new PageImpl<>(List.of(order), pageable, 1);
-        when(orderRepository.searchOrdersWithUser(null, null, null, null, null, null, null, pageable)).thenReturn(page);
+        when(orderRepository.searchOrdersWithUser(null, null, null, "ALL", false, null, null, null, null, null, null, pageable)).thenReturn(page);
 
-        byte[] csv = adminTradeService.exportTradesCsv(null, null, null, null, null, null, null, sort);
+        byte[] csv = adminTradeService.exportTradesCsv(AdminSearchConditionDto.of(null, null, null), null, null, null, null, null, null, sort);
 
         assertThat(csv[0]).isEqualTo((byte) 0xEF);
         assertThat(csv[1]).isEqualTo((byte) 0xBB);
@@ -175,10 +183,91 @@ class AdminTradeServiceTest {
         com.teamfp.aistock.domain.admin.dto.request.AdminOrderCancelRequest request =
                 new com.teamfp.aistock.domain.admin.dto.request.AdminOrderCancelRequest("비정상 주문으로 관리자 취소");
         when(orderRepository.findOrderWithUserById(ORDER_ID)).thenReturn(Optional.of(order));
+        com.teamfp.aistock.domain.admin.entity.AuditLog cancelLog = com.teamfp.aistock.domain.admin.entity.AuditLog.builder()
+                .adminUserId(ADMIN_ID).adminLoginId("admin").action(AuditLogService.ACTION_ORDER_CANCEL)
+                .targetType(AuditLogService.TARGET_ORDER).targetId(ORDER_ID).reason("비정상 주문으로 관리자 취소").build();
+        ReflectionTestUtils.setField(cancelLog, "createdAt", LocalDateTime.of(2026, 10, 4, 10, 0));
+        when(auditLogRepository.findFirstByActionAndTargetTypeAndTargetIdOrderByCreatedAtDesc(
+                AuditLogService.ACTION_ORDER_CANCEL, AuditLogService.TARGET_ORDER, ORDER_ID)).thenReturn(Optional.of(cancelLog));
 
-        AdminTradeResponse result = adminTradeService.cancelTrade(ADMIN_ID, ORDER_ID, request);
+        com.teamfp.aistock.domain.admin.dto.response.AdminTradeDetailResponse result =
+                adminTradeService.cancelTrade(ADMIN_ID, ORDER_ID, request);
 
         verify(orderService).adminCancelOrder(ADMIN_ID, ORDER_ID, "비정상 주문으로 관리자 취소");
         assertThat(result.order().status()).isEqualTo(com.teamfp.aistock.domain.order.entity.OrderStatus.CANCELLED);
+        // 취소된 주문 상세에는 감사 로그의 취소 사유·처리 관리자·시각이 담긴다(feat/admin-improvements).
+        assertThat(result.cancelReason()).isEqualTo("비정상 주문으로 관리자 취소");
+        assertThat(result.cancelledByLoginId()).isEqualTo("admin");
+        assertThat(result.cancelledAt()).isEqualTo(LocalDateTime.of(2026, 10, 4, 10, 0));
+    }
+
+    @Test
+    @DisplayName("거래 상세·목록에는 회원번호·계좌번호·체결 금액(체결가×수량)이 담기고, 미체결 주문은 감사 로그를 찾지 않는다")
+    void tradeDetail_containsAccountAndExecutedAmount() {
+        Order order = orderOf();
+        when(orderRepository.findOrderWithUserById(ORDER_ID)).thenReturn(Optional.of(order));
+
+        com.teamfp.aistock.domain.admin.dto.response.AdminTradeDetailResponse pending = adminTradeService.getTradeDetail(ORDER_ID);
+        assertThat(pending.userId()).isEqualTo(1L);
+        assertThat(pending.accountNumber()).isEqualTo("ACC-1");
+        assertThat(pending.executedAmount()).isNull();
+        assertThat(pending.cancelReason()).isNull();
+        verify(auditLogRepository, org.mockito.Mockito.never())
+                .findFirstByActionAndTargetTypeAndTargetIdOrderByCreatedAtDesc(any(), any(), any());
+
+        order.execute(71_000L);
+        assertThat(AdminTradeResponse.from(order).executedAmount()).isEqualTo(71_000L);
+    }
+    @Test
+    @DisplayName("체결된 매도 주문 상세에는 마이페이지와 같은 계산의 실현 손익과, 이 주문으로 생긴 잔고 내역이 담긴다")
+    void tradeDetail_sellHasRealizedProfitAndBalanceChanges() {
+        Order buy = orderOf();
+        ReflectionTestUtils.setField(buy, "orderId", ORDER_ID - 1);
+        buy.execute(100_000L);
+        ReflectionTestUtils.setField(buy, "executedAt", LocalDateTime.of(2026, 10, 1, 9, 0));
+        Order sell = Order.builder()
+                .account(buy.getAccount())
+                .stockCode("005930")
+                .stockName("삼성전자")
+                .orderType(OrderType.SELL)
+                .priceType(PriceType.MARKET)
+                .orderPrice(120_000L)
+                .quantity(1)
+                .build();
+        ReflectionTestUtils.setField(sell, "orderId", ORDER_ID);
+        sell.execute(120_000L);
+        when(orderRepository.findOrderWithUserById(ORDER_ID)).thenReturn(Optional.of(sell));
+        when(orderRepository.findExecutedByAccountIdAndStockCode(10L, "005930")).thenReturn(List.of(sell, buy));
+        com.teamfp.aistock.domain.account.entity.AccountTransaction sellTx =
+                com.teamfp.aistock.domain.account.entity.AccountTransaction.builder()
+                        .account(sell.getAccount())
+                        .type(com.teamfp.aistock.domain.account.entity.AccountTransactionType.ORDER_SELL)
+                        .amount(120_000L).balanceBefore(1_000_000L).balanceAfter(1_120_000L)
+                        .relatedOrderId(ORDER_ID).build();
+        when(accountTransactionRepository.findAllByRelatedOrderIdOrderByCreatedAtAscTransactionIdAsc(ORDER_ID))
+                .thenReturn(List.of(sellTx));
+
+        com.teamfp.aistock.domain.admin.dto.response.AdminTradeDetailResponse result = adminTradeService.getTradeDetail(ORDER_ID);
+
+        // (120,000 - 평단 100,000) × 1주 - 매도 수수료
+        assertThat(result.realizedProfit()).isNotNull();
+        assertThat(result.realizedProfit().averageCost()).isEqualTo(100_000L);
+        assertThat(result.realizedProfit().profitAmount()).isEqualTo(20_000L - sell.getFee());
+        assertThat(result.balanceChanges()).singleElement().satisfies(change -> {
+            assertThat(change.balanceBefore()).isEqualTo(1_000_000L);
+            assertThat(change.balanceAfter()).isEqualTo(1_120_000L);
+        });
+    }
+
+    @Test
+    @DisplayName("이전 매수 기록이 맞지 않아 실현 손익을 계산할 수 없어도 상세 조회는 실패하지 않고 realizedProfit만 null이다")
+    void tradeDetail_inconsistentHistory_realizedProfitNull() {
+        Order sell = orderOf();
+        ReflectionTestUtils.setField(sell, "orderType", OrderType.SELL);
+        sell.execute(120_000L);
+        when(orderRepository.findOrderWithUserById(ORDER_ID)).thenReturn(Optional.of(sell));
+        when(orderRepository.findExecutedByAccountIdAndStockCode(10L, "005930")).thenReturn(List.of(sell));
+
+        assertThat(adminTradeService.getTradeDetail(ORDER_ID).realizedProfit()).isNull();
     }
 }
