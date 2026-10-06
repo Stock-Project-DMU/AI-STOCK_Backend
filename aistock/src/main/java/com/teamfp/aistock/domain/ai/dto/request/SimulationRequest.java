@@ -10,6 +10,8 @@ import jakarta.validation.constraints.Size;
  * 목표는 자유 문장(goalText)으로 받고, 목표 금액·기한 추출은 서버가 Gemini로 한다
  * (예: "3년 안에 1억" → targetAmount 100000000, periodMonths 36). 시작 금액은 사용자의
  * 실제 보유종목 평가금액 + 예수금이라 요청으로 받지 않는다.
+ * includeCurrentPortfolio(feature/goal-simulation-v3, 2026-10-06)가 false면 계좌를 반영하지 않고
+ * 시작 금액 0원에서 월 추가 납입액만으로 계산한다. 생략(null)하면 true로 본다.
  */
 public record SimulationRequest(
 
@@ -19,6 +21,16 @@ public record SimulationRequest(
 
         @Min(value = 0, message = "월 추가 납입액은 0원 이상이어야 합니다.")
         @Max(value = 100_000_000, message = "월 추가 납입액은 1억원 이하로 입력해 주세요.")
-        long monthlyContribution
+        long monthlyContribution,
+
+        Boolean includeCurrentPortfolio
 ) {
+
+    public SimulationRequest {
+        includeCurrentPortfolio = includeCurrentPortfolio == null ? Boolean.TRUE : includeCurrentPortfolio;
+    }
+
+    public SimulationRequest(String goalText, long monthlyContribution) {
+        this(goalText, monthlyContribution, true);
+    }
 }
