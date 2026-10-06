@@ -73,6 +73,7 @@ import lombok.extern.slf4j.Slf4j;
  * 실행 순서(runSimulation):
  * ① Gemini 호출 한도 확인(분당3/일일10) ② 투자성향·계좌 확인
  * ③ Gemini 1차 — 자유 문장에서 목표 금액·기한 추출, 성공하면 한도 1회 차감 ④ 보유종목 평가금액 + 예수금 = 시작 금액
+ *    (includeCurrentPortfolio=false면 계좌를 보지 않고 시작 금액 0원 — 월 추가 납입액만으로 계산, v3)
  * ⑤ 보유종목별 최근 3년 월봉 → 보수적 월 성장률(ScenarioCalculator) → 왼쪽 차트
  * ⑥ Gemini — 시가총액 상위 종목 목록 안에서 성향에 맞는 리밸런싱 구성 추천 → 서버 검증
  *    (RebalancePlanValidator, 위반 시 1회 재요청) → 시세 이력 12개월 미만 종목 제외 → 오른쪽 차트
@@ -190,8 +191,12 @@ public class SimulationService {
 
         InvestmentProfile profile = investmentProfileRepository.findByUserId(userId)
                 .orElseThrow(() -> new CustomException(ErrorCode.INVESTMENT_PROFILE_REQUIRED));
-        AccountInfoResponse account = accountService.getMyAccounts(userId).stream().findFirst()
-                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+        boolean includeCurrentPortfolio = request.includeCurrentPortfolio();
+        // 계좌를 반영하지 않으면 계좌가 없어도 실행할 수 있으므로 조회 자체를 건너뛴다.
+        AccountInfoResponse account = includeCurrentPortfolio
+                ? accountService.getMyAccounts(userId).stream().findFirst()
+                        .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND))
+                : null;
 
         GoalExtraction goal = extractGoal(request.goalText());
         // 설문·계좌 확인과 목표 해석이 성공한 뒤에만 1회 차감한다 — 설문 미완료·목표 문장 오타처럼 사용자가
@@ -201,12 +206,13 @@ public class SimulationService {
         // 목표 해석(JUDGE 모델 1회) 비용이라 감수한다.
         rateLimiterService.increment(userId);
 
-        List<HoldingValuationDto> holdings = holdingValuationService.getHoldingValuations(account.accountId()).stream()
-                .filter(holding -> holding.quantity() > 0)
-                .toList();
+        List<HoldingValuationDto> holdings = account == null ? List.of()
+                : holdingValuationService.getHoldingValuations(account.accountId()).stream()
+                        .filter(holding -> holding.quantity() > 0)
+                        .toList();
         long holdingsAmount = holdings.stream().mapToLong(holding -> holding.quantity() * holding.currentPrice()).sum();
         // 지정가 매수 대기로 묶인 금액(frozenBalance)도 아직 주식이 아닌 현금이므로 예수금에 포함한다.
-        long cashAmount = account.balance() + account.frozenBalance();
+        long cashAmount = account == null ? 0 : account.balance() + account.frozenBalance();
         long startAmount = holdingsAmount + cashAmount;
 
         Map<String, List<Long>> monthlyClosesCache = new HashMap<>();
@@ -269,7 +275,7 @@ public class SimulationService {
         Map<String, NaverNewsSearchResponse> newsData = fetchNewsData(rationaleStocks);
 
         SimulationExplanation explanation = requestExplanation(profile, goal, request.monthlyContribution(),
-                holdingsAmount, cashAmount, current, rebalanced, shortenedMonths, rationaleStocks, dartData, newsData);
+                includeCurrentPortfolio, holdingsAmount, cashAmount, current, rebalanced, shortenedMonths, rationaleStocks, dartData, newsData);
 
         String pendingSimulationId = UUID.randomUUID().toString();
         SimulationResponse response = new SimulationResponse(
@@ -551,7 +557,7 @@ public class SimulationService {
     // ===== ⑧ 설명 생성 =====
 
     private SimulationExplanation requestExplanation(InvestmentProfile profile, GoalExtraction goal, long monthlyContribution,
-                                                     long holdingsAmount, long cashAmount,
+                                                     boolean includeCurrentPortfolio, long holdingsAmount, long cashAmount,
                                                      PortfolioProjectionDto current, PortfolioProjectionDto rebalanced,
                                                      Integer shortenedMonths, Map<String, String> rationaleStocks,
                                                      Map<String, DartDataSnapshot> dartData,
@@ -561,6 +567,10 @@ public class SimulationService {
         prompt.append("[목표]\n").append(describeGoal(goal)).append("\n\n");
         prompt.append("[시작 금액] 보유종목 %d원 + 예수금 %d원 = %d원, 월 추가 납입 %d원\n"
                 .formatted(holdingsAmount, cashAmount, holdingsAmount + cashAmount, monthlyContribution));
+        if (!includeCurrentPortfolio) {
+            prompt.append("- 사용자가 현재 계좌를 반영하지 않기로 해 0원에서 월 추가 납입액만으로 시작합니다. "
+                    + "\"현재 보유 유지\"는 납입금을 모두 예수금으로 두는 경우입니다.\n");
+        }
         prompt.append("[성장률 계산 방식] 종목별 최근 3년 월봉 복리(기하평균) 월 수익률에서 30% 할인(음수면 그대로), "
                 + "종목당 월 5% 상한, 예수금은 0%, 비중으로 가중평균\n\n");
         prompt.append("[현재 보유 유지]\n").append(describeProjection(current)).append('\n');

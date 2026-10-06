@@ -181,6 +181,44 @@ class SimulationServiceTest {
         }
 
         @Test
+        @DisplayName("계좌 미반영(includeCurrentPortfolio=false) - 시작 금액 0원에서 월 추가 납입액만으로 계산한다")
+        void excludeCurrentPortfolio() {
+            when(geminiApiClient.generate(any())).thenReturn(gemini(GOAL_JSON), gemini(REBALANCE_JSON), gemini(EXPLANATION_JSON));
+
+            SimulationResponse response = simulationService.runSimulation(USER_ID,
+                    new SimulationRequest("3년 안에 2천만원", 500_000, false));
+
+            assertThat(response.startAmount()).isZero();
+            assertThat(response.holdingsAmount()).isZero();
+            assertThat(response.cashAmount()).isZero();
+            assertThat(response.monthlyContribution()).isEqualTo(500_000);
+            // 보유종목을 반영하지 않으므로 현재 유지 쪽은 전부 예수금(성장률 0)이고 곡선은 0원에서 시작한다.
+            assertThat(response.current().allocations()).isEmpty();
+            assertThat(response.current().cashWeight()).isEqualTo(100.0);
+            assertThat(response.current().points().get(0).value()).isZero();
+            verify(accountService, never()).getMyAccounts(anyLong());
+            verify(holdingValuationService, never()).getHoldingValuations(anyLong());
+            // ③ 설명 요청 프롬프트에 계좌 미반영 안내가 들어가야 Gemini가 "현재 보유 유지"를 현금 적립으로 설명한다.
+            ArgumentCaptor<GeminiRequest> captor = ArgumentCaptor.forClass(GeminiRequest.class);
+            verify(geminiApiClient, times(3)).generate(captor.capture());
+            assertThat(captor.getAllValues().get(2).prompt())
+                    .contains("보유종목 0원 + 예수금 0원 = 0원")
+                    .contains("현재 계좌를 반영하지 않기로 해 0원에서 월 추가 납입액만으로 시작합니다");
+        }
+
+        @Test
+        @DisplayName("계좌 반영(includeCurrentPortfolio=true)인데 계좌가 없으면 Gemini를 부르지 않고 ACCOUNT_NOT_FOUND")
+        void accountNotFoundWhenIncludingPortfolio() {
+            when(accountService.getMyAccounts(USER_ID)).thenReturn(List.of());
+
+            assertThatThrownBy(() -> simulationService.runSimulation(USER_ID, new SimulationRequest("3년 안에 2천만원", 0, true)))
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.ACCOUNT_NOT_FOUND);
+            verify(geminiApiClient, never()).generate(any());
+            verify(rateLimiterService, never()).increment(anyLong());
+        }
+
+        @Test
         @DisplayName("호출 한도 초과면 Gemini를 부르지 않고 GEMINI_RATE_LIMIT_EXCEEDED")
         void rateLimited() {
             when(rateLimiterService.isAllowed(USER_ID)).thenReturn(false);
