@@ -18,6 +18,6 @@ public class MultiStockPriceDto {
     private Long changeAmount;
     private Double changeRate;
     private Long volume;
-    // 누적 거래대금(백만원, t8407 value). 전체 종목 거래대금 순위(real 모드)에서 쓴다.
+    // 누적 거래대금(백만원) — 로컬 데이터에 거래대금이 없어 MarketDataApiClient가 현재가 × 거래량으로 근사한다.
     private Long tradingValue;
 }

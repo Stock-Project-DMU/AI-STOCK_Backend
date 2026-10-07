@@ -674,6 +674,31 @@ class AiPlanningServiceTest {
     class MarketDataInvestInfoTools {
 
         @Test
+        @DisplayName("ETF 구성종목 도구는 DART에 없는 ETF 이름도 등록 ETF 목록으로 찾아 구성종목을 돌려준다(캐시 경로 분기 누락 수정)")
+        void functionCall_etfConstituents_resolvesEtfNameAndReturnsConstituents() {
+            GeminiResponse.FunctionCall functionCall = new GeminiResponse.FunctionCall(
+                    "get_etf_info", Map.of("companyName", "KODEX 200", "infoType", "CONSTITUENTS"));
+            GeminiResponse firstResponse = new GeminiResponse(null, null, List.of(functionCall));
+            GeminiResponse finalResponse = new GeminiResponse("KODEX 200은 삼성전자 비중이 가장 커요.", 10);
+
+            stubHappyPathUpTo(firstResponse);
+            when(geminiApiClient.generate(any())).thenReturn(firstResponse).thenReturn(finalResponse);
+            when(etfApiClient.findEtfCode("KODEX 200")).thenReturn(Optional.of("069500"));
+            when(etfApiClient.getConstituents("069500")).thenReturn(List.of(
+                    com.teamfp.aistock.infra.marketdata.dto.EtfConstituentDto.builder()
+                            .stockCode("005930").stockName("삼성전자").weight(43.9).build()));
+
+            aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("KODEX 200 구성종목 알려줘"));
+
+            org.mockito.ArgumentCaptor<GeminiRequest> captor = org.mockito.ArgumentCaptor.forClass(GeminiRequest.class);
+            verify(geminiApiClient, times(2)).generate(captor.capture());
+            String toolResult = captor.getAllValues().get(1).functionExchangeRounds().get(0).get(0)
+                    .functionResult().get("result").toString();
+            assertThat(toolResult).contains("삼성전자(005930) 비중 43.90%");
+            verify(dartApiClient, never()).resolveStockCodeByName("KODEX 200");
+        }
+
+        @Test
         @DisplayName("외국인/기관 매매동향 도구 호출 시 stockCode로 조회해 최종 답변에 반영한다")
         void functionCall_foreignInstitutionalTrend_executesToolAndReturnsResult() {
             GeminiResponse.FunctionCall functionCall = new GeminiResponse.FunctionCall(

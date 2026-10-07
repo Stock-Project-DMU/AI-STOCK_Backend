@@ -32,8 +32,7 @@ public class HoldingValuationService {
 
     private final HoldingRepository holdingRepository;
     private final RedisStockCacheService redisStockCacheService;
-    // Redis 실시간 시세 캐시(TTL 5초)가 비어 있는 종목의 마지막 시세 조회용. market-data.mode에 따라
-    // mock이면 로컬 시세 JSON, real이면 외부 시세 데이터 현재가 조회로 알아서 갈라진다.
+    // Redis 실시간 시세 캐시(TTL 5초)가 비어 있는 종목의 마지막 시세 조회용 — 로컬 시세 데이터(market_data.json)를 읽는다.
     private final StockQuoteService stockQuoteService;
 
     /**

@@ -1,80 +1,33 @@
 package com.teamfp.aistock.infra.marketdata;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
 
 import com.teamfp.aistock.infra.marketdata.dto.InvestorTypeSummaryDto;
 import com.teamfp.aistock.infra.marketdata.dto.MarketInvestorComparisonDto;
 
-import lombok.extern.slf4j.Slf4j;
+import lombok.RequiredArgsConstructor;
 
 /**
- * 외부 시세 데이터 제공사 Open API [주식] 투자자 카테고리({@code /stock/investor})를 조회하는 클라이언트.
- * 투자자별종합(t1601)/투자자매매종합1(t1615) 2개 TR을 다룬다(2026-08-11 추가).
+ * 시장 전체 투자자 매매 — 투자자유형별 순매수 스냅샷과 시장(코스피/코스닥)별 비교(AI 재무설계사 상담 도구).
+ * local-market-data-generator가 market_data.json의 {@code _market.investorSummary}·{@code _market.marketComparison}에
+ * 5초마다 갱신하는 모의 값을 읽는다(fix/local-market-data-stable — 이전에는 외부 시세 데이터 t1601/t1615를 호출했다).
  */
-@Slf4j
 @Component
-public class InvestorApiClient extends MarketDataApiClientSupport {
+@RequiredArgsConstructor
+public class InvestorApiClient {
 
-    private final MarketDataAccessTokenProvider accessTokenProvider;
+    private final LocalMarketDataReader localMarketDataReader;
 
-    @Value("${market-data.investor-url}")
-    private String investorUrl;
-
-    public InvestorApiClient(MarketDataAccessTokenProvider accessTokenProvider, @org.springframework.beans.factory.annotation.Qualifier("marketDataRestClientBuilder") RestClient.Builder restClientBuilder) {
-        super(restClientBuilder);
-        this.accessTokenProvider = accessTokenProvider;
-    }
-
-    /** 투자자별종합(t1601) — 코스피 시장 전체 투자자유형별(개인/외국인/기관 등) 순매수 스냅샷. */
+    /** 투자자유형별(개인/외국인/기관 등) 순매수 스냅샷(주). 데이터가 없으면 빈 값. */
     public Optional<InvestorTypeSummaryDto> getInvestorTypeSummary() {
-        String token = accessTokenProvider.issueAccessToken();
-        Map<String, Object> inBlock = Map.of("gubun1", "1", "gubun2", "1", "gubun3", "", "gubun4", "1");
-        Map<String, Object> requestBody = Map.of("t1601InBlock", inBlock);
-
-        Map<String, Object> response = call("t1601", requestBody, token);
-        if (response == null || !(response.get("t1601OutBlock1") instanceof Map)) {
-            return Optional.empty();
-        }
-        @SuppressWarnings("unchecked")
-        Map<String, Object> outBlock = (Map<String, Object>) response.get("t1601OutBlock1");
-        return Optional.of(InvestorTypeSummaryDto.builder()
-                .individualNetBuy(parseLong(outBlock.get("svolume_08")))
-                .foreignNetBuy(parseLong(outBlock.get("svolume_17")))
-                .institutionNetBuy(parseLong(outBlock.get("svolume_18")))
-                .securitiesNetBuy(parseLong(outBlock.get("svolume_01")))
-                .insuranceNetBuy(parseLong(outBlock.get("svolume_02")))
-                .investmentTrustNetBuy(parseLong(outBlock.get("svolume_03")))
-                .build());
+        return localMarketDataReader.getMarketObject("investorSummary", InvestorTypeSummaryDto.class);
     }
 
-    /** 투자자매매종합1(t1615) — 코스피/코스닥/선물/옵션 등 시장별 투자자 순매수 비교. */
+    /** 시장별(코스피/코스닥) 개인·외국인·기관 순매수 비교. 데이터가 없으면 빈 목록. */
     public List<MarketInvestorComparisonDto> getMarketComparison() {
-        String token = accessTokenProvider.issueAccessToken();
-        Map<String, Object> requestBody = Map.of("t1615InBlock", Map.of("gubun1", "1", "gubun2", "1"));
-
-        Map<String, Object> response = call("t1615", requestBody, token);
-        if (response == null || !(response.get("t1615OutBlock1") instanceof List)) {
-            return List.of();
-        }
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> outBlock = (List<Map<String, Object>>) response.get("t1615OutBlock1");
-        return outBlock.stream()
-                .map(row -> MarketInvestorComparisonDto.builder()
-                        .marketName(stringOf(row.get("hname")))
-                        .individualNetBuy(parseLong(row.get("sv_08")))
-                        .foreignNetBuy(parseLong(row.get("sv_17")))
-                        .institutionNetBuy(parseLong(row.get("sv_18")))
-                        .build())
-                .toList();
-    }
-
-    private Map<String, Object> call(String trCd, Map<String, Object> requestBody, String token) {
-        return call(investorUrl, trCd, requestBody, token, "외부 시세 데이터 투자자(" + trCd + ") 조회 실패");
+        return localMarketDataReader.getMarketList("marketComparison", MarketInvestorComparisonDto.class);
     }
 }

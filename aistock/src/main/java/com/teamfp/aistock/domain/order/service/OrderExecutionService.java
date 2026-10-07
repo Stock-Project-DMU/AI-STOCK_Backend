@@ -55,10 +55,8 @@ public class OrderExecutionService {
     private final TradeFeeService tradeFeeService;
 
     // 주문이 대기 리스트에서 빠질 때 미체결 주문 종목 구독(주문 접수 시 +1)을 함께 줄인다.
-    // 생성자 주입이면 real 모드에서 StockSubscriptionManager → MarketDataWebSocketClient →
-    // MarketDataWebSocketHandler → StockBroadcastService → OrderExecutionService → StockSubscriptionManager
-    // 순환 의존이 생겨 애플리케이션이 기동하지 못한다(mock 모드는 WebSocket 클라이언트 빈이 없어 드러나지
-    // 않았음, 2026-10-01 확인). 아래 self와 같은 @Lazy 필드 주입으로 프록시를 받아 고리를 끊는다.
+    // 시세 수신 → StockBroadcastService → OrderExecutionService → StockSubscriptionManager로 이어지는 빈 사이에 순환 의존이
+    // 생기지 않도록(2026-10-01, 당시 real 모드 WebSocket 클라이언트 경로에서 실측) self와 같은 @Lazy 필드 주입으로 프록시를 받는다.
     @Autowired
     @Lazy
     private StockSubscriptionManager stockSubscriptionManager;

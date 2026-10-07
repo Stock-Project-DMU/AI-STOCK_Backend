@@ -56,13 +56,10 @@ cors:
 jwt:
   secret: ${JWT_SECRET}
 
-# 운영 환경은 실서버(포트 9443)로 접속하며, 로컬 기본값을 물려받지 않도록 기본값 없이 강제한다.
-# mode는 현재 real 고정 — 추후 Mock 전환 브랜치에서 다시 바뀔 값이지만 지금은 실제 외부 시세 데이터 연동을 사용한다.
+# 운영 환경도 local-market-data-generator가 만드는 시세를 쓴다(fix/local-market-data-stable — 실제 시세 연동 제거).
+# 배포 서버는 generator와 파일 시스템을 공유하지 못하므로 MARKET_DATA_URL에 generator의 GET /market-data 주소를 넣는다.
 market-data:
-  mode: real
-  websocket-url: ${MARKET_DATA_WEBSOCKET_URL}
-  app-key: ${MARKET_DATA_APP_KEY}
-  app-secret: ${MARKET_DATA_APP_SECRET}
+  url: ${MARKET_DATA_URL}
 
 admin:
   signup-code: ${ADMIN_SIGNUP_CODE}

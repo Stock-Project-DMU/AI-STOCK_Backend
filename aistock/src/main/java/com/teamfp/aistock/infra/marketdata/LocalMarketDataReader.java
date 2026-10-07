@@ -2,11 +2,12 @@ package com.teamfp.aistock.infra.marketdata;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -14,88 +15,76 @@ import org.springframework.web.client.RestClient;
 import com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility;
 import com.fasterxml.jackson.annotation.PropertyAccessor;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JavaType;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.type.MapType;
+import com.fasterxml.jackson.databind.node.MissingNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
+import com.teamfp.aistock.infra.marketdata.dto.HistoricalPriceDto;
 import com.teamfp.aistock.infra.marketdata.dto.HogaData;
 
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * {@code market-data.mode=mock}에서 외부 시세 데이터 실시간 시세 대신 로컬 파일(또는 HTTP)로 시세·호가를 공급하는
- * 컴포넌트(feature/ls-local-data). 위 10개 REST 클라이언트({@link MarketDataApiClient} 등)와
- * 달리 외부 시세 데이터 API를 호출하지 않으므로(TR코드/Authorization 헤더 불필요) {@link MarketDataApiClientSupport}를
- * 상속하지 않는다.
+ * 시세 데이터의 유일한 원천 — local-market-data-generator가 갱신하는 {@code market_data.json}(또는 같은 내용을
+ * 내려주는 HTTP 엔드포인트)과 과거 시세 스냅샷 {@code price_history.json}을 읽는다(fix/local-market-data-stable에서
+ * 외부 시세 데이터 제공사 API 직접 호출(real 모드)을 없애면서 모든 시세 클라이언트가 이 컴포넌트만 쓰게 됐다).
  *
- * <p>{@code market-data.mode=mock}일 때만 빈으로 생성된다 — {@link MarketDataWebSocketClient}(real 전용)와 정반대
- * 조건이다. {@link MarketDataApiClient}는 이 빈을 {@code Optional}로 주입받아, 존재하면(=mock)
- * 이걸로 대체하고 없으면(=real) 기존 REST 호출을 그대로 쓴다({@code StockSubscriptionManager}가
- * {@code Optional<MarketDataWebSocketClient>}로 mock/real을 구분하는 것과 동일한 패턴). {@code StockService}도
- * 동일한 패턴으로 이 빈을 주입받아 {@code getCurrentPrice()}/{@code getHoga()} 둘 다 mock/real을
- * 분기한다.</p>
+ * <p>{@code market_data.json} 구조 — 종목코드를 키로 종목 객체를 담고, 시장 전체 데이터는 {@code "_market"} 키에 담는다.
+ * {@code "_"}로 시작하는 키는 종목이 아니므로 종목 목록({@link #getAllCurrentPrices()})에서 뺀다.</p>
+ * <pre>
+ * {"005930": {현재가 필드(CurrentPriceDetailDto) + 호가 필드(HogaData) + 종목 부가 데이터(investorTrend, themes, ...)},
+ *  "_market": {hotThemes, investorSummary, overseasIndexes, ...}}
+ * </pre>
+ * 부가 데이터 필드명은 응답 DTO 필드명과 같아 그대로 역직렬화한다(서로 모르는 필드는 무시 —
+ * {@code FAIL_ON_UNKNOWN_PROPERTIES=false}). 원본을 찾지 못하거나 파싱에 실패하거나 키가 없으면 예외 없이 빈 값을 돌려준다.
  *
- * <p>데이터 원본은 {@code {"005930": {CurrentPriceDetailDto 필드... + HogaData 필드(askPrices
- * 등)...}, "000660": {...}}} 형태의 맵 JSON이다 — 종목 하나당 현재가·호가 필드가 한 JSON 객체에
- * 함께 들어있고, {@link #getCurrentPrice}/{@link #getHoga}는 같은 데이터를 각자 필요한 DTO
- * 타입으로 따로 역직렬화한다(서로 자기 DTO에 없는 필드는 모른 척 무시 — 그래서 아래
- * {@code FAIL_ON_UNKNOWN_PROPERTIES}를 꺼둔다).</p>
- *
- * <p><b>원본을 어디서 읽을지는 {@code market-data.url} 값으로 갈린다</b>(feature/mock-broadcast-remote,
- * 배포 사전검증 단계 추가) — 로컬 개발은 백엔드 프로세스와 데이터 생성기가 같은 파일 시스템을
- * 쓰므로 {@code market-data.local-path} 디렉토리의 {@code market_data.json} 파일을 직접 읽는 게
- * 기본값(빈 문자열)이다. 반면 백엔드를 별도 서버·컨테이너에 배포하면 데이터 생성기가 도는
- * 로컬 PC의 파일 시스템에 더 이상 접근할 수 없으므로, {@code market-data.url}에 데이터
- * 생성기가 노출하는 HTTP 엔드포인트(예: {@code http://<데이터 생성기 호스트>:8081/market-data})를
- * 넣으면 파일 대신 그 URL로 GET 요청해 동일한 JSON을 가져온다. 두 경로 모두 같은 JSON 스키마를
- * 반환하므로 이후 파싱·역직렬화 로직은 완전히 동일하다.</p>
+ * <p><b>원본은 {@code market-data.url} 값으로 갈린다</b> — 비어 있으면(로컬 개발) {@code market-data.local-path}
+ * 디렉토리의 파일을 읽고, 값이 있으면(백엔드가 생성기와 파일 시스템을 공유하지 못하는 배포 서버) 그 URL(생성기의
+ * {@code GET /market-data})로 같은 JSON을 가져온다. 파일은 수정 시각이 바뀔 때만, URL은 {@value #URL_CACHE_MILLIS}ms가
+ * 지났을 때만 다시 읽는다 — 부가 데이터가 붙어 파일이 수백 KB라 조회마다 다시 파싱하지 않기 위해서다(생성기는 5초마다 쓴다).</p>
  */
 @Slf4j
 @Component
-@ConditionalOnProperty(name = "market-data.mode", havingValue = "mock")
 public class LocalMarketDataReader {
 
     private static final String MARKET_DATA_FILE_NAME = "market_data.json";
+    // 과거 봉 스냅샷 — local-market-data-generator/history_collector.py가 만든다.
+    private static final String PRICE_HISTORY_FILE_NAME = "price_history.json";
+    /** 시장 전체 부가 데이터가 담긴 키. */
+    public static final String MARKET_KEY = "_market";
+    private static final long URL_CACHE_MILLIS = 1_000L;
 
-    // updatedAt(LocalDateTime) 역직렬화를 위해 JavaTimeModule을 반드시 등록해야 한다 — 등록하지
-    // 않으면 market_data.json에 updatedAt 값이 있을 때 InvalidDefinitionException으로 실패한다
-    // (기존 테스트가 updatedAt을 넣지 않아 발견되지 않았던 버그, 단일 파일 구조 전환 시 수정).
-    // FAIL_ON_UNKNOWN_PROPERTIES를 꺼야 한다 — 종목 하나당 JSON 객체 하나에 현재가 필드와 호가
-    // 필드가 함께 들어있는데, CurrentPriceDetailDto로 읽을 땐 호가 필드(askPrices 등)가,
-    // HogaData로 읽을 땐 현재가 필드(currentPrice 등)가 서로에게 "모르는 필드"이기 때문이다
-    // (호가 지원 추가, 2026-09-20).
+    // updatedAt(LocalDateTime) 역직렬화를 위해 JavaTimeModule을 등록하고, 종목 객체 하나에 여러 DTO의 필드가 섞여
+    // 있어 FAIL_ON_UNKNOWN_PROPERTIES를 끈다.
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper()
             .setVisibility(PropertyAccessor.FIELD, Visibility.ANY)
             .registerModule(new JavaTimeModule())
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
-    private static final MapType MARKET_DATA_MAP_TYPE = OBJECT_MAPPER.getTypeFactory()
-            .constructMapType(Map.class, String.class, CurrentPriceDetailDto.class);
-
-    private static final MapType HOGA_MAP_TYPE = OBJECT_MAPPER.getTypeFactory()
-            .constructMapType(Map.class, String.class, HogaData.class);
-
     @Value("${market-data.local-path:}")
     private String localDataPath;
 
-    // 값이 비어있지 않으면(배포 환경) 파일 대신 이 URL로 GET 요청해 같은 JSON을 가져온다.
-    // 로컬 개발은 이 값이 비어있어(기본값) 기존과 동일하게 파일을 직접 읽는다. 필드 초기값을
-    // 빈 문자열로 둬야 한다 — LocalMarketDataReaderTest처럼 스프링 컨테이너 없이
-    // `new LocalMarketDataReader()`로 직접 생성해 @Value 주입이 일어나지 않는 테스트에서
-    // 이 필드가 null로 남아 isBlank() 호출 시 NPE가 나는 것을 막는다.
+    // 값이 비어있지 않으면(배포 환경) 파일 대신 이 URL로 GET 요청해 같은 JSON을 가져온다. 테스트가 스프링 없이
+    // new로 만들 때 null이 되지 않도록 빈 문자열로 초기화한다.
     @Value("${market-data.url:}")
     private String localDataUrl = "";
 
-    // Spring이 관리하는 빈(RestClientConfig의 marketDataRestClientBuilder 등)을 주입받지 않고 직접
-    // 생성한다 — MarketDataWebSocketClient의 StandardWebSocketClient와 동일한 이유로, 테스트가 생성자
-    // 주입 없이 `new LocalMarketDataReader()`로 만든 뒤 ReflectionTestUtils로 필드만 주입하는
-    // 기존 방식을 그대로 유지하기 위함이다. connect/read 타임아웃은 RestClientConfig의 이유와
-    // 동일하게(무제한이면 응답 지연 시 요청 스레드가 무한 대기) 직접 설정한다 — 로컬 개발
-    // 기본값(local-data-url 빈 문자열)에서는 이 필드가 아예 쓰이지 않는다.
     private static final int CONNECT_TIMEOUT_MS = 3_000;
     private static final int READ_TIMEOUT_MS = 5_000;
-
     private final RestClient restClient = createRestClient();
+
+    // market_data.json 캐시 — 원본(파일 경로 또는 URL), 파일 수정 시각·크기(또는 URL 조회 시각)가 같으면 재사용한다.
+    private JsonNode cachedRoot = MissingNode.getInstance();
+    private String cachedSource;
+    private long cachedVersion = Long.MIN_VALUE;
+    private long cachedAtMillis;
+    private Map<String, CurrentPriceDetailDto> cachedPrices = Map.of();
+
+    private PriceHistoryFile cachedPriceHistory;
+    private long cachedPriceHistoryModifiedAt = -1L;
 
     private static RestClient createRestClient() {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
@@ -104,14 +93,9 @@ public class LocalMarketDataReader {
         return RestClient.builder().requestFactory(requestFactory).build();
     }
 
-    /**
-     * 종목코드로 데이터 원본(파일 또는 URL)에서 해당 종목코드 키의 값을 꺼낸다. 원본을 찾지
-     * 못하거나 파싱에 실패하거나 해당 종목코드 키가 없으면 REST 클라이언트들과 동일한 관례로
-     * 예외를 던지지 않고 빈 값을 반환한다.
-     */
+    /** 종목코드의 현재가. 원본·종목이 없으면 빈 값. */
     public Optional<CurrentPriceDetailDto> getCurrentPrice(String stockCode) {
-        Map<String, CurrentPriceDetailDto> marketData = readMarketData(MARKET_DATA_MAP_TYPE);
-        CurrentPriceDetailDto price = marketData.get(stockCode);
+        CurrentPriceDetailDto price = getAllCurrentPrices().get(stockCode);
         if (price == null) {
             log.warn("시세 데이터에 종목코드 없음 - stockCode: {}", stockCode);
             return Optional.empty();
@@ -120,65 +104,211 @@ public class LocalMarketDataReader {
     }
 
     /**
-     * 데이터 원본 전체를 한 번에 읽어 종목코드→현재가 맵으로 반환한다. {@code MockMarketDataGenerator}
-     * (market-data.mode=mock, feature/mock-broadcast)가 구독 중인 다수 종목의 {@code updatedAt} 변경
-     * 여부를 매 폴링 주기마다 확인해야 하는데, {@link #getCurrentPrice(String)}을 종목 수만큼
-     * 반복 호출하면 같은 원본을 그만큼 반복해서 읽게 되어 한 번만 읽는 전용 메서드를 둔다.
-     * 원본을 찾지 못하거나 파싱에 실패하면 다른 메서드와 동일한 관례로 예외를 던지지 않고 빈
-     * 맵을 반환한다.
+     * 전체 종목의 현재가(종목코드 → 현재가, {@code "_"}로 시작하는 키 제외). 원본이 바뀌지 않았으면 이전에 변환한 맵을
+     * 그대로 돌려준다(MockMarketDataGenerator가 5초마다 부른다).
      */
-    public Map<String, CurrentPriceDetailDto> getAllCurrentPrices() {
-        return readMarketData(MARKET_DATA_MAP_TYPE);
+    public synchronized Map<String, CurrentPriceDetailDto> getAllCurrentPrices() {
+        JsonNode root = readRoot();
+        if (root != cachedPricesRoot) {
+            Map<String, CurrentPriceDetailDto> prices = new LinkedHashMap<>();
+            root.properties().forEach(entry -> {
+                if (!entry.getKey().startsWith("_") && entry.getValue().isObject()) {
+                    convert(entry.getValue(), CurrentPriceDetailDto.class).ifPresent(price -> prices.put(entry.getKey(), price));
+                }
+            });
+            cachedPrices = Map.copyOf(prices);
+            cachedPricesRoot = root;
+        }
+        return cachedPrices;
     }
 
-    /**
-     * 종목코드로 데이터 원본에서 해당 종목코드 키의 호가 필드(askPrices/askVolumes/bidPrices/
-     * bidVolumes)를 꺼낸다. 원본을 찾지 못하거나 파싱에 실패하거나 해당 종목코드 키가 없거나,
-     * 있어도 호가 필드 자체가 비어있으면(예: 데이터 생성기가 아직 호가 결과를 채우지 못한
-     * 시점) 예외를 던지지 않고 빈 값을 반환한다.
-     */
+    private JsonNode cachedPricesRoot;
+
+    /** 종목코드의 호가(askPrices 등). 원본·종목·호가 필드가 없으면 빈 값. */
     public Optional<HogaData> getHoga(String stockCode) {
-        Map<String, HogaData> marketData = readMarketData(HOGA_MAP_TYPE);
-        HogaData hoga = marketData.get(stockCode);
-        if (hoga == null || hoga.getAskPrices() == null) {
+        Optional<HogaData> hoga = convert(stockNode(stockCode), HogaData.class);
+        if (hoga.isEmpty() || hoga.get().getAskPrices() == null) {
             log.warn("시세 데이터에 종목코드의 호가 데이터 없음 - stockCode: {}", stockCode);
             return Optional.empty();
         }
-        return Optional.of(hoga);
+        return hoga;
     }
 
-    private <T> Map<String, T> readMarketData(MapType mapType) {
-        if (!localDataUrl.isBlank()) {
-            return readFromUrl(mapType);
+    /** 종목 객체의 부가 데이터 목록(예: investorTrend, themes, opinions). 없으면 빈 목록. */
+    public <T> List<T> getStockList(String stockCode, String field, Class<T> elementType) {
+        return convertList(stockNode(stockCode).path(field), elementType);
+    }
+
+    /** 종목 객체의 부가 데이터 객체(예: pivot). 없으면 빈 값. */
+    public <T> Optional<T> getStockObject(String stockCode, String field, Class<T> type) {
+        return convert(stockNode(stockCode).path(field), type);
+    }
+
+    /** 종목 객체의 부가 데이터 원본 노드(DTO로 바로 옮기지 않는 구조 — 예: credit). 없으면 MissingNode. */
+    public JsonNode getStockField(String stockCode, String field) {
+        return stockNode(stockCode).path(field);
+    }
+
+    /** 시장 전체 부가 데이터 목록(예: hotThemes, newListings). 없으면 빈 목록. */
+    public <T> List<T> getMarketList(String field, Class<T> elementType) {
+        return convertList(marketNode().path(field), elementType);
+    }
+
+    /** 시장 전체 부가 데이터 객체(예: investorSummary). 없으면 빈 값. */
+    public <T> Optional<T> getMarketObject(String field, Class<T> type) {
+        return convert(marketNode().path(field), type);
+    }
+
+    /** 시장 전체 부가 데이터 원본 노드(맵 구조 — 예: overseasIndexes, industryTrend). 없으면 MissingNode. */
+    public JsonNode getMarketField(String field) {
+        return marketNode().path(field);
+    }
+
+    /** JsonNode를 원하는 DTO로 옮긴다(시장 맵의 값처럼 호출부가 노드를 직접 고른 경우). 실패하면 빈 값. */
+    public <T> Optional<T> convert(JsonNode node, Class<T> type) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return Optional.empty();
         }
-        return readFromFile(mapType);
+        try {
+            return Optional.ofNullable(OBJECT_MAPPER.treeToValue(node, type));
+        } catch (IOException | IllegalArgumentException e) {
+            log.warn("시세 데이터 변환 실패 - type: {}, 사유: {}", type.getSimpleName(), e.getMessage());
+            return Optional.empty();
+        }
     }
 
-    private <T> Map<String, T> readFromFile(MapType mapType) {
+    /** JsonNode 배열을 DTO 목록으로 옮긴다. 배열이 아니거나 실패하면 빈 목록. */
+    public <T> List<T> convertList(JsonNode node, Class<T> elementType) {
+        if (node == null || !node.isArray()) {
+            return List.of();
+        }
+        try {
+            JavaType listType = OBJECT_MAPPER.getTypeFactory().constructCollectionType(List.class, elementType);
+            List<T> result = OBJECT_MAPPER.readerFor(listType).readValue(node);
+            return result == null ? List.of() : result;
+        } catch (IOException | IllegalArgumentException e) {
+            log.warn("시세 데이터 목록 변환 실패 - type: {}, 사유: {}", elementType.getSimpleName(), e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * 종목의 과거 봉(최신순)을 {@code price_history.json}에서 꺼낸다. dwmcode는 1=일봉, 2=주봉, 3=월봉이다. 이 파일은
+     * local-market-data-generator의 history_collector.py가 기간별주가(t1305)를 한 번 받아 저장해 두는 스냅샷이다.
+     * 파일이 없거나(수집 전) 종목·봉 종류가 없거나 파싱에 실패하면 빈 목록을 돌려주고, 호출부({@link MarketDataApiClient})가
+     * 합성 시세로 대체한다. {@code market-data.url}(HTTP 원본) 모드에서는 이 파일을 읽지 않는다. 파일 수정 시각이 바뀌었을
+     * 때만 다시 읽는다.
+     */
+    public List<HistoricalPriceDto> getPriceHistory(String stockCode, int dwmcode) {
+        if (!localDataUrl.isBlank()) {
+            return List.of();
+        }
+        PriceHistoryFile history = readPriceHistory();
+        StockPriceHistory stockHistory = history.stocks == null ? null : history.stocks.get(stockCode);
+        if (stockHistory == null) {
+            return List.of();
+        }
+        List<HistoricalPriceDto> bars = switch (dwmcode) {
+            case 1 -> stockHistory.day;
+            case 2 -> stockHistory.week;
+            case 3 -> stockHistory.month;
+            default -> null;
+        };
+        return bars == null ? List.of() : bars;
+    }
+
+    private JsonNode stockNode(String stockCode) {
+        if (stockCode == null || stockCode.startsWith("_")) {
+            return MissingNode.getInstance();
+        }
+        return readRoot().path(stockCode);
+    }
+
+    private JsonNode marketNode() {
+        return readRoot().path(MARKET_KEY);
+    }
+
+    private synchronized JsonNode readRoot() {
+        return localDataUrl.isBlank() ? readRootFromFile() : readRootFromUrl();
+    }
+
+    private JsonNode readRootFromFile() {
         File file = new File(localDataPath, MARKET_DATA_FILE_NAME);
         if (!file.exists()) {
             log.warn("로컬 시세 파일을 찾지 못함 - path: {}", file.getPath());
-            return Map.of();
+            return remember(file.getPath(), Long.MIN_VALUE + 1, MissingNode.getInstance());
+        }
+        long version = file.lastModified() * 31 + file.length();
+        if (file.getPath().equals(cachedSource) && version == cachedVersion) {
+            return cachedRoot;
         }
         try {
-            return OBJECT_MAPPER.readValue(file, mapType);
+            JsonNode root = OBJECT_MAPPER.readTree(file);
+            return remember(file.getPath(), version, root instanceof ObjectNode ? root : MissingNode.getInstance());
         } catch (IOException e) {
             log.warn("로컬 시세 파일 파싱 실패 - path: {}, 사유: {}", file.getPath(), e.getMessage());
-            return Map.of();
+            return remember(file.getPath(), version, MissingNode.getInstance());
         }
     }
 
-    private <T> Map<String, T> readFromUrl(MapType mapType) {
+    private JsonNode readRootFromUrl() {
+        long now = System.currentTimeMillis();
+        if (localDataUrl.equals(cachedSource) && now - cachedAtMillis < URL_CACHE_MILLIS) {
+            return cachedRoot;
+        }
         try {
             String body = restClient.get().uri(localDataUrl).retrieve().body(String.class);
             if (body == null || body.isBlank()) {
                 log.warn("원격 시세 데이터 응답이 비어있음 - url: {}", localDataUrl);
-                return Map.of();
+                return remember(localDataUrl, now, MissingNode.getInstance());
             }
-            return OBJECT_MAPPER.readValue(body, mapType);
+            JsonNode root = OBJECT_MAPPER.readTree(body);
+            return remember(localDataUrl, now, root instanceof ObjectNode ? root : MissingNode.getInstance());
         } catch (Exception e) {
             log.warn("원격 시세 데이터 조회 실패 - url: {}, 사유: {}", localDataUrl, e.getMessage());
-            return Map.of();
+            return remember(localDataUrl, now, MissingNode.getInstance());
         }
+    }
+
+    private JsonNode remember(String source, long version, JsonNode root) {
+        cachedSource = source;
+        cachedVersion = version;
+        cachedAtMillis = System.currentTimeMillis();
+        cachedRoot = root;
+        return root;
+    }
+
+    private synchronized PriceHistoryFile readPriceHistory() {
+        File file = new File(localDataPath, PRICE_HISTORY_FILE_NAME);
+        if (!file.exists()) {
+            cachedPriceHistory = PriceHistoryFile.EMPTY;
+            cachedPriceHistoryModifiedAt = -1L;
+            return cachedPriceHistory;
+        }
+        long modifiedAt = file.lastModified();
+        if (cachedPriceHistory != null && modifiedAt == cachedPriceHistoryModifiedAt) {
+            return cachedPriceHistory;
+        }
+        try {
+            cachedPriceHistory = OBJECT_MAPPER.readValue(file, PriceHistoryFile.class);
+        } catch (IOException e) {
+            log.warn("로컬 과거 시세 파일 파싱 실패 - path: {}, 사유: {}", file.getPath(), e.getMessage());
+            cachedPriceHistory = PriceHistoryFile.EMPTY;
+        }
+        cachedPriceHistoryModifiedAt = modifiedAt;
+        return cachedPriceHistory;
+    }
+
+    // price_history.json 구조 — {"generatedAt": "...", "stocks": {"005930": {"day": [...], "week": [...], "month": [...]}}}.
+    // 봉 목록은 최신순이고 각 봉은 HistoricalPriceDto 필드명을 그대로 쓴다.
+    static class PriceHistoryFile {
+        static final PriceHistoryFile EMPTY = new PriceHistoryFile();
+        Map<String, StockPriceHistory> stocks = Map.of();
+    }
+
+    static class StockPriceHistory {
+        List<HistoricalPriceDto> day;
+        List<HistoricalPriceDto> week;
+        List<HistoricalPriceDto> month;
     }
 }
