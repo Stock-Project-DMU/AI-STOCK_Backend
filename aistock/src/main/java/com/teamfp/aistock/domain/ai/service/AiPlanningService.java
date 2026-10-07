@@ -1406,6 +1406,9 @@ public class AiPlanningService {
                 case CAPITAL_CHANGE_TOOL_NAME -> executeCapitalChangeLookup(functionCall);
                 case OWNERSHIP_TOOL_NAME -> executeOwnershipLookup(functionCall);
                 case DISCLOSURE_TOOL_NAME -> executeDisclosureLookup(functionCall);
+                // CONSTITUENTS 모드의 get_etf_info는 위 캐시 우회 대상이 아니라 여기로 온다 — 이 분기가 빠져 있어
+                // "요청한 도구를 찾을 수 없습니다"가 나던 버그(fix/local-market-data-stable 검증 중 발견)를 고친다.
+                case ETF_INFO_TOOL_NAME -> executeEtfInfoLookup(functionCall);
                 default -> {
                     log.warn("알 수 없는 도구 호출 요청 - name: {}", functionCall.name());
                     yield Map.of("result", "요청한 도구를 찾을 수 없습니다.");
@@ -2244,7 +2247,7 @@ public class AiPlanningService {
     private Map<String, Object> executeEtfInfoLookup(GeminiResponse.FunctionCall functionCall) {
         String companyName = stringArg(functionCall.args(), "companyName");
         String infoType = stringArg(functionCall.args(), "infoType");
-        return withResolvedStockCode(companyName, stockCode -> {
+        Function<String, Map<String, Object>> lookup = stockCode -> {
             if ("CONSTITUENTS".equals(infoType)) {
                 List<EtfConstituentDto> constituents = etfApiClient.getConstituents(stockCode);
                 if (constituents.isEmpty()) {
@@ -2259,7 +2262,14 @@ public class AiPlanningService {
                 return Map.of("result", "'%s'의 현재가를 확인할 수 없습니다.".formatted(companyName));
             }
             return Map.of("result", describeCurrentPrice(price.get()));
-        }, "ETF 정보를 확인할 수 없습니다.");
+        };
+        // DART 회사 목록에는 ETF가 없어 이름("KODEX 200")으로는 종목코드를 못 찾으므로, 등록 ETF 목록에서 먼저 찾는다
+        // (fix/local-market-data-stable). 못 찾으면 기존처럼 DART 종목코드 조회로 넘어간다.
+        Optional<String> etfCode = etfApiClient.findEtfCode(companyName);
+        if (etfCode.isPresent()) {
+            return lookup.apply(etfCode.get());
+        }
+        return withResolvedStockCode(companyName, lookup, "ETF 정보를 확인할 수 없습니다.");
     }
 
     private Map<String, Object> executeProgramTradingSummaryLookup(GeminiResponse.FunctionCall functionCall) {

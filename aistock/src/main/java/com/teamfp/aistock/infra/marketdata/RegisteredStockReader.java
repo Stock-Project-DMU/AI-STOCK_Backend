@@ -17,10 +17,9 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * 백엔드에 함께 배포되는 등록 종목 목록(classpath {@code stocks.json}, 2026-10-02 기준 105개)을 읽는다.
  *
- * <p>real 모드의 순위 TR(t1441/t1444/t1452/t1463)은 시장 전체 상위 10건만 돌려줘서, 홈 주요 종목
- * 무한 스크롤({@code GET /api/market/rankings?all=true})과 시뮬레이션 리밸런싱 후보가 mock 모드(105개)와
- * 달리 10개로 잘렸다. {@link HighItemApiClient}가 이 목록의 종목코드로 t8407 현재가를 받아 직접 정렬해
- * mock/real 모두 같은 105개 범위를 반환하도록 하기 위한 종목 범위 기준이다.</p>
+ * <p>처음에는 real 모드 등록 종목 순위용으로 추가했고(2026-10-02), fix/local-market-data-stable에서 real 모드를 없앤 뒤에는
+ * 시세 데이터와 무관하게 "등록 종목코드 → 종목명·시장·상장주식수" 카탈로그로 쓴다(예: feature/dividend의 배당 일정 종목명).
+ * 외부 시세 데이터 API는 호출하지 않는다.</p>
  *
  * <p>local-market-data-generator(별도 프로젝트, git 미포함)의 stocks.json과 종목 구성이 같아야 한다 —
  * 그 파일은 팀원 PC에 없을 수 있어 백엔드가 직접 읽지 않고, 필요한 필드만 복사해 resources에 둔다.

@@ -18,16 +18,9 @@ public class MarketQueryService {
     private final IndustryApiClient industryApiClient;
     private final InvestInfoApiClient investInfoApiClient;
     private final com.teamfp.aistock.infra.dart.DartApiClient dartApiClient;
-    @org.springframework.beans.factory.annotation.Value("${market-data.app-key:}") private String appKey;
-    @org.springframework.beans.factory.annotation.Value("${market-data.app-secret:}") private String appSecret;
 
-    private void requireMarketConfigured() {
-        if (appKey == null || appKey.isBlank() || appSecret == null || appSecret.isBlank())
-            throw new CustomException(ErrorCode.MARKET_NOT_CONFIGURED);
-    }
 
     public OverseasIndexDto getExchangeRate() {
-        requireMarketConfigured();
         return investInfoApiClient.getOverseasIndex("R", "USDKRWSMBS")
                 .orElseThrow(() -> new CustomException(ErrorCode.STOCK_PRICE_NOT_AVAILABLE));
     }
@@ -50,13 +43,11 @@ public class MarketQueryService {
     }
 
     public List<IndustryPriceDto> getIndexes() {
-        requireMarketConfigured();
         return java.util.stream.Stream.of("코스피", "코스닥").map(industryApiClient::getCurrentPrice)
                 .flatMap(java.util.Optional::stream).toList();
     }
 
     public Object getResearch(String stockCode, String section) {
-        requireMarketConfigured();
         validateCode(stockCode);
         if (section.equals("analysts")) return investInfoApiClient.getInvestmentOpinions(stockCode);
         if (section.equals("peers")) return highItemApiClient.getTopMarketCap();
@@ -69,11 +60,9 @@ public class MarketQueryService {
             default -> throw new CustomException(ErrorCode.INVALID_INPUT);
         };
     }
-    // isAll=true는 홈 주요 종목 무한 스크롤·시뮬레이션 리밸런싱 후보용 — mock/real 모두 상위 10건 제한 없이
-    // 등록 종목(stocks.json, 2026-10-02 기준 105개) 전체를 한 번에 반환한다. real 모드는 순위 TR 대신 등록 종목의
-    // t8407 현재가로 정렬한다(HighItemApiClient 참고, 이전에는 real 모드만 최대 10건이었음). false면 기존과 동일하게 상위 10건.
+    // isAll=true는 홈 주요 종목 무한 스크롤·시뮬레이션 리밸런싱 후보용 — 상위 10건 제한 없이 로컬 시세 데이터의 등록 종목
+    // (local-market-data-generator stocks.json, 105개) 전체를 한 번에 정렬해 반환한다. false면 상위 10건.
     public List<RankingItemDto> getRankings(String sort, boolean isAll) {
-        requireMarketConfigured();
         if (isAll) {
             int limit = HighItemApiClient.ALL_REGISTERED_STOCKS;
             return switch (sort) {
@@ -96,7 +85,6 @@ public class MarketQueryService {
         };
     }
     public List<HistoricalPriceDto> getHistory(String stockCode, int months) {
-        requireMarketConfigured();
         validateCode(stockCode);
         if (months < 1 || months > 60) throw new CustomException(ErrorCode.INVALID_INPUT);
         return marketDataApiClient.getHistoricalPrices(stockCode, months);
@@ -104,13 +92,11 @@ public class MarketQueryService {
     // 종목 상세 차트용 — dwmcode(1=일봉/2=주봉/3=월봉)를 그대로 써서 count건(1~60)을 조회한다.
     // getHistory(months)는 months가 오면 월봉으로 바뀌어 일·주 탭에 쓸 수 없어 분리했다.
     public List<HistoricalPriceDto> getChartHistory(String stockCode, int dwmcode, int count) {
-        requireMarketConfigured();
         validateCode(stockCode);
         if (dwmcode < 1 || dwmcode > 3 || count < 1 || count > 60) throw new CustomException(ErrorCode.INVALID_INPUT);
         return marketDataApiClient.getChartPrices(stockCode, dwmcode, count);
     }
     public CurrentPriceDetailDto getDetail(String stockCode) {
-        requireMarketConfigured();
         validateCode(stockCode);
         return marketDataApiClient.getCurrentPrice(stockCode)
                 .orElseThrow(() -> new CustomException(ErrorCode.STOCK_PRICE_NOT_AVAILABLE));

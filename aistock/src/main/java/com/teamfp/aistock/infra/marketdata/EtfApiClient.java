@@ -1,126 +1,71 @@
 package com.teamfp.aistock.infra.marketdata;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
 
 import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
 import com.teamfp.aistock.infra.marketdata.dto.EtfConstituentDto;
 
-import lombok.extern.slf4j.Slf4j;
+import lombok.RequiredArgsConstructor;
 
 /**
- * 외부 시세 데이터 제공사 Open API [주식] ETF 카테고리({@code /stock/etf})를 조회하는 클라이언트.
- * ETF현재가(시세)조회(t1901)/ETF구성종목조회(t1904) 2개 TR을 다룬다(2026-08-11 추가).
+ * ETF 현재가와 구성 종목(AI 재무설계사 상담 도구). local-market-data-generator가 market_data.json에 담는 값을 읽는다
+ * (fix/local-market-data-stable — 이전 real 모드에서는 외부 시세 데이터 t1901/t1904를 호출했다).
  */
-@Slf4j
 @Component
-public class EtfApiClient extends MarketDataApiClientSupport {
+@RequiredArgsConstructor
+public class EtfApiClient {
 
     private static final int MAX_CONSTITUENT_ITEMS = 10;
 
-    private final MarketDataAccessTokenProvider accessTokenProvider;
-    // market-data.mode=mock일 때만 존재. getCurrentPrice()만 mock 분기를 탄다 —
-    // getConstituents()(구성종목)는 market_data.json에 대응 데이터가 없어 이번 범위 밖이다
-    // (ETF 시세 mock 지원 추가, 2026-09-21).
-    private final Optional<LocalMarketDataReader> localMarketDataReader;
+    private final LocalMarketDataReader localMarketDataReader;
 
-    @Value("${market-data.etf-url}")
-    private String etfUrl;
-
-    public EtfApiClient(
-            MarketDataAccessTokenProvider accessTokenProvider,
-            Optional<LocalMarketDataReader> localMarketDataReader,
-            @org.springframework.beans.factory.annotation.Qualifier("marketDataRestClientBuilder") RestClient.Builder restClientBuilder) {
-        super(restClientBuilder);
-        this.accessTokenProvider = accessTokenProvider;
-        this.localMarketDataReader = localMarketDataReader;
+    /**
+     * ETF 현재가. stocks.json에 {@code isEtf: true}로 등록된 종목만 있다 — 등록되지 않았거나 ETF가 아닌 코드는 빈 값.
+     * 생성기가 ETF 종목에만 채우는 exchgubun("K"=KRX)도 CurrentPriceDetailDto 그대로 함께 돌려준다.
+     */
+    public Optional<CurrentPriceDetailDto> getCurrentPrice(String stockCode) {
+        return localMarketDataReader.getCurrentPrice(stockCode).filter(CurrentPriceDetailDto::isEtf);
     }
 
     /**
-     * ETF현재가(시세)조회(t1901) — NAV·52주 최고저 포함 현재가.
-     *
-     * market-data.mode=mock이면 MarketDataApiClient.getCurrentPrice()와 동일한 패턴으로
-     * LocalMarketDataReader를 직접 읽는다. stocks.json에 isEtf:true로 등록된 종목만 mock
-     * 데이터가 있다 — 등록되지 않은 ETF 코드는(t1901 전용 필드인 NAV 등은 애초에 mock에
-     * 없으므로) 다른 mock 분기와 동일하게 빈 값을 반환한다. local-market-data-generator가
-     * ETF 종목에만 채워 넣는 exchgubun("K"=KRX)도 CurrentPriceDetailDto 그대로를 반환하므로
-     * 별도 매핑 없이 함께 딸려온다(ETF exchgubun 신규 필드 반영, #04, 2026-09-23).
+     * 이름이나 6자리 코드로 등록 ETF의 종목코드를 찾는다(AI 상담 get_etf_info 도구용). DART 회사 목록에는 ETF가 없어
+     * "KODEX 200" 같은 이름이 종목코드로 바뀌지 않던 문제를 막는다 — 코드가 정확히 같거나, 이름이 같거나(공백 무시),
+     * 한쪽이 다른 쪽을 포함하면(이름이 가장 짧은 ETF) 그 코드를 돌려준다. ETF가 아니면 빈 값.
      */
-    public Optional<CurrentPriceDetailDto> getCurrentPrice(String stockCode) {
-        if (localMarketDataReader.isPresent()) {
-            return localMarketDataReader.get().getCurrentPrice(stockCode).filter(CurrentPriceDetailDto::isEtf);
-        }
-        String token = accessTokenProvider.issueAccessToken();
-        Map<String, Object> requestBody = Map.of("t1901InBlock", Map.of("shcode", stockCode));
-
-        Map<String, Object> response = call("t1901", requestBody, token);
-        if (response == null || !(response.get("t1901OutBlock") instanceof Map)) {
+    public Optional<String> findEtfCode(String nameOrCode) {
+        if (nameOrCode == null || nameOrCode.isBlank()) {
             return Optional.empty();
         }
-        @SuppressWarnings("unchecked")
-        Map<String, Object> outBlock = (Map<String, Object>) response.get("t1901OutBlock");
-        Long price = parseLong(outBlock.get("price"));
-        if (price == null) {
-            return Optional.empty();
-        }
-        // change(등락액)가 부호 없는 크기로 오고 방향은 sign 필드로 오는 t1102와 동일한
-        // 버그가 여기(t1901)도 있었다 — MarketDataApiClientSupport.signedLong으로 수정(2026-09-11).
-        Long changeAmount = signedLong(outBlock.get("change"), outBlock.get("sign"));
-        Long volume = parseLong(outBlock.get("volume"));
-        // per/high52wdate/low52wdate/listing/exhratio는 t1901OutBlock에 실제로 내려오는
-        // 필드인데(외부 시세 데이터 제공사 API 정리.html t1901 섹션), MarketDataApiClient(t1102)와 달리
-        // 지금까지 매핑이 안 돼 있어서 describeCurrentPrice()가 이 값들을 항상 빈 값으로만
-        // 보여주고 있었다(코드리뷰 지적 반영, 2026-09). pbr은 t1901에 대응 필드가 없어(ETF는
-        // PBR 개념이 없음) 계속 null로 둔다 — MarketDataApiClient.getCurrentPrice()와
-        // 동일한 파싱 패턴(parseNullableDouble 등)을 그대로 따른다.
-        return Optional.of(CurrentPriceDetailDto.builder()
-                .stockCode(stockCode)
-                .stockName(stringOf(outBlock.get("hname")))
-                .currentPrice(price)
-                .changeAmount(changeAmount != null ? changeAmount : 0L)
-                .changeRate(parseDoubleOrZero(outBlock.get("diff")))
-                .volume(volume != null ? volume : 0L)
-                .per(parseNullableDouble(outBlock.get("per")))
-                .high52w(parseLong(outBlock.get("high52w")))
-                .high52wDate(stringOf(outBlock.get("high52wdate")))
-                .low52w(parseLong(outBlock.get("low52w")))
-                .low52wDate(stringOf(outBlock.get("low52wdate")))
-                .listingShares(parseLong(outBlock.get("listing")))
-                .foreignExhaustionRate(parseNullableDouble(outBlock.get("exhratio")))
-                .updatedAt(java.time.LocalDateTime.now())
-                .build());
-    }
-
-    /** ETF구성종목조회(t1904) — 구성종목 최대 10개(비중 큰 순 응답 그대로). */
-    public List<EtfConstituentDto> getConstituents(String stockCode) {
-        String token = accessTokenProvider.issueAccessToken();
-        Map<String, Object> inBlock = Map.of("shcode", stockCode, "date", "", "sgb", "1");
-        Map<String, Object> requestBody = Map.of("t1904InBlock", inBlock);
-
-        Map<String, Object> response = call("t1904", requestBody, token);
-        if (response == null || !(response.get("t1904OutBlock1") instanceof List)) {
-            return List.of();
-        }
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> outBlock = (List<Map<String, Object>>) response.get("t1904OutBlock1");
-        return outBlock.stream()
-                .limit(MAX_CONSTITUENT_ITEMS)
-                .map(row -> EtfConstituentDto.builder()
-                        .stockCode(stringOf(row.get("shcode")))
-                        .stockName(stringOf(row.get("hname")))
-                        .price(parseLong(row.get("price")))
-                        .changeRate(parseDoubleOrZero(row.get("diff")))
-                        .weight(parseDoubleOrZero(row.get("weight")))
-                        .build())
+        String wanted = normalize(nameOrCode);
+        List<CurrentPriceDetailDto> etfs = localMarketDataReader.getAllCurrentPrices().values().stream()
+                .filter(CurrentPriceDetailDto::isEtf)
                 .toList();
+        for (CurrentPriceDetailDto etf : etfs) {
+            if (wanted.equals(etf.getStockCode()) || wanted.contains(etf.getStockCode())
+                    || (etf.getStockName() != null && wanted.equals(normalize(etf.getStockName())))) {
+                return Optional.of(etf.getStockCode());
+            }
+        }
+        return etfs.stream()
+                .filter(etf -> etf.getStockName() != null)
+                .filter(etf -> normalize(etf.getStockName()).contains(wanted) || wanted.contains(normalize(etf.getStockName())))
+                .min(java.util.Comparator.comparingInt(etf -> etf.getStockName().length()))
+                .map(CurrentPriceDetailDto::getStockCode);
     }
 
-    private Map<String, Object> call(String trCd, Map<String, Object> requestBody, String token) {
-        return call(etfUrl, trCd, requestBody, token, "외부 시세 데이터 ETF(" + trCd + ") 조회 실패");
+    private static String normalize(String value) {
+        return value.replaceAll("\\s", "").toUpperCase(java.util.Locale.ROOT);
+    }
+
+    /**
+     * ETF 구성 종목(비중 큰 순, 최대 {@value #MAX_CONSTITUENT_ITEMS}개). 생성기가 테마 ETF는 그 테마 종목, 지수 ETF는 같은
+     * 시장 시가총액 상위 종목으로 만든 모의 구성이다(가격은 30초마다 갱신). ETF가 아니면 빈 목록.
+     */
+    public List<EtfConstituentDto> getConstituents(String stockCode) {
+        List<EtfConstituentDto> items = localMarketDataReader.getStockList(stockCode, "etfConstituents", EtfConstituentDto.class);
+        return items.size() > MAX_CONSTITUENT_ITEMS ? items.subList(0, MAX_CONSTITUENT_ITEMS) : items;
     }
 }

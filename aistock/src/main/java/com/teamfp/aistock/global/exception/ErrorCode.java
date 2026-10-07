@@ -91,7 +91,6 @@ public enum ErrorCode {
     REBALANCE_SUGGESTION_INVALID(HttpStatus.BAD_GATEWAY, "REBALANCE_SUGGESTION_INVALID", "AI 리밸런싱 추천 결과가 올바르지 않습니다. 잠시 후 다시 시도해 주세요."),
 
     // 503 Service Unavailable
-    MARKET_NOT_CONFIGURED(HttpStatus.SERVICE_UNAVAILABLE, "MARKET_NOT_CONFIGURED", "시장 데이터 제공자 설정이 아직 완료되지 않았습니다."),
     OAUTH_NOT_CONFIGURED(HttpStatus.SERVICE_UNAVAILABLE, "OAUTH_NOT_CONFIGURED", "소셜 로그인 제공자 설정이 아직 완료되지 않았습니다."),
     // 외부 시세 데이터 제공사 REST 호출(토큰 발급 포함) 자체가 실패한 경우 — "조회는 성공했지만 데이터가
     // 없음"(빈 목록)과 구분하기 위해 EXTERNAL_API_ERROR와 별도로 둔다(외부 장애와 빈 목록 구분 처리, #05).
