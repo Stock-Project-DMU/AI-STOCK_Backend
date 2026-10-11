@@ -12,6 +12,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.teamfp.aistock.domain.admin.service.AuditLogService;
+import com.teamfp.aistock.domain.account.service.AccountService;
+import com.teamfp.aistock.domain.account.dto.request.CreateAccountRequest;
 import com.teamfp.aistock.domain.auth.dto.request.InitialAdminCreateRequest;
 import com.teamfp.aistock.domain.auth.dto.response.InitialAdminStatusResponse;
 import com.teamfp.aistock.domain.auth.dto.response.SignupResponse;
@@ -44,6 +46,7 @@ public class InitialAdminService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuditLogService auditLogService;
+    private final AccountService accountService;
     private final TransactionTemplate transactionTemplate;
     private final RedisAuthCodeService redisAuthCodeService;
     private final String setupCode;
@@ -52,6 +55,7 @@ public class InitialAdminService {
             UserRepository userRepository,
             PasswordEncoder passwordEncoder,
             AuditLogService auditLogService,
+            AccountService accountService,
             PlatformTransactionManager transactionManager,
             RedisAuthCodeService redisAuthCodeService,
             @Value("${admin.signup-code}") String setupCode
@@ -59,6 +63,7 @@ public class InitialAdminService {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.auditLogService = auditLogService;
+        this.accountService = accountService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.redisAuthCodeService = redisAuthCodeService;
         this.setupCode = setupCode;
@@ -100,6 +105,7 @@ public class InitialAdminService {
                 throw new CustomException(ErrorCode.DUPLICATE_EMAIL);
             }
 
+            accountService.createAccount(admin.getUserId(), new CreateAccountRequest("기본 계좌"));
             auditLogService.record(admin.getUserId(), AuditLogService.ACTION_ADMIN_CREATE, AuditLogService.TARGET_ADMIN,
                     admin.getUserId(), null, admin.getLoginId(), AUDIT_REASON);
 

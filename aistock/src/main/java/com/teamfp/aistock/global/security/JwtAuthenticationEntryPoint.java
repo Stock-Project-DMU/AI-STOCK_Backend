@@ -51,7 +51,7 @@ public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
         response.setCharacterEncoding("UTF-8");
         // ApiResponse.error(...)로 감싸서 success=false, message, data=null 형태의 공통 응답 포맷을 유지한다.
         response.getWriter().write(
-                objectMapper.writeValueAsString(ApiResponse.error(errorCode.getMessage()))
+                objectMapper.writeValueAsString(ApiResponse.error(errorCode.getCode(), errorCode.getMessage()))
         );
     }
 }

@@ -30,6 +30,7 @@ class GlobalExceptionHandlerTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
         assertThat(response.getBody().getMessage()).contains("GOOGLE_OAUTH_REDIRECT_URI");
+        assertThat(response.getBody().getCode()).isEqualTo("OAUTH_NOT_CONFIGURED");
     }
 
     @Test
@@ -61,5 +62,21 @@ class GlobalExceptionHandlerTest {
     // MethodArgumentTypeMismatchException 생성에 필요한 MethodParameter를 만들기 위한 더미 메서드
     @SuppressWarnings("unused")
     private void dummyAccountIdParam(Long accountId) {
+    }
+
+    @Test
+    void invalidJsonIsBadRequestRatherThanServerFailure() {
+        var exception = new org.springframework.http.converter.HttpMessageNotReadableException(
+                "invalid JSON", new org.springframework.mock.http.MockHttpInputMessage(new byte[0]));
+        var response = handler.handleUnreadableBody(exception);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody().getCode()).isEqualTo("INVALID_INPUT");
+    }
+
+    @Test
+    void unsupportedMethodKeepsMethodNotAllowedStatus() {
+        var response = handler.handleUnsupportedMethod(new org.springframework.web.HttpRequestMethodNotSupportedException("PUT"));
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED);
+        assertThat(response.getBody().getCode()).isEqualTo("METHOD_NOT_ALLOWED");
     }
 }

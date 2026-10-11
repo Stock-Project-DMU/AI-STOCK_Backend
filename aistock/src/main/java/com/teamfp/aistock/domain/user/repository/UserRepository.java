@@ -18,6 +18,9 @@ import org.springframework.data.repository.query.Param;
 import jakarta.persistence.LockModeType;
 
 public interface UserRepository extends JpaRepository<User, Long> {
+    @Query("select u.userId from User u where u.role = :role and u.isActive = true "
+            + "and not exists (select a.accountId from Account a where a.user = u)")
+    List<Long> findActiveUserIdsWithoutAccount(@Param("role") Role role);
 
     @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
     @Query("UPDATE User u SET u.status = com.teamfp.aistock.domain.user.entity.UserStatus.ACTIVE, "
