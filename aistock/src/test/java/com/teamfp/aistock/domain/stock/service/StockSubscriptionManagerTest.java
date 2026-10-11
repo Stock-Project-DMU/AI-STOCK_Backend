@@ -1,7 +1,6 @@
 package com.teamfp.aistock.domain.stock.service;
 
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
 import org.junit.jupiter.api.DisplayName;
@@ -9,13 +8,9 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import com.teamfp.aistock.global.redis.RedisPendingOrderService;
-import com.teamfp.aistock.infra.marketdata.MarketDataWebSocketClient;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -27,7 +22,7 @@ class StockSubscriptionManagerTest {
 
     private final RedisPendingOrderService redisPendingOrderService = mock(RedisPendingOrderService.class);
     private final StockSubscriptionManager stockSubscriptionManager =
-            new StockSubscriptionManager(Optional.empty(), redisPendingOrderService);
+            new StockSubscriptionManager(redisPendingOrderService);
 
     @Test
     @DisplayName("아무도 구독하지 않았으면 빈 집합을 반환한다")
@@ -95,23 +90,5 @@ class StockSubscriptionManagerTest {
             assertThat(stockSubscriptionManager.getActiveSubscribedStockCodes()).contains("005930");
         }
 
-        @Test
-        @DisplayName("실 모드에서는 첫 주문에만 외부 시세 구독, 마지막 주문 제거 시에만 구독 해제를 호출한다")
-        void realMode_SubscribesOnFirstOrderAndUnsubscribesOnLast() {
-            MarketDataWebSocketClient webSocketClient = mock(MarketDataWebSocketClient.class);
-            StockSubscriptionManager realModeManager =
-                    new StockSubscriptionManager(Optional.of(webSocketClient), redisPendingOrderService);
-
-            realModeManager.increaseOrderSubscription("005930");
-            realModeManager.increaseOrderSubscription("005930");
-            realModeManager.decreaseOrderSubscription("005930");
-
-            verify(webSocketClient, times(1)).subscribe("005930");
-            verify(webSocketClient, never()).unsubscribe("005930");
-
-            realModeManager.decreaseOrderSubscription("005930");
-
-            verify(webSocketClient, times(1)).unsubscribe("005930");
         }
-    }
 }

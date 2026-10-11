@@ -31,12 +31,4 @@ public class RestClientConfig {
 
         return RestClient.builder().requestFactory(requestFactory);
     }
-
-    @Bean("marketDataRestClientBuilder")
-    public RestClient.Builder marketDataRestClientBuilder() {
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(1_000);
-        factory.setReadTimeout(3_000);
-        return RestClient.builder().requestFactory(factory);
-    }
 }

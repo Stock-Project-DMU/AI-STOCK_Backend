@@ -40,7 +40,6 @@ import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.redis.RedisAiToolCacheService;
 import com.teamfp.aistock.infra.dart.DartApiClient;
 import com.teamfp.aistock.infra.gemini.GeminiApiClient;
-import com.teamfp.aistock.infra.marketdata.MarketDataAccessTokenProvider;
 import com.teamfp.aistock.infra.marketdata.HighItemApiClient;
 import com.teamfp.aistock.infra.marketdata.InvestInfoApiClient;
 import com.teamfp.aistock.infra.marketdata.InvestorTrendApiClient;
@@ -140,51 +139,27 @@ class LiveGeminiManualCheck {
         ReflectionTestUtils.setField(naverNewsApiClient, "clientSecret", System.getenv("NAVER_CLIENT_SECRET"));
         ReflectionTestUtils.setField(naverNewsApiClient, "apiUrl", "https://naverapihub.apigw.ntruss.com/search/v1/news");
 
-        // MarketDataAccessTokenProvider(2026-08-10 분리) — MarketDataApiClient/InvestorTrendApiClient/
-        // InvestInfoApiClient 3개가 공유하는 토큰 발급 컴포넌트. 이 셋이 전부 같은 인스턴스를
-        // 주입받아야 실제로도 동일한 발급 로직을 타는 실제 서비스 구성과 같아진다.
-        MarketDataAccessTokenProvider marketDataAccessTokenProvider = new MarketDataAccessTokenProvider(RestClient.builder());
-        ReflectionTestUtils.setField(marketDataAccessTokenProvider, "tokenUrl", "https://openapi.ls-sec.co.kr:8080/oauth2/token");
-        ReflectionTestUtils.setField(marketDataAccessTokenProvider, "appKey", System.getenv("MARKET_DATA_APP_KEY"));
-        ReflectionTestUtils.setField(marketDataAccessTokenProvider, "appSecret", System.getenv("MARKET_DATA_APP_SECRET"));
-
-        MarketDataApiClient marketDataApiClient = new MarketDataApiClient(marketDataAccessTokenProvider, Optional.empty(), RestClient.builder());
-        ReflectionTestUtils.setField(marketDataApiClient, "marketDataUrl", "https://openapi.ls-sec.co.kr:8080/stock/market-data");
-
-        InvestorTrendApiClient investorTrendApiClient = new InvestorTrendApiClient(marketDataAccessTokenProvider, RestClient.builder());
-        ReflectionTestUtils.setField(investorTrendApiClient, "frgrIttUrl", "https://openapi.ls-sec.co.kr:8080/stock/frgr-itt");
-
-        InvestInfoApiClient investInfoApiClient = new InvestInfoApiClient(marketDataAccessTokenProvider, RestClient.builder());
-        ReflectionTestUtils.setField(investInfoApiClient, "investInfoUrl", "https://openapi.ls-sec.co.kr:8080/stock/investinfo");
-
-        // 2026-08-11 추가 — get_market_ranking/get_theme_info 도구 전용.
-        HighItemApiClient highItemApiClient = new HighItemApiClient(marketDataAccessTokenProvider, java.util.Optional.empty(),
-                new com.teamfp.aistock.infra.marketdata.RegisteredStockReader(), marketDataApiClient, RestClient.builder());
-        ReflectionTestUtils.setField(highItemApiClient, "highItemUrl", "https://openapi.ls-sec.co.kr:8080/stock/high-item");
-
-        SectorApiClient sectorApiClient = new SectorApiClient(marketDataAccessTokenProvider, RestClient.builder());
-        ReflectionTestUtils.setField(sectorApiClient, "sectorUrl", "https://openapi.ls-sec.co.kr:8080/stock/sector");
-
-        // 2026-08-11 추가 — 나머지 13개 도구 전용 클라이언트.
+        // 시세 클라이언트는 전부 local-market-data-generator의 market_data.json을 읽는다(fix/local-market-data-stable).
+        // MARKET_DATA_PATH 환경변수(없으면 기본 상대경로)의 디렉토리를 쓴다.
+        com.teamfp.aistock.infra.marketdata.LocalMarketDataReader localMarketDataReader =
+                new com.teamfp.aistock.infra.marketdata.LocalMarketDataReader();
+        ReflectionTestUtils.setField(localMarketDataReader, "localDataPath",
+                System.getenv().getOrDefault("MARKET_DATA_PATH", "../../local-market-data-generator/output"));
+        MarketDataApiClient marketDataApiClient = new MarketDataApiClient(localMarketDataReader);
+        InvestorTrendApiClient investorTrendApiClient = new InvestorTrendApiClient(localMarketDataReader);
+        InvestInfoApiClient investInfoApiClient = new InvestInfoApiClient(localMarketDataReader);
+        HighItemApiClient highItemApiClient = new HighItemApiClient(localMarketDataReader);
+        SectorApiClient sectorApiClient = new SectorApiClient(localMarketDataReader);
         com.teamfp.aistock.infra.marketdata.EtfApiClient etfApiClient =
-                new com.teamfp.aistock.infra.marketdata.EtfApiClient(marketDataAccessTokenProvider, java.util.Optional.empty(), RestClient.builder());
-        ReflectionTestUtils.setField(etfApiClient, "etfUrl", "https://openapi.ls-sec.co.kr:8080/stock/etf");
-
+                new com.teamfp.aistock.infra.marketdata.EtfApiClient(localMarketDataReader);
         com.teamfp.aistock.infra.marketdata.ProgramApiClient programApiClient =
-                new com.teamfp.aistock.infra.marketdata.ProgramApiClient(marketDataAccessTokenProvider, RestClient.builder());
-        ReflectionTestUtils.setField(programApiClient, "programUrl", "https://openapi.ls-sec.co.kr:8080/stock/program");
-
+                new com.teamfp.aistock.infra.marketdata.ProgramApiClient(localMarketDataReader);
         com.teamfp.aistock.infra.marketdata.InvestorApiClient investorApiClient =
-                new com.teamfp.aistock.infra.marketdata.InvestorApiClient(marketDataAccessTokenProvider, RestClient.builder());
-        ReflectionTestUtils.setField(investorApiClient, "investorUrl", "https://openapi.ls-sec.co.kr:8080/stock/investor");
-
+                new com.teamfp.aistock.infra.marketdata.InvestorApiClient(localMarketDataReader);
         com.teamfp.aistock.infra.marketdata.EtcApiClient etcApiClient =
-                new com.teamfp.aistock.infra.marketdata.EtcApiClient(marketDataAccessTokenProvider, RestClient.builder());
-        ReflectionTestUtils.setField(etcApiClient, "etcUrl", "https://openapi.ls-sec.co.kr:8080/stock/etc");
-
+                new com.teamfp.aistock.infra.marketdata.EtcApiClient(localMarketDataReader);
         com.teamfp.aistock.infra.marketdata.IndustryApiClient industryApiClient =
-                new com.teamfp.aistock.infra.marketdata.IndustryApiClient(marketDataAccessTokenProvider, java.util.Optional.empty(), RestClient.builder());
-        ReflectionTestUtils.setField(industryApiClient, "industryUrl", "https://openapi.ls-sec.co.kr:8080/indtp/market-data");
+                new com.teamfp.aistock.infra.marketdata.IndustryApiClient(localMarketDataReader);
 
         Executor syncExecutor = Runnable::run;
 

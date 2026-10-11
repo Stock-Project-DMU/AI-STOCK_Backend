@@ -122,6 +122,45 @@ class LocalMarketDataReaderTest {
     }
 
     @Nested
+    @DisplayName("과거 시세 스냅샷 조회 (getPriceHistory, price_history.json)")
+    class GetPriceHistory {
+
+        @Test
+        @DisplayName("dwmcode(1=일봉, 2=주봉, 3=월봉)에 맞는 봉 목록을 최신순 그대로 반환한다")
+        void success_readsBarsByDwmcode() throws IOException {
+            Files.writeString(tempDir.resolve("price_history.json"), """
+                    {"generatedAt":"2026-10-06T15:00:00","source":"ls-t1305","stocks":{
+                      "005930":{
+                        "day":[{"date":"20261006","open":278500,"high":279000,"low":270000,"close":272250,"volume":10}],
+                        "week":[{"date":"20261006","close":272250},{"date":"20260930","close":270000}],
+                        "month":[{"date":"20261006","close":272250},{"date":"20260930","close":250000},{"date":"20260831","close":240000}]}}}""");
+
+            assertThat(reader.getPriceHistory(STOCK_CODE, 1)).singleElement()
+                    .satisfies(bar -> assertThat(bar.getHigh()).isEqualTo(279000L));
+            assertThat(reader.getPriceHistory(STOCK_CODE, 2)).hasSize(2);
+            assertThat(reader.getPriceHistory(STOCK_CODE, 3))
+                    .extracting(com.teamfp.aistock.infra.marketdata.dto.HistoricalPriceDto::getClose)
+                    .containsExactly(272250L, 250000L, 240000L);
+        }
+
+        @Test
+        @DisplayName("파일이 없거나 종목이 없거나 파싱에 실패하면 빈 목록을 반환한다")
+        void empty_whenFileOrStockMissingOrInvalid() throws IOException {
+            assertThat(reader.getPriceHistory(STOCK_CODE, 3)).isEmpty();
+
+            Files.writeString(tempDir.resolve("price_history.json"), """
+                    {"stocks":{"000660":{"month":[{"date":"20261006","close":1781000}]}}}""");
+            assertThat(reader.getPriceHistory(STOCK_CODE, 3)).isEmpty();
+            assertThat(reader.getPriceHistory("000660", 1)).isEmpty();
+
+            Files.writeString(tempDir.resolve("price_history.json"), "깨진 JSON");
+            // 수정 시각이 같으면 캐시를 다시 쓰므로, 덮어쓴 파일을 확실히 다시 읽도록 시각을 바꾼다.
+            tempDir.resolve("price_history.json").toFile().setLastModified(System.currentTimeMillis() + 5_000);
+            assertThat(reader.getPriceHistory("000660", 3)).isEmpty();
+        }
+    }
+
+    @Nested
     @DisplayName("전체 현재가 일괄 조회 (getAllCurrentPrices)")
     class GetAllCurrentPrices {
 

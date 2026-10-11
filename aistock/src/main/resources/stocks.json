@@ -1,5 +1,5 @@
 {
-  "_comment": "홈 주요 종목·시뮬레이션 리밸런싱 후보로 쓰는 등록 종목 목록(RegisteredStockReader가 읽음). local-market-data-generator/stocks.json의 종목(code/name/market/isEtf)과 같아야 하며, 종목을 추가·삭제하면 두 파일을 함께 고친다. listingShares(상장주식수, 천주 단위)는 real 모드 시가총액 정렬용 스냅샷이다(2026-10-02 t1102 기준) — t8407(멀티현재가)에는 시가총액·상장주식수가 없어 실시간 현재가 × 이 값으로 시가총액을 계산한다. 증자·감자 등으로 크게 바뀐 종목만 갱신하면 된다.",
+  "_comment": "등록 종목 카탈로그(RegisteredStockReader가 읽음 — 종목코드로 종목명·시장·상장주식수를 찾을 때 쓴다, 예: 배당 일정 종목명). local-market-data-generator/stocks.json의 종목(code/name/market/isEtf)과 같아야 하며, 종목을 추가·삭제하면 두 파일을 함께 고친다. 시세는 이 파일이 아니라 generator의 market_data.json에서 읽는다(fix/local-market-data-stable).",
   "stocks": [
     {"code": "005930", "name": "삼성전자", "market": "KOSPI", "listingShares": 5846279},
     {"code": "000660", "name": "SK하이닉스", "market": "KOSPI", "listingShares": 730492},

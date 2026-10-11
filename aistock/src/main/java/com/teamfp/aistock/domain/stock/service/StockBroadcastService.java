@@ -21,7 +21,7 @@ import com.teamfp.aistock.infra.marketdata.dto.TickData;
 
 /**
  * 외부 시세 데이터 제공사 실시간 체결/호가를 수신해 Redis 캐싱 + STOMP 브로드캐스팅으로 동시에 처리한다
- * (CLAUDE.md 8번 아키텍처). tick 자체의 Throttle(200ms)은 MarketDataWebSocketHandler/AsyncConfig
+ * (CLAUDE.md 8번 아키텍처). tick 송신은 MockMarketDataGenerator(5초 주기)와 AsyncConfig
  * 어디에도 구현돼있지 않아(NAMING.md 8-4 참고) 이 서비스에서 종목별로 직접 적용한다 — 체결과
  * 호가는 별도 스트림이라 각각 독립적인 200ms 창을 둔다.
  */
@@ -39,8 +39,8 @@ public class StockBroadcastService implements MarketDataListener {
     // 낙관적 락으로 체결"). OrderExecutionService 자체는 tick 수신 경로를 모르고 호출만
     // 기다리는 구조라(OrderExecutionService 클래스 상단 Javadoc 참고), 실제 tick 파이프라인인
     // 여기서 종목코드·체결가를 넘겨 호출해야 지정가 주문이 실제로 체결된다.
-    // real 모드의 WebSocket 핸들러가 이 리스너를 먼저 생성할 때 주문 서비스까지 즉시 만들면
-    // OrderExecutionService → StockSubscriptionManager → WebSocketClient 순환이 생긴다.
+    // 시세 송신기(MockMarketDataGenerator)가 이 리스너를 먼저 생성할 때 주문 서비스까지 즉시 만들면
+    // OrderExecutionService → StockSubscriptionManager로 이어지는 빈 생성 순서가 꼬일 수 있어 지연 주입한다(2026-10-01 순환 의존 대응).
     private final OrderExecutionService orderExecutionService;
 
     public StockBroadcastService(RedisStockCacheService redisStockCacheService, StockNameResolver stockNameResolver,

@@ -24,7 +24,7 @@ import com.teamfp.aistock.infra.marketdata.MarketDataApiClient;
 import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
 
 /** Uses a temporary user and transaction rollback; no real quote, notification or trade is sent. */
-@SpringBootTest(properties = {"market-data.mode=mock"})
+@SpringBootTest
 @Transactional(isolation = Isolation.READ_COMMITTED)
 class TradingFallbackIntegrationTest {
     @Autowired OrderService orders;

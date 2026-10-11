@@ -18,7 +18,7 @@
 
 - **백엔드**: Spring Boot 4.0.6 (Java 21), JPA, Spring Security, WebSocket/STOMP
 - **DB**: MySQL (AWS RDS), Redis (AWS ElastiCache)
-- **외부 API**: 외부 시세 데이터 제공사 OpenAPI(WebSocket 시세), Gemini API, Open DART, 네이버 뉴스 검색 API(NCP API Hub, AI 재무설계 상담 뉴스 검색), OAuth(카카오/네이버/구글)
+- **외부 API**: local-market-data-generator(로컬 시세 데이터 — 외부 시세 API 직접 연동은 fix/local-market-data-stable에서 제거), Gemini API, Open DART, 네이버 뉴스 검색 API(NCP API Hub, AI 재무설계 상담 뉴스 검색), OAuth(카카오/네이버/구글)
   (Tavily는 뉴스 검색 백엔드로 쓰다가 2026-08-05 네이버로 교체, 관련 코드·설정은 2026-08-06 완전 삭제됨)
 - **인프라**: AWS EC2, AWS Parameter Store, Docker Compose(로컬)
 - **빌드**: Gradle
@@ -47,19 +47,26 @@ gradlew.bat build        # Windows
 - CI: `.github/workflows/backend-ci.yml` — working-directory는 `aistock`
 - 민감한 값(JWT_SECRET, API 키)은 `.env` 또는 IDE 환경변수로 주입. 코드·yml에 하드코딩 금지.
 
-### 시세 데이터 모드 설정 (팀원 로컬 환경, `aistock/.env`)
+### 시세 데이터 (local-market-data-generator 전용, fix/local-market-data-stable)
 
-| 상황 | `.env` 설정 | 결과 |
+외부 시세 데이터 제공사(LS증권) API를 직접 호출하던 real 모드는 제거됐다. 백엔드는 로컬 개발·배포 모두 별도 Python 프로젝트
+local-market-data-generator가 만드는 `market_data.json`(현재가·호가 + 투자자 동향·테마·신용 등 부가 데이터)과
+`price_history.json`(과거 시세 스냅샷)만 읽는다(`LocalMarketDataReader`). LS 키는 백엔드에 필요 없다.
+
+| 상황 | 백엔드 `.env` | 결과 |
 |---|---|---|
-| LS 키만 있고 local-market-data-generator가 없음 | `MARKET_DATA_MODE=real` | 시세·차트·순위를 LS API에서 직접 받음. 홈 주요 종목(`all=true`)도 등록 종목 105개 |
-| generator를 함께 띄움(mock, 기본값) | `MARKET_DATA_MODE` 미지정 또는 `mock` | 시세·순위는 generator의 `market_data.json`. 차트는 합성 시세라 **목표 도달 시뮬레이션 수익률이 0% 근처로 나온다** |
-| mock인데 폴더 배치가 기본과 다름 | `MARKET_DATA_PATH=<generator의 output 폴더 절대경로>` | 기본값 `../../local-market-data-generator/output` 대신 지정 경로를 읽음 |
+| 로컬 개발(기본) | 설정 없음 | `../../local-market-data-generator/output`의 파일을 읽는다 |
+| 폴더 배치가 기본과 다름 | `MARKET_DATA_PATH=<generator의 output 폴더 절대경로>` | 지정 경로를 읽는다 |
+| 배포 서버(파일 공유 불가) | `MARKET_DATA_URL=http://<generator 호스트>:8081/market-data` | generator HTTP 서버에서 같은 JSON을 가져온다(prod 프로필 필수값) |
 
-- generator는 git에 포함되지 않은 별도 프로젝트다. mock 모드로 쓰려면 `AI-STOCK_Backend`와 같은 상위 폴더에
-  `local-market-data-generator`를 두고, generator `.env`의 `OUTPUT_DIR`도 같은 `output` 폴더를 가리키게 한다
-  (generator의 `OUTPUT_DIR` 기본값은 `output/`이 아니라 `local-market-data/`다).
+- generator는 git에 포함되지 않은 별도 프로젝트다. `AI-STOCK_Backend`와 같은 상위 폴더에 두고, generator `.env`의
+  `OUTPUT_DIR`도 같은 `output` 폴더를 가리키게 한다(generator의 `OUTPUT_DIR` 기본값은 `local-market-data/`다).
+- `python generator.py` — LS 호출 없이 마지막 `market_data.json`에서 시작해 5초마다 가격·호가·투자자 매매 등을, 30초마다
+  테마·순위·업종 추이 등을 갱신한다(부가 데이터 구조는 generator의 `market_extras.py` 상단 주석 참고). 모든 값은 모의 데이터다.
+- `python history_collector.py`(과거 시세)·`python dividend_collector.py`(배당 일정)는 LS·DART 키로 스냅샷을 한 번 받는
+  독립 스크립트다 — 생성기와 백엔드 실행에는 필요 없다. `price_history.json`이 없으면 차트·시뮬레이션은 종목별 추세가 있는
+  합성 시세를 쓴다.
 - generator가 없거나 경로가 틀려도 서버는 기동된다 — 홈 종목 목록이 비어 있으면 경로부터 확인한다.
-- 예시 (Windows, 기본 폴더 배치가 아닐 때): `MARKET_DATA_PATH=D:\work\local-market-data-generator\output`
 
 ---
 
@@ -94,7 +101,7 @@ com.teamfp.aistock
 │   │                     RedisAiToolCacheService, RedisPendingSimulationService
 │   └── util           → DateUtil, SecurityUtil, ExternalApiInvoker, NewsRelevanceMatcher
 ├── infra
-│   ├── ls            → MarketDataWebSocketClient, MarketDataWebSocketHandler, MarketDataReconnectService, dto
+│   ├── marketdata    → LocalMarketDataReader, 시세 클라이언트 10개(MarketDataApiClient 등), MarketDataListener, dto
 │   ├── gemini        → GeminiApiClient, dto
 │   ├── dart          → DartApiClient, dto
 │   ├── naver         → NaverNewsApiClient, dto (뉴스 검색 — infra/oauth의 NaverOAuthClient와는
@@ -238,7 +245,9 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
 
 ## 8. 아키텍처 필수 준수 사항
 
-- **실시간 시세**: 외부 시세 데이터 제공사 WebSocket 수신 → Throttle 200ms → Redis 캐싱 + STOMP 브로드캐스팅 동시 처리
+- **실시간 시세**: `MockMarketDataGenerator`가 5초마다 `market_data.json`을 읽어, 구독 중인 종목 중 갱신된 종목의
+  tick·호가를 `MarketDataListener`(`StockBroadcastService`)로 넘긴다 → Redis 캐싱 + STOMP 브로드캐스팅(fix/local-market-data-stable에서
+  외부 시세 데이터 WebSocket을 제거한 뒤 유일한 실시간 소스)
 - **STOMP 토픽**: `/topic/stock/{stockCode}` (브로드캐스팅), `/user/{userId}/queue` (유니캐스팅)
 - **비회원 실시간 시세**: `StompAuthInterceptor`는 토큰 없는 CONNECT를 익명 세션으로 허용하되,
   익명 세션에는 `/topic/stock/{stockCode}`·`/topic/stock/{stockCode}/hoga` 구독만 허용하고 SEND는
@@ -248,82 +257,19 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
   주문 접수 시에도 커밋 직후 현재가(`StockQuoteService`)로 체결 조건을 1회 확인한다
   (`OrderService.tryImmediateExecution()`, `OrderExecutionService.execute()`는 이 afterCommit 경로
   때문에 `REQUIRES_NEW`). 미체결 주문이 있는 종목은 `StockSubscriptionManager`의 주문 구독
-  (`increaseOrderSubscription`/`decreaseOrderSubscription`)으로 체결·취소될 때까지 real/mock 모두
-  구독을 유지한다(fix/realtime-trade-fix, 2026-09-30).
-- **서버 시작 순서**: `@PostConstruct`로 DB PENDING 주문을 Redis에 재적재하고 구독 카운트를 복원한 뒤,
-  `ApplicationReadyEvent`에서 real 모드 WebSocket의 최초 연결을 예약한다. 연결 전 등록한 종목은 연결 시 재구독한다.
-- **외부 시세 데이터 재연결**: 지수 백오프 (1→2→4→최대 30초)
-- **실전·모의 서버 불일치**: WebSocket 구독 응답 `10001`은 같은 설정으로 재시도해도 해결되지 않으므로
-  연결을 끊고 재연결을 중지한다. API 키 종류와 `MARKET_DATA_WEBSOCKET_URL`(실전 9443/모의 29443)을
-  맞춘 뒤 서버를 다시 시작한다.
-- **외부 시세 데이터 REST 장애 처리**: `infra/marketdata`의 REST 클라이언트는 제공사 호출(토큰 발급 포함)이
-  네트워크 오류·HTTP 오류로 실패하면 `CustomException(ErrorCode.MARKET_DATA_UNAVAILABLE)`(503)을 던진다
-  (`MarketDataApiClientSupport.invokeMarketData()`). 빈 목록/`Optional.empty()`는 "제공사가 정상 응답했지만
-  데이터가 없음"만 뜻하므로, 클라이언트에서 이 예외를 잡아 빈 값으로 삼키지 않는다. REST API는 이 예외를
-  그대로 전파하고, `AiPlanningService`는 도구 결과를 일시 장애 전용 문구로 바꿔 Gemini에 넘긴다
-  (외부 장애와 빈 목록 구분 처리, #05, 2026-09-24). mock 모드의 `LocalMarketDataReader`는 대상이 아니다.
-- **외부 시세 데이터 mock 모드**: `market-data.mode=mock`이면 아래 경로들이 실제 외부 시세 데이터
-  API·Redis 대신 `LocalMarketDataReader`로 데이터를 공급한다(순위·지수·ETF 시세·차트 mock 지원 추가,
-  2026-09-21). `MarketDataAccessTokenProvider`와 이 목록에 없는 나머지 REST 메서드(t1105/t1305의
-  `getRecentHistoricalPrices()`·t1404/t1405·t1486·t8407·`EtfApiClient.getConstituents()` 등)는
-  여전히 `market-data.mode`와 무관하게 항상 실제 외부 시세 데이터 API를 호출한다.
-  - `MarketDataApiClient.getCurrentPrice()`/`StockService.getCurrentPrice()`·`getHoga()` — 종목
-    현재가·호가(가장 먼저 추가된 mock 경로).
-  - `MarketDataApiClient.getHistoricalPrices(stockCode, periodMonths)` — 차트. market_data.json에는
-    현재가 스냅샷 1건뿐이라 실제 과거 시세가 없다. 종목코드로 시드를 고정한 결정적 합성
-    (fabricated) OHLC 시계열을 만들어 반환하며(같은 종목은 항상 같은 그래프), 가장 최근 구간의
-    종가만 mock 현재가와 일치시킨다. **실제 과거 시세가 아니다.**
-  - `HighItemApiClient.getTopVolume()`/`getTopTradingValue()`/`getTopPriceChangeRate()`/
-    `getTopPriceDeclineRate()`/`getTopMarketCap()` — 순위(`MarketQueryService.getRankings()`가 노출하는
-    5종). 상승/하락 순위는 real 모드에서 t1441을 코스피+코스닥 전체·당일 조건으로 호출하고, mock
-    모드에서는 상승 종목만/하락 종목만 걸러 정렬한다(상승·하락 순위 전체 시장 기준, #13, 2026-09-30). 전종목이 아니라
-    `LocalMarketDataReader.getAllCurrentPrices()`(stocks.json에 등록된 종목만, 2026-09-21 기준
-    105개)를 정렬해 상위 10개만 뽑는 근사치다. 단 홈 주요 종목은 `GET /api/market/rankings?all=true`로
-    `(int limit)` 오버로드(`HighItemApiClient.ALL_REGISTERED_STOCKS`)를 호출해 10개 제한 없이 등록 종목 전체를
-    한 번에 받아 화면에서 15개씩 무한 스크롤로 보여준다(2026-10-01). 같은 클래스의 나머지 3개
-    (`getSurgingVolumeVsYesterday()`/시간외 2종)는 mock 대상이 아니다.
-  - **real 모드의 `all=true`(2026-10-02 수정)**: real 모드에서는 `all=true`여도 LS API 특성상(순위 TR
-    t1441/t1444/t1452/t1463은 시장 전체 상위 목록만 줌) `MAX_RANKING_ITEMS=10`에서 잘렸으나, 이번 수정으로
-    해제됐다. 이전에는 배포(prod=real) 환경에서 홈 무한 스크롤이 10개만 보이고, 시뮬레이션 리밸런싱 후보
-    (`getRankings("market-cap", true)`)도 10개뿐이었다. 이제 `limit`이 10을 넘으면 순위 TR 대신
-    `RegisteredStockReader`가 읽은 등록 종목 목록(`aistock/src/main/resources/stocks.json`, 105개)의 종목코드로
-    `MarketDataApiClient.getMultiStockPricesInBatches()`(t8407, 50종목씩 3회, REST 캐시 10초)를 호출해 mock과 같은
-    기준으로 정렬한다 — mock/real 모두 등록 종목 105개 범위의 순위다. 시가총액은 t8407에 없어 실시간 현재가 ×
-    `stocks.json`의 상장주식수(`listingShares`, 천주, 2026-10-02 스냅샷)로 계산하고, 거래대금은 t8407 `value`(백만원,
-    실제값)를 쓴다. `all=false`(기본, AI 상담 도구 포함)는 그대로 순위 TR 상위 10건이다. 백엔드
-    `resources/stocks.json`과 local-market-data-generator의 `stocks.json`은 종목 구성이 같아야 하므로 종목을
-    추가·삭제할 때 두 파일을 함께 고친다.
-  - `IndustryApiClient.getCurrentPrice(marketName)` — 지수(코스피/코스닥). 실지수는 전종목 시가총액
-    가중평균이라 105개 mock 종목으로 재현 불가능해, 고정 베이스값(`MOCK_BASE_INDEX_VALUE`)을 같은
-    시장 mock 종목의 평균 등락률만큼 흔든 근사치를 쓴다. **실제 지수 값이 아니다.** 같은 클래스의
-    `getTrend()`/`getExpectedIndex()`는 mock 대상이 아니다.
-  - `EtfApiClient.getCurrentPrice()` — ETF 시세. stocks.json에 `isEtf: true`로 등록된 종목만
-    mock 데이터가 있고(2026-09-21 기준 5개), 등록되지 않은 ETF 코드는 real 모드와 동일하게
-    빈 값을 반환한다. ETF 종목에는 `exchgubun`("K"=KRX 고정값)도 함께 채워지며 별도 매핑
-    없이 `CurrentPriceDetailDto` 그대로 반환된다 — 실제 t1901 API의 exchgubun 스펙과는 무관한
-    mock 전용 필드다(ETF exchgubun 신규 필드 반영, #04, 2026-09-23).
-  - 위 4개 mock 파생 로직이 쓰는 `market`(KOSPI/KOSDAQ)·`etf` 필드는 t1102 실제 응답에는 없는
-    필드로, local-market-data-generator가 stocks.json의 로컬 메타데이터를 market_data.json에
-    함께 써 넣는다(`CurrentPriceDetailDto.market`/`etf`, real 모드 파싱 경로에서는 채워지지 않음).
-  - `MockMarketDataGenerator`(5초 주기 폴링, generator.py 기본 수집 주기 10초)는 `MarketDataWebSocketClient`(real 전용) 대신
-    변경분을 감지해 STOMP로 실시간 브로드캐스트한다(현재가/호가 대상).
-  `LocalMarketDataReader`는 원본을 파일 또는 HTTP 둘 중 하나에서 읽는다:
-  - **파일 모드(로컬 개발 기본값)**: `market-data.url`이 비어있으면 `market-data.local-path`
-    디렉토리의 `market_data.json` 단일 파일(종목코드를 키로, 현재가·호가 필드가 함께 들어있는
-    맵, local-market-data-generator가 생성)을 직접 읽는다. dev 기본값은 `MARKET_DATA_PATH` 환경변수가 없을 때
-    `../../local-market-data-generator/output`(백엔드 실행 디렉토리 `aistock/` 기준 상대경로 — `AI-STOCK_Backend`와
-    `local-market-data-generator`가 같은 상위 폴더에 나란히 있다는 전제)이다. 이전 기본값
-    `C:\AI-STOCK\...` 절대경로는 PC마다 경로가 달라 generator가 있어도 데이터를 못 읽는 문제가 있어 바꿨다
-    (2026-10-02). 파일이 없거나(generator 미설치·미실행) 파싱에 실패해도 서버는 정상 기동하고 시세·순위만 빈 값으로
-    응답한다.
-  - **HTTP 모드(백엔드가 생성기와 파일 시스템을 공유 못 하는 배포 환경)**: 환경변수
-    `MARKET_DATA_URL`을 설정하면 파일 대신 그 URL로 GET 요청해 같은 JSON을 가져온다.
-    local-market-data-generator는 자체 HTTP 서버(기본 포트 8081)를 함께 띄워
-    `GET /market-data`(market_data.json 원문), `GET /health`(생존 확인용)를 노출한다 — 이
-    서버는 60초 주기 수집 루프와 무관하게 항상 켜져 있다(`HTTP_SERVER_ENABLED`로 끌 수 있음).
-  - **배포 시 주의**: `application-prod.yml`은 `market-data.mode: real`이 고정값이라(환경변수 오버라이드
-    없음) `prod` 프로필로는 mock 모드 자체를 켤 수 없다. mock 모드로 배포 서버를 띄워 이
-    데이터 흐름을 검증하려면 반드시 `--spring.profiles.active=dev`로 실행해야 한다.
+  (`increaseOrderSubscription`/`decreaseOrderSubscription`)으로 체결·취소될 때까지 실시간 시세 대상에 남는다
+  (fix/realtime-trade-fix, 2026-09-30).
+- **서버 시작 순서**: `@PostConstruct`로 DB PENDING 주문을 Redis에 재적재하고 구독 카운트를 복원한다.
+- **시세 데이터 원천(fix/local-market-data-stable)**: `infra/marketdata`의 시세 클라이언트 10개(`MarketDataApiClient`,
+  `HighItemApiClient`, `IndustryApiClient`, `InvestInfoApiClient`, `InvestorApiClient`, `InvestorTrendApiClient`, `ProgramApiClient`,
+  `SectorApiClient`, `EtcApiClient`, `EtfApiClient`)는 모두 `LocalMarketDataReader`만 쓴다 — 종목 객체의 부가 데이터
+  (investorTrend·themes·credit·opinions 등)와 `"_market"` 키의 시장 데이터(hotThemes·investorSummary·overseasIndexes 등)를
+  응답 DTO로 옮긴다. 데이터가 없으면 예외 없이 빈 값이다. 순위는 시장 전체가 아니라 등록 종목(stocks.json, 105개) 범위이고,
+  지수(`IndustryApiClient`)·환율은 고정 기준값을 종목 평균 등락률만큼 움직인 근사치다. 차트·목표 도달 시뮬레이션은
+  `price_history.json`이 있으면 그 봉을 현재가에 맞춰 비율 조정하고(기간 수익률 유지), 없으면 종목별 추세·변동성이 있는
+  결정적 합성 시세를 쓴다. **모두 실제 시세가 아닌 모의 데이터다.**
+- **`MARKET_DATA_UNAVAILABLE`(503)**: 외부 시세 호출은 없어졌지만 `AiPlanningService`·`SimulationService`의 장애 처리 분기는
+  그대로 둔다(에러코드 유지).
 - **Gemini 호출 전** `RedisRateLimiterService` 통과 필요 — 단, **AI 재무설계사(`AiPlanningService`)는
   2026-09-21 사용자 요청으로 이 제한을 제거함**("몇 번 대화하다 짤리면 안 된다"는 이유, Gemini
   자체 API 한도에만 걸림). `SimulationService`(목표 도달 시뮬레이션)는 그대로 분당3/일일10
