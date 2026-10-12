@@ -54,3 +54,5 @@ market-data:
   # 전제다. 폴더 배치가 다르면 .env에 MARKET_DATA_PATH(절대경로)를 넣는다. 경로에 파일이 없거나 generator가
   # 없으면 서버는 정상 기동하고 시세·순위만 빈 값으로 응답한다(LocalMarketDataReader의 fallback, 2026-10-02).
   local-path: ${MARKET_DATA_PATH:../../local-market-data-generator/output}
+  # 생성기 실시간 스트림(GET /stream)을 받는다 — 기본값(application.yml)은 테스트용으로 꺼져 있다.
+  stream-enabled: ${MARKET_DATA_STREAM_ENABLED:true}

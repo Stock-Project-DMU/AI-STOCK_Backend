@@ -48,7 +48,7 @@
     {"code": "018880", "name": "한온시스템", "market": "KOSPI", "listingShares": 1026251},
     {"code": "086280", "name": "현대글로비스", "market": "KOSPI", "listingShares": 75000},
     {"code": "241560", "name": "두산밥캣", "market": "KOSPI", "listingShares": 95856},
-    {"code": "028050", "name": "삼성엔지니어링", "market": "KOSPI", "listingShares": 196000},
+    {"code": "028050", "name": "삼성E&A", "market": "KOSPI", "listingShares": 196000},
     {"code": "251270", "name": "넷마블", "market": "KOSPI", "listingShares": 83158},
     {"code": "021240", "name": "코웨이", "market": "KOSPI", "listingShares": 70767},
     {"code": "247540", "name": "에코프로비엠", "market": "KOSDAQ", "listingShares": 97830},
@@ -81,8 +81,8 @@
     {"code": "049070", "name": "인탑스", "market": "KOSDAQ", "listingShares": 15742},
     {"code": "112040", "name": "위메이드", "market": "KOSDAQ", "listingShares": 33948},
     {"code": "357780", "name": "솔브레인", "market": "KOSDAQ", "listingShares": 7779},
-    {"code": "066970", "name": "엘앤에프", "market": "KOSDAQ", "listingShares": 40686},
-    {"code": "000180", "name": "다우데이타", "market": "KOSDAQ", "listingShares": 13950},
+    {"code": "066970", "name": "엘앤에프", "market": "KOSPI", "listingShares": 40686},
+    {"code": "032190", "name": "다우데이타", "market": "KOSDAQ", "listingShares": 38300},
     {"code": "078600", "name": "대주전자재료", "market": "KOSDAQ", "listingShares": 15704},
     {"code": "041960", "name": "코미팜", "market": "KOSDAQ", "listingShares": 74618},
     {"code": "235980", "name": "메드팩토", "market": "KOSDAQ", "listingShares": 34275},
@@ -94,7 +94,7 @@
     {"code": "178320", "name": "서진시스템", "market": "KOSDAQ", "listingShares": 63723},
     {"code": "166090", "name": "하나머티리얼즈", "market": "KOSDAQ", "listingShares": 19778},
     {"code": "074600", "name": "원익QnC", "market": "KOSDAQ", "listingShares": 26288},
-    {"code": "007660", "name": "이수페타시스", "market": "KOSDAQ", "listingShares": 73409},
+    {"code": "007660", "name": "이수페타시스", "market": "KOSPI", "listingShares": 73409},
     {"code": "214370", "name": "케어젠", "market": "KOSDAQ", "listingShares": 53715},
     {"code": "064760", "name": "티씨케이", "market": "KOSDAQ", "listingShares": 11179},
     {"code": "033640", "name": "네패스", "market": "KOSDAQ", "listingShares": 23059},
@@ -104,7 +104,7 @@
     {"code": "069500", "name": "KODEX 200", "market": "KOSPI", "isEtf": true, "listingShares": 231000},
     {"code": "102110", "name": "TIGER 200", "market": "KOSPI", "isEtf": true, "listingShares": 93350},
     {"code": "091160", "name": "KODEX 반도체", "market": "KOSPI", "isEtf": true, "listingShares": 41850},
-    {"code": "233740", "name": "KODEX 코스닥150레버리지", "market": "KOSDAQ", "isEtf": true, "listingShares": 470500},
+    {"code": "233740", "name": "KODEX 코스닥150레버리지", "market": "KOSPI", "isEtf": true, "listingShares": 470500},
     {"code": "305720", "name": "KODEX 2차전지산업", "market": "KOSPI", "isEtf": true, "listingShares": 130200}
   ]
 }

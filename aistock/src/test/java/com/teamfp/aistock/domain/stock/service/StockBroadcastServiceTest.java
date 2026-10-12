@@ -58,8 +58,9 @@ class StockBroadcastServiceTest {
 
     @BeforeEach
     void setUp() {
+        // 지정가 체결 판단은 실제로는 tickTaskExecutor에서 돌지만, 테스트는 같은 스레드에서 바로 실행해 검증한다.
         stockBroadcastService = new StockBroadcastService(
-                redisStockCacheService, stockNameResolver, messagingTemplate, orderExecutionService);
+                redisStockCacheService, stockNameResolver, messagingTemplate, orderExecutionService, Runnable::run);
     }
 
     @Test
@@ -130,6 +131,56 @@ class StockBroadcastServiceTest {
         // Throttle되어 무시된 두 번째 tick은 지정가 체결 판단도 함께 건너뛴다 — 다음 tick(200ms
         // 이후)에서 다시 시도되므로 안전하다(OrderExecutionService.checkAndExecute()는 멱등).
         verify(orderExecutionService, times(1)).checkAndExecute(eq("005930"), anyLong());
+    }
+
+    @Test
+    @DisplayName("200ms 안에 걸린 tick·호가는 버리지 않고 창이 끝나면 마지막 값 1건을 보낸다(trailing, 2026-10-12 코드리뷰)")
+    void onTickReceived_SendsLastThrottledTickAfterWindow() {
+        TickData first = TickData.builder().stockCode("005930").stockName("삼성전자").currentPrice(75000)
+                .changeRate(0.0).changeAmount(0).volume(100).tradedAt(LocalDateTime.now()).build();
+        TickData middle = TickData.builder().stockCode("005930").stockName("삼성전자").currentPrice(75100)
+                .changeRate(0.1).changeAmount(100).volume(200).tradedAt(LocalDateTime.now()).build();
+        TickData last = TickData.builder().stockCode("005930").stockName("삼성전자").currentPrice(75200)
+                .changeRate(0.3).changeAmount(200).volume(300).tradedAt(LocalDateTime.now()).build();
+        HogaData hoga1 = HogaData.builder().stockCode("005930").askPrices(List.of(75100L)).build();
+        HogaData hoga2 = HogaData.builder().stockCode("005930").askPrices(List.of(75300L)).build();
+
+        stockBroadcastService.onTickReceived(first);
+        stockBroadcastService.onTickReceived(middle);
+        stockBroadcastService.onTickReceived(last);
+        stockBroadcastService.onHogaReceived(hoga1);
+        stockBroadcastService.onHogaReceived(hoga2);
+
+        // 첫 tick은 바로, 창 안의 나머지는 마지막 것(75,200원) 1건만 창이 끝난 뒤 나간다 — 지정가 체결 판단도 마지막 가격으로 한 번 더.
+        verify(orderExecutionService, org.mockito.Mockito.timeout(1000).times(1)).checkAndExecute("005930", 75200L);
+        verify(orderExecutionService, times(1)).checkAndExecute("005930", 75000L);
+        verify(orderExecutionService, org.mockito.Mockito.never()).checkAndExecute("005930", 75100L);
+        verify(messagingTemplate, org.mockito.Mockito.timeout(1000).times(2))
+                .convertAndSend(eq("/topic/stock/005930/hoga"), any(HogaResponse.class));
+    }
+
+    @Test
+    @DisplayName("늦게 보내려던 tick보다 새 tick이 먼저 나가면 옛 tick은 버린다 — 가격이 뒤로 가지 않게(2026-10-12 마지막 리뷰)")
+    @SuppressWarnings("unchecked")
+    void onTickReceived_DropsOlderPendingWhenNewerSent() throws Exception {
+        TickData first = TickData.builder().stockCode("005930").stockName("삼성전자").currentPrice(75000)
+                .changeRate(0.0).changeAmount(0).volume(100).tradedAt(LocalDateTime.now()).build();
+        TickData older = TickData.builder().stockCode("005930").stockName("삼성전자").currentPrice(75100)
+                .changeRate(0.1).changeAmount(100).volume(200).tradedAt(LocalDateTime.now()).build();
+        TickData newer = TickData.builder().stockCode("005930").stockName("삼성전자").currentPrice(75300)
+                .changeRate(0.4).changeAmount(300).volume(300).tradedAt(LocalDateTime.now()).build();
+
+        stockBroadcastService.onTickReceived(first);
+        stockBroadcastService.onTickReceived(older); // 창 안 → 대기
+        // 창이 끝나기 전에 다른 경로로 더 새 tick이 나간 상황을 만든다(200ms 제한 기록을 비워 바로 통과시킴).
+        ((ConcurrentHashMap<String, Long>) org.springframework.test.util.ReflectionTestUtils
+                .getField(stockBroadcastService, "lastTickProcessedAt")).clear();
+        stockBroadcastService.onTickReceived(newer);
+        Thread.sleep(400);
+
+        verify(orderExecutionService).checkAndExecute("005930", 75000L);
+        verify(orderExecutionService).checkAndExecute("005930", 75300L);
+        verify(orderExecutionService, org.mockito.Mockito.never()).checkAndExecute("005930", 75100L);
     }
 
     @Test

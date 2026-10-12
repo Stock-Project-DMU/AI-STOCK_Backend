@@ -10,6 +10,7 @@ import java.util.function.Predicate;
 import org.springframework.stereotype.Component;
 
 import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
+import com.teamfp.aistock.infra.marketdata.dto.MarketCapPeersDto;
 import com.teamfp.aistock.infra.marketdata.dto.RankingItemDto;
 
 import lombok.RequiredArgsConstructor;
@@ -26,6 +27,7 @@ import lombok.RequiredArgsConstructor;
 public class HighItemApiClient {
 
     private static final int MAX_RANKING_ITEMS = 10;
+    private static final int MAX_PEER_ITEMS = 10;
 
     /**
      * 순위 5종의 {@code (int limit)} 오버로드에 넘기면 "등록 종목 전체"를 뜻한다 — 홈 주요 종목 무한 스크롤과
@@ -69,6 +71,48 @@ public class HighItemApiClient {
         long totalMarketCap = all.values().stream().mapToLong(this::marketCap).sum();
         return ranking(dto -> true, Comparator.comparingLong(this::marketCap).reversed(),
                 dto -> marketCapShareInfo(marketCap(dto), totalMarketCap), limit);
+    }
+
+    /**
+     * 종목 리서치 "시가총액 상위 비교" — 보고 있는 종목과 같은 시장의 시가총액 상위 {@value #MAX_PEER_ITEMS}개와 그 종목의
+     * 순위. 이전에는 종목과 상관없이 전체 시가총액 상위 10개({@link #getTopMarketCap()})를 그대로 보여줘 어떤 종목을 보든
+     * 같은 목록이었다. 종목이 상위 밖이면 비교할 수 있게 그 종목을 목록 끝에 덧붙인다.
+     */
+    public MarketCapPeersDto getMarketCapPeers(String stockCode) {
+        Map<String, CurrentPriceDetailDto> all = localMarketDataReader.getAllCurrentPrices();
+        CurrentPriceDetailDto target = all.get(stockCode);
+        if (target == null) {
+            return new MarketCapPeersDto(stockCode, null, null, null, 0, List.of());
+        }
+        String market = target.getMarket();
+        // ETF는 상장주식수가 없어 시가총액을 계산할 수 없다(0으로 맨 뒤에 섞임) — 비교 대상에서 빼고, ETF 자체를 보면 순위 없이 돌려준다.
+        if (target.isEtf()) {
+            return new MarketCapPeersDto(stockCode, target.getStockName(), market, null, 0, List.of());
+        }
+        List<CurrentPriceDetailDto> sameMarket = all.values().stream()
+                .filter(dto -> !dto.isEtf())
+                .filter(dto -> market == null || market.equals(dto.getMarket()))
+                .sorted(Comparator.comparingLong(this::marketCap).reversed())
+                .toList();
+        long totalMarketCap = sameMarket.stream().mapToLong(this::marketCap).sum();
+
+        List<RankingItemDto> items = new ArrayList<>();
+        Integer targetRank = null;
+        for (int i = 0; i < sameMarket.size(); i++) {
+            CurrentPriceDetailDto dto = sameMarket.get(i);
+            boolean isTarget = stockCode.equals(dto.getStockCode());
+            if (isTarget) {
+                targetRank = i + 1;
+            }
+            if (i < MAX_PEER_ITEMS || isTarget) {
+                items.add(rankingItem(dto, i + 1, marketCapShareInfo(marketCap(dto), totalMarketCap)).toBuilder()
+                        .marketCap(marketCap(dto))
+                        .per(valuation(dto.getPer()))
+                        .pbr(valuation(dto.getPbr()))
+                        .build());
+            }
+        }
+        return new MarketCapPeersDto(stockCode, target.getStockName(), market, targetRank, sameMarket.size(), items);
     }
 
     /** 당일 누적 거래량 상위. */
@@ -119,18 +163,30 @@ public class HighItemApiClient {
             if (rank > limit) {
                 break;
             }
-            items.add(RankingItemDto.builder()
-                    .rank(rank++)
-                    .stockCode(dto.getStockCode())
-                    .stockName(dto.getStockName())
-                    .price(dto.getCurrentPrice())
-                    .changeAmount(dto.getChangeAmount())
-                    .changeRate(dto.getChangeRate())
-                    .volume(dto.getVolume())
-                    .extraInfo(extraInfoFn != null ? extraInfoFn.apply(dto) : null)
-                    .build());
+            items.add(rankingItem(dto, rank++, extraInfoFn != null ? extraInfoFn.apply(dto) : null));
         }
         return items;
+    }
+
+    /**
+     * PER·PBR이 0이면 "계산하지 않음"(우선주 등 — 시세 데이터에 0으로 들어 있다)이라 null로 바꾼다. 적자 기업의 음수 PER은
+     * 실제 값이라 그대로 둔다.
+     */
+    public static Double valuation(Double value) {
+        return value == null || value == 0.0 ? null : value;
+    }
+
+    private static RankingItemDto rankingItem(CurrentPriceDetailDto dto, int rank, String extraInfo) {
+        return RankingItemDto.builder()
+                .rank(rank)
+                .stockCode(dto.getStockCode())
+                .stockName(dto.getStockName())
+                .price(dto.getCurrentPrice())
+                .changeAmount(dto.getChangeAmount())
+                .changeRate(dto.getChangeRate())
+                .volume(dto.getVolume())
+                .extraInfo(extraInfo)
+                .build();
     }
 
     private static String marketCapShareInfo(long marketCap, long totalMarketCap) {

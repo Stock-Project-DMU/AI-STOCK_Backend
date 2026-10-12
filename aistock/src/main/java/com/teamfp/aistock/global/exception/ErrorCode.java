@@ -18,6 +18,8 @@ public enum ErrorCode {
     INSUFFICIENT_BALANCE(HttpStatus.BAD_REQUEST, "INSUFFICIENT_BALANCE", "계좌 잔액이 부족합니다."),
     INSUFFICIENT_HOLDING(HttpStatus.BAD_REQUEST, "INSUFFICIENT_HOLDING", "보유 주식이 부족합니다."),
     ACCOUNT_SUSPENDED(HttpStatus.BAD_REQUEST, "ACCOUNT_SUSPENDED", "정지된 계좌는 주문할 수 없습니다."),
+    // 정규장(평일 09:00~15:30, 휴장일 제외) 외 주문 — MarketSessionService.requireOpen()(실시세 전환 2단계).
+    MARKET_CLOSED(HttpStatus.BAD_REQUEST, "MARKET_CLOSED", "정규장(평일 09:00~15:30, 휴장일 제외)에만 주문할 수 있습니다."),
     ACCOUNT_SUSPENDED_CHARGE(HttpStatus.BAD_REQUEST, "ACCOUNT_SUSPENDED_CHARGE", "거래가 정지된 계좌는 충전할 수 없습니다."),
     INVALID_ADMIN_CODE(HttpStatus.BAD_REQUEST, "INVALID_ADMIN_CODE", "관리자 인증 코드가 일치하지 않습니다."),
     ACCOUNT_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "ACCOUNT_LIMIT_EXCEEDED", "계좌는 1개만 만들 수 있습니다."),

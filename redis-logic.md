@@ -1,4 +1,11 @@
-# Redis 키 설계 및 로직 (최종본 v8)
+# Redis 키 설계 및 로직 (최종본 v9)
+
+**변경사항 v8 → v9 (2026-10-12, fix/stock-detail-review 코드리뷰)**
+1. `dart:cache:{corpCode}:{종류}[:{연도}]` 키 추가 — 종목 리서치 탭(로그인 없이 열림)이 열 때마다 DART를 불러 하루 호출 한도를
+   낭비하던 문제. 종류는 `company`(기업개황, TTL 7일), `finance:{연도}`(사업보고서 재무), `earnings`(최근 분기 실적), `dividend`
+   (배당에 관한 사항). 보고서 TTL은 장 일정에 맞춰 다음 장 시작 전(한국 시간 08:00)까지, 공시 시즌(3·5·8·11월)에는 1시간.
+   값은 DART 응답 DTO(레코드)의 JSON이며 빈 결과(null)는 저장하지 않는다. Redis 장애 시 캐시 없이 DART를 그대로 부른다.
+   `RedisDartCacheService` 신규 추가(`getOrLoad(key, ttl, type, loader)`, `ttlUntilNextMorning()`).
 
 ## 2026-09-09 이메일 검증 보완
 
@@ -67,6 +74,7 @@
 | `simulation:pending:{userId}:{pendingSimulationId}` | 30분 | 목표 도달 시뮬레이션 실행 결과 임시 보관 (`RedisPendingSimulationService` — `savePending`, `claimPending`(GET 후 `__SAVED__` 표시로 교체하는 Lua 스크립트, 남은 TTL 유지)). 저장 버튼 요청에는 임시 ID만 받아 값 조작을 막고, 꺼내면서 "저장됨" 표시로 바꿔 중복 저장을 막는다 — 두 번째 요청은 만료가 아니라 "이미 저장함"으로 안내한다 (2026-10-01, 2026-10-03 표시 방식으로 변경) |
 | `admin:online:users` | 없음 (이벤트 기반) | 현재 WebSocket 연결 중인 userId 집합 (관리자 대시보드) |
 | `ai:tool:{sessionId}:{도구이름}?{인자}` | 30분 | AI 상담 세션 내 DART/네이버 도구 실행 결과 캐시 |
+| `dart:cache:{corpCode}:{종류}[:{연도}]` | 기업개황 7일 / 보고서는 다음 08:00(공시 시즌 1시간) | 종목 리서치 DART 응답 캐시 (`RedisDartCacheService`, 2026-10-12) |
 
 **제거된 키**: `briefing:{userId}:{date}` → 시황 브리핑이 Tavily 즉석 검색으로 변경되어 캐싱 불필요
 

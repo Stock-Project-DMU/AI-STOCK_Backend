@@ -147,8 +147,10 @@ public class SecurityConfig {
                 // 경로별 인가 규칙: PUBLIC_URLS는 누구나 접근 가능, 그 외에는 인증(JWT) 필요
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(PUBLIC_URLS).permitAll()
+                        // 배당 일정(/api/dividends/schedule)은 사용자 정보 없이 종목별로 같은 값이라 시세·리서치처럼 공개한다 —
+                        // 같은 컨트롤러의 /my·/upcoming(내 배당)은 그대로 로그인 필요(fix/stock-detail-review).
                         .requestMatchers(org.springframework.http.HttpMethod.GET,
-                                "/api/market/**", "/api/stocks/*", "/api/stocks/*/hoga").permitAll()
+                                "/api/market/**", "/api/stocks/*", "/api/stocks/*/hoga", "/api/dividends/schedule").permitAll()
                         // v8 추가 — 관리자 전용 API는 ROLE_ADMIN만 접근 가능 (CLAUDE.md 8번, NAMING.md 4번)
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()

@@ -3,6 +3,7 @@ package com.teamfp.aistock.infra.dart;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -10,6 +11,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import java.util.function.Function;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -29,6 +31,10 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.util.ExternalApiInvoker;
+import com.teamfp.aistock.infra.dart.dto.DartCompanyResponse;
+import com.teamfp.aistock.infra.dart.dto.DartDividendResponse;
+import com.teamfp.aistock.infra.dart.dto.DartEarningsResponse;
+import com.teamfp.aistock.infra.dart.dto.DartFinancialDetailResponse;
 import com.teamfp.aistock.infra.dart.dto.DartFinancialRequest;
 import com.teamfp.aistock.infra.dart.dto.DartFinancialResponse;
 import com.teamfp.aistock.infra.dart.dto.ListedStock;
@@ -83,6 +89,46 @@ public class DartApiClient {
     // 1·3분기보고서는 "분기순이익"으로 온다. getRecentQuarterlyFinancials()가 여러 보고서
     // 종류를 오가며 조회하므로, 후보 이름을 전부 순서대로 시도한다.
     private static final List<String> NET_INCOME_ACCOUNT_NAMES = List.of("당기순이익", "반기순이익", "분기순이익");
+
+    // 계정명은 회사마다 제각각이라(에코프로비엠은 매출액을 "매출", 반기순이익을 "반기손이익(손실)"으로 공시해 이름으로는
+    // 못 찾았다 — 2026-10-11 실응답 확인) DART 표준 계정 ID로 먼저 찾고, ID가 없는 응답만 위 계정명으로 찾는다.
+    private static final String ACCOUNT_ID_REVENUE = "ifrs-full_Revenue";
+    private static final String ACCOUNT_ID_OPERATING_PROFIT = "dart_OperatingIncomeLoss";
+    private static final String ACCOUNT_ID_NET_INCOME = "ifrs-full_ProfitLoss";
+    private static final String ACCOUNT_ID_TOTAL_ASSETS = "ifrs-full_Assets";
+    private static final String ACCOUNT_ID_TOTAL_LIABILITIES = "ifrs-full_Liabilities";
+    private static final String ACCOUNT_ID_TOTAL_EQUITY = "ifrs-full_Equity";
+
+    // 같은 계정 ID가 자본변동표(SCE)·현금흐름표(CF)에도 구성요소별로 여러 번 나오므로(삼성전자 반기 응답에서
+    // ifrs-full_ProfitLoss가 SCE에만 7줄) 계정이 속한 재무제표를 정해 찾는다. 손익은 손익계산서(IS)를 먼저 보고,
+    // 손익계산서를 따로 내지 않고 포괄손익계산서(CIS) 하나로 공시하는 회사(에코프로비엠)는 CIS에서 찾는다.
+    private static final String STATEMENT_BALANCE_SHEET = "BS";
+    private static final String STATEMENT_CASH_FLOW = "CF";
+    private static final List<String> INCOME_STATEMENTS = List.of("IS", "CIS");
+
+    // 종목 리서치 재무제표 상세용 계정 ID(fix/stock-detail-review) — 계정명 대체 없이 ID로만 찾는다.
+    private static final String ACCOUNT_ID_GROSS_PROFIT = "ifrs-full_GrossProfit";
+    private static final String ACCOUNT_ID_PROFIT_BEFORE_TAX = "ifrs-full_ProfitLossBeforeTax";
+    private static final String ACCOUNT_ID_NET_INCOME_OWNERS = "ifrs-full_ProfitLossAttributableToOwnersOfParent";
+    private static final String ACCOUNT_ID_NET_INCOME_NON_CONTROLLING = "ifrs-full_ProfitLossAttributableToNoncontrollingInterests";
+    private static final String ACCOUNT_ID_EPS = "ifrs-full_BasicEarningsLossPerShare";
+    private static final String ACCOUNT_ID_EPS_CONTINUING = "ifrs-full_BasicEarningsLossPerShareFromContinuingOperations";
+    private static final String ACCOUNT_ID_EPS_DISCONTINUED = "ifrs-full_BasicEarningsLossPerShareFromDiscontinuedOperations";
+    private static final List<String> EPS_ACCOUNT_NAMES = List.of(
+            "기본주당이익", "기본주당순이익", "보통주 기본주당이익", "보통주 기본주당순이익", "보통주 기본/희석주당순이익");
+    private static final String ACCOUNT_ID_CURRENT_ASSETS = "ifrs-full_CurrentAssets";
+    private static final String ACCOUNT_ID_CURRENT_LIABILITIES = "ifrs-full_CurrentLiabilities";
+    private static final String ACCOUNT_ID_CASH = "ifrs-full_CashAndCashEquivalents";
+    private static final String ACCOUNT_ID_ISSUED_CAPITAL = "ifrs-full_IssuedCapital";
+    private static final String ACCOUNT_ID_RETAINED_EARNINGS = "ifrs-full_RetainedEarnings";
+    private static final String ACCOUNT_ID_EQUITY_OWNERS = "ifrs-full_EquityAttributableToOwnersOfParent";
+    private static final String ACCOUNT_ID_OPERATING_CASH_FLOW = "ifrs-full_CashFlowsFromUsedInOperatingActivities";
+    private static final String ACCOUNT_ID_INVESTING_CASH_FLOW = "ifrs-full_CashFlowsFromUsedInInvestingActivities";
+    private static final String ACCOUNT_ID_FINANCING_CASH_FLOW = "ifrs-full_CashFlowsFromUsedInFinancingActivities";
+    // 금융업 판별용 — 매출액 대신 이 계정들로 영업수익을 공시한다(KB금융·신한지주·삼성생명·삼성화재 등 실응답 확인).
+    private static final java.util.Set<String> FINANCIAL_REVENUE_ACCOUNT_IDS = java.util.Set.of(
+            "ifrs-full_RevenueFromInterest", "ifrs-full_InsuranceRevenue", "dart_OperatingIncomeInsurance",
+            "ifrs-full_FeeAndCommissionIncome");
 
     // corpCode.xml 압축을 풀면 나오는 내부 파일명 — DART가 고정으로 이 이름을 쓴다.
     private static final String CORP_CODE_ENTRY_NAME = "CORPCODE.xml";
@@ -158,7 +204,7 @@ public class DartApiClient {
      * 못 찾으면 마지막 안전장치로 작년 연간 사업보고서를 시도한다.</p>
      */
     public DartFinancialResponse getRecentQuarterlyFinancials(String corpCode) {
-        ReportPeriod likelyAvailable = mostRecentLikelyAvailableQuarter(LocalDate.now());
+        ReportPeriod likelyAvailable = mostRecentLikelyAvailableQuarter(LocalDate.now(KST));
         int startIndex = QUARTERLY_REPORT_CODES_NEWEST_FIRST.indexOf(likelyAvailable.reportCode());
         for (int i = startIndex; i < QUARTERLY_REPORT_CODES_NEWEST_FIRST.size(); i++) {
             DartFinancialResponse response = fetchFinancials(corpCode, likelyAvailable.year(), QUARTERLY_REPORT_CODES_NEWEST_FIRST.get(i));
@@ -167,9 +213,18 @@ public class DartApiClient {
             }
         }
 
-        int fallbackYear = LocalDate.now().getYear() - ANNUAL_FALLBACK_YEAR_OFFSET;
+        int fallbackYear = LocalDate.now(KST).getYear() - ANNUAL_FALLBACK_YEAR_OFFSET;
         DartFinancialResponse fallback = fetchFinancials(corpCode, fallbackYear, REPORT_CODE_BUSINESS);
         return fallback != null ? fallback : emptyResponse(corpCode, fallbackYear);
+    }
+
+    // 날짜는 한국 시간 기준 — 배포 서버(UTC)에서 1월 1일 00~09시(KST)에 "작년"을 1년 잘못 계산하지 않게(2026-10-12 코드리뷰).
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
+    // 4월 1일~5월 15일에는 3월 말에 나온 작년 사업보고서가 작년 3분기 보고서보다 최신이다 — 이 기간엔 사업보고서를 먼저 찾는다
+    // (5월 16일부터는 올해 1분기 보고서가 기한을 넘겨 더 최신). package-private: 날짜 경계값 테스트용.
+    boolean isAnnualReportFirst(LocalDate today) {
+        return !today.isBefore(LocalDate.of(today.getYear(), 4, 1)) && today.isBefore(LocalDate.of(today.getYear(), 5, 16));
     }
 
     // 최신순(3분기→반기→1분기) 고정 순서 — mostRecentLikelyAvailableQuarter()가 고른 시작 지점부터
@@ -181,7 +236,7 @@ public class DartApiClient {
     // "이미 공시 기한이 지나 존재할 가능성이 높은" 가장 최근 보고서를 고른다. 올해 어떤
     // 분기도 아직 기한이 안 지났다면(1~5월 중순) 작년 3분기가 그 시점 기준 가장 최근 보고서다
     // (작년 3분기 기한은 작년 11월 중순이라 올해 어느 시점이든 이미 지나 있음이 보장된다).
-    // package-private: DartApiClientTest가 LocalDate.now()에 의존하지 않고 날짜 경계값을
+    // package-private: DartApiClientTest가 LocalDate.now(KST)에 의존하지 않고 날짜 경계값을
     // 직접 넣어 이 순수 로직만 검증할 수 있게 한다.
     ReportPeriod mostRecentLikelyAvailableQuarter(LocalDate today) {
         int year = today.getYear();
@@ -230,7 +285,7 @@ public class DartApiClient {
      */
     public List<Map<String, Object>> getCapitalChangeDecisions(String corpCode, String changeType) {
         String endpoint = "유상증자".equals(changeType) ? ENDPOINT_PAID_CAPITAL_INCREASE : ENDPOINT_FREE_CAPITAL_INCREASE;
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(KST);
         Map<String, String> params = Map.of(
                 "bgn_de", today.minusYears(CAPITAL_CHANGE_LOOKBACK_YEARS).format(DATE_FORMAT),
                 "end_de", today.format(DATE_FORMAT));
@@ -401,7 +456,7 @@ public class DartApiClient {
         }
         Map<String, String> params = switch (type.paramStyle()) {
             case DATE_RANGE -> {
-                LocalDate today = LocalDate.now();
+                LocalDate today = LocalDate.now(KST);
                 yield Map.of(
                         "bgn_de", today.minusYears(CAPITAL_CHANGE_LOOKBACK_YEARS).format(DATE_FORMAT),
                         "end_de", today.format(DATE_FORMAT));
@@ -419,7 +474,7 @@ public class DartApiClient {
     // 동일한 패턴으로, 먼저 최근 분기로 시도하고 실질 데이터가 없으면 최근 연간(사업보고서)으로
     // 한 번 더 시도한다. 소유권(getOwnershipInfo)과 범용 공시 조회(getDisclosureInfo)가 공유한다.
     private List<Map<String, Object>> fetchYearReportWithAnnualFallback(String endpoint, String corpCode) {
-        ReportPeriod period = mostRecentLikelyAvailableQuarter(LocalDate.now());
+        ReportPeriod period = mostRecentLikelyAvailableQuarter(LocalDate.now(KST));
         List<Map<String, Object>> quarterlyItems = fetchDisclosureList(endpoint, corpCode, Map.of(
                 "bsns_year", String.valueOf(period.year()),
                 "reprt_code", period.reportCode()));
@@ -427,7 +482,7 @@ public class DartApiClient {
             return quarterlyItems;
         }
 
-        int fallbackYear = LocalDate.now().getYear() - ANNUAL_FALLBACK_YEAR_OFFSET;
+        int fallbackYear = LocalDate.now(KST).getYear() - ANNUAL_FALLBACK_YEAR_OFFSET;
         return fetchDisclosureList(endpoint, corpCode, Map.of(
                 "bsns_year", String.valueOf(fallbackYear),
                 "reprt_code", REPORT_CODE_BUSINESS));
@@ -442,14 +497,14 @@ public class DartApiClient {
     private static final List<String> FINANCIAL_INDEX_CATEGORY_CODES = List.of("M210000", "M220000");
 
     private List<Map<String, Object>> fetchFinancialIndicators(String corpCode) {
-        ReportPeriod period = mostRecentLikelyAvailableQuarter(LocalDate.now());
+        ReportPeriod period = mostRecentLikelyAvailableQuarter(LocalDate.now(KST));
         List<Map<String, Object>> quarterlyItems = fetchFinancialIndicatorCategories(
                 corpCode, String.valueOf(period.year()), period.reportCode());
         if (!quarterlyItems.isEmpty() && !isBlankOfContent(quarterlyItems, YEAR_REPORT_BOILERPLATE_KEYS)) {
             return quarterlyItems;
         }
 
-        int fallbackYear = LocalDate.now().getYear() - ANNUAL_FALLBACK_YEAR_OFFSET;
+        int fallbackYear = LocalDate.now(KST).getYear() - ANNUAL_FALLBACK_YEAR_OFFSET;
         return fetchFinancialIndicatorCategories(corpCode, String.valueOf(fallbackYear), REPORT_CODE_BUSINESS);
     }
 
@@ -504,6 +559,12 @@ public class DartApiClient {
     // 예외를 던지지 않고 빈 리스트를 반환한다 — 재무제표 쪽과 동일하게 "해당 공시가 없다"로
     // 자연스럽게 처리되도록 한다. 최신순으로 MAX_DISCLOSURE_ITEMS개까지만 잘라 반환한다.
     private List<Map<String, Object>> fetchDisclosureList(String endpoint, String corpCode, Map<String, String> extraParams) {
+        List<Map<String, Object>> items = fetchAllDisclosureItems(endpoint, corpCode, extraParams);
+        return items.size() > MAX_DISCLOSURE_ITEMS ? items.subList(0, MAX_DISCLOSURE_ITEMS) : items;
+    }
+
+    // fetchDisclosureList()의 줄 수 제한 없는 버전 — 배당 공시처럼 한 보고서의 여러 줄을 전부 봐야 하는 조회용.
+    private List<Map<String, Object>> fetchAllDisclosureItems(String endpoint, String corpCode, Map<String, String> extraParams) {
         StringBuilder uriBuilder = new StringBuilder(apiUrl.substring(0, apiUrl.lastIndexOf('/') + 1))
                 .append(endpoint)
                 .append("?crtfc_key={apiKey}&corp_code={corpCode}");
@@ -528,10 +589,93 @@ public class DartApiClient {
             return List.of();
         }
         requireSuccessfulStatus(response.status(), response.message());
-        if (response.list() == null) return List.of();
-        return response.list().size() > MAX_DISCLOSURE_ITEMS
-                ? response.list().subList(0, MAX_DISCLOSURE_ITEMS)
-                : response.list();
+        return response.list() == null ? List.of() : response.list();
+    }
+
+    // ===== 배당 공시(종목 리서치 "배당 공시" 탭, fix/stock-detail-review) =====
+    //
+    // AI 상담의 getDisclosureInfo("배당사항")는 프롬프트 길이 때문에 5줄까지만 돌려줘, 15줄 안팎인 배당 공시에서 정작
+    // 주당 현금배당금·배당성향·시가배당률이 잘린다(삼성전자는 액면가·순이익·EPS·배당금총액만 남았다). 그래서 리서치 탭은
+    // 이 메서드로 전체 줄을 받아 배당 판단에 쓰는 줄만 남긴다. 분기·반기 보고서는 당기가 그 해 누적이라 연간 지표로 읽기
+    // 어려워, 한 해 전체 값이 나오는 작년 사업보고서를 쓰고(3월 말 제출 전이면 없을 수 있어) 없으면 재작년으로 대체한다.
+    private static final String ENDPOINT_DIVIDEND = "alotMatter.json";
+    private static final int DIVIDEND_YEAR_OFFSET = 1;
+    private static final int DIVIDEND_FALLBACK_YEAR_OFFSET = 2;
+    // 배당 판단과 무관하거나(액면가) 연결 값과 중복되는(별도 재무제표 기준) 줄은 뺀다.
+    private static final java.util.Set<String> DIVIDEND_EXCLUDED_LABELS =
+            java.util.Set.of("주당액면가액(원)", "(별도)당기순이익(백만원)");
+    // 화면에 보여줄 순서 — 배당 자체 지표를 먼저, 배당성향 계산 근거(순이익·EPS)를 뒤에 둔다. 목록에 없는 항목은 맨 뒤.
+    private static final List<String> DIVIDEND_LABEL_ORDER = List.of(
+            "주당 현금배당금(원)", "현금배당수익률(%)", "(연결)현금배당성향(%)", "현금배당금총액(백만원)",
+            "주당 주식배당(주)", "주식배당수익률(%)", "주식배당금총액(백만원)",
+            "(연결)당기순이익(백만원)", "(연결)주당순이익(원)");
+    private static final String DART_VIEWER_URL = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=";
+
+    /** 작년(없으면 재작년) 사업보고서의 배당에 관한 사항. 공시가 없으면 indicators가 빈 응답. */
+    public DartDividendResponse getDividendDisclosure(String corpCode) {
+        int currentYear = LocalDate.now(KST).getYear();
+        for (int offset : List.of(DIVIDEND_YEAR_OFFSET, DIVIDEND_FALLBACK_YEAR_OFFSET)) {
+            int year = currentYear - offset;
+            List<Map<String, Object>> rows = fetchAllDisclosureItems(ENDPOINT_DIVIDEND, corpCode, Map.of(
+                    "bsns_year", String.valueOf(year),
+                    "reprt_code", REPORT_CODE_BUSINESS));
+            if (!rows.isEmpty() && !isBlankOfContent(rows, YEAR_REPORT_BOILERPLATE_KEYS)) {
+                return toDividendResponse(corpCode, year, rows);
+            }
+        }
+        return new DartDividendResponse(corpCode, currentYear - DIVIDEND_YEAR_OFFSET, REPORT_CODE_BUSINESS, null, null, List.of());
+    }
+
+    /** DART 공시 원문 뷰어 주소. 접수번호가 없으면 null. */
+    public static String viewerUrl(String receiptNo) {
+        return receiptNo == null || receiptNo.isBlank() ? null : DART_VIEWER_URL + receiptNo;
+    }
+
+    private DartDividendResponse toDividendResponse(String corpCode, int year, List<Map<String, Object>> rows) {
+        List<DartDividendResponse.DividendIndicator> indicators = rows.stream()
+                .map(row -> new DartDividendResponse.DividendIndicator(
+                        dividendText(row.get("se")),
+                        dividendText(row.get("stock_knd")),
+                        dividendNumber(row.get("thstrm")),
+                        dividendNumber(row.get("frmtrm")),
+                        dividendNumber(row.get("lwfr"))))
+                .filter(indicator -> indicator.label() != null && !DIVIDEND_EXCLUDED_LABELS.contains(indicator.label()))
+                // 주식배당처럼 세 해 모두 "-"인 줄은 "해당 없음"이라 보여줄 게 없다.
+                .filter(indicator -> indicator.currentValue() != null || indicator.previousValue() != null
+                        || indicator.beforePreviousValue() != null)
+                .sorted(Comparator.comparingInt(this::dividendLabelRank))
+                .toList();
+        Map<String, Object> first = rows.get(0);
+        return new DartDividendResponse(corpCode, year, REPORT_CODE_BUSINESS,
+                dividendText(first.get("rcept_no")), dividendText(first.get("stlm_dt")), indicators);
+    }
+
+    private int dividendLabelRank(DartDividendResponse.DividendIndicator indicator) {
+        int rank = DIVIDEND_LABEL_ORDER.indexOf(indicator.label());
+        return rank < 0 ? DIVIDEND_LABEL_ORDER.size() : rank;
+    }
+
+    // DART는 값이 없거나 해당 없는 칸을 "-"로 준다 — 화면에서 "미제공"으로 보이도록 null로 바꾼다(기업개황 필드에도 쓴다).
+    private String dividendText(Object raw) {
+        if (raw == null) {
+            return null;
+        }
+        String value = raw.toString().trim();
+        return value.isEmpty() || "-".equals(value) ? null : value;
+    }
+
+    // "1,668"·"25.10"·"-1.5" 같은 DART 표기를 숫자로 바꾼다 — 프론트가 단위 변환·정렬을 할 수 있게. 숫자가 아니면 null.
+    private Double dividendNumber(Object raw) {
+        String value = dividendText(raw);
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Double.parseDouble(value.replace(",", ""));
+        } catch (NumberFormatException e) {
+            log.warn("DART 배당 값 파싱 실패 - rawValue: {}", value);
+            return null;
+        }
     }
 
     private record GenericDartListResponse(String status, String message, List<Map<String, Object>> list) {
@@ -550,28 +694,237 @@ public class DartApiClient {
     // 종류로 넘어갈지" 판단하게 한다 — 항목이 전부 null인 빈 응답과 "아직 이 호출을 안 해봤다"를
     // 구분하기 위함이다.
     private DartFinancialResponse fetchFinancials(String corpCode, int year, String reportCode) {
-        List<DartAccountItem> items = fetchAccountItems(corpCode, year, reportCode, FS_DIV_CONSOLIDATED);
-        if (items.isEmpty()) {
-            items = fetchAccountItems(corpCode, year, reportCode, FS_DIV_INDIVIDUAL);
-        }
-        if (items.isEmpty()) {
-            return null;
-        }
+        FetchedAccounts fetched = fetchAccounts(corpCode, year, reportCode);
+        return fetched == null ? null : toFinancialResponse(corpCode, year, reportCode, fetched, DartAccountItem::thstrmAmount);
+    }
 
+    // 연결재무제표(CFS)를 먼저, 계정이 하나도 없으면 개별재무제표(OFS)로 조회한다. 둘 다 없으면 null.
+    private FetchedAccounts fetchAccounts(String corpCode, int year, String reportCode) {
+        List<DartAccountItem> items = fetchAccountItems(corpCode, year, reportCode, FS_DIV_CONSOLIDATED);
+        if (!items.isEmpty()) {
+            return new FetchedAccounts(FS_DIV_CONSOLIDATED, items);
+        }
+        items = fetchAccountItems(corpCode, year, reportCode, FS_DIV_INDIVIDUAL);
+        return items.isEmpty() ? null : new FetchedAccounts(FS_DIV_INDIVIDUAL, items);
+    }
+
+    private record FetchedAccounts(String fsDiv, List<DartAccountItem> items) {
+
+        String receiptNo() {
+            return items.stream().map(DartAccountItem::rceptNo)
+                    .filter(value -> value != null && !value.isBlank()).findFirst().orElse(null);
+        }
+    }
+
+    // amountField로 어느 기간 값을 읽을지 고른다 — 당기(thstrm_amount), 전기(frmtrm_amount), 전전기(bfefrmtrm_amount).
+    private DartFinancialResponse toFinancialResponse(String corpCode, int year, String reportCode, FetchedAccounts fetched,
+                                                      Function<DartAccountItem, String> amountField) {
+        List<DartAccountItem> items = fetched.items();
+        List<String> balanceSheet = List.of(STATEMENT_BALANCE_SHEET);
         return new DartFinancialResponse(
                 corpCode,
                 year,
-                findAmount(items, List.of(ACCOUNT_REVENUE)),
-                findAmount(items, List.of(ACCOUNT_OPERATING_PROFIT)),
-                findAmount(items, NET_INCOME_ACCOUNT_NAMES),
-                findAmount(items, List.of(ACCOUNT_TOTAL_ASSETS)),
-                findAmount(items, List.of(ACCOUNT_TOTAL_LIABILITIES)),
-                findAmount(items, List.of(ACCOUNT_TOTAL_EQUITY))
+                findAmount(items, ACCOUNT_ID_REVENUE, INCOME_STATEMENTS, List.of(ACCOUNT_REVENUE), amountField),
+                findAmount(items, ACCOUNT_ID_OPERATING_PROFIT, INCOME_STATEMENTS, List.of(ACCOUNT_OPERATING_PROFIT), amountField),
+                findNetIncome(items, amountField),
+                findAmount(items, ACCOUNT_ID_TOTAL_ASSETS, balanceSheet, List.of(ACCOUNT_TOTAL_ASSETS), amountField),
+                findAmount(items, ACCOUNT_ID_TOTAL_LIABILITIES, balanceSheet, List.of(ACCOUNT_TOTAL_LIABILITIES), amountField),
+                findAmount(items, ACCOUNT_ID_TOTAL_EQUITY, balanceSheet, List.of(ACCOUNT_TOTAL_EQUITY), amountField),
+                reportCode,
+                fetched.fsDiv(),
+                fetched.receiptNo()
         );
     }
 
+    // 당기순이익 합계(ifrs-full_ProfitLoss)가 없고 "지배기업 소유주지분 + 비지배지분"으로만 공시하는 회사가 있다(레인보우로보틱스
+    // 2025 연결 — 2026-10-11 실응답 확인). 그때는 두 값을 더해 합계를 만든다.
+    private Long findNetIncome(List<DartAccountItem> items, Function<DartAccountItem, String> amountField) {
+        Long total = findAmount(items, ACCOUNT_ID_NET_INCOME, INCOME_STATEMENTS, NET_INCOME_ACCOUNT_NAMES, amountField);
+        if (total != null) {
+            return total;
+        }
+        Long owners = findAmount(items, ACCOUNT_ID_NET_INCOME_OWNERS, INCOME_STATEMENTS, List.of(), amountField);
+        if (owners == null) {
+            return null;
+        }
+        Long nonControlling = findAmount(items, ACCOUNT_ID_NET_INCOME_NON_CONTROLLING, INCOME_STATEMENTS, List.of(), amountField);
+        return nonControlling == null ? owners : owners + nonControlling;
+    }
+
+    // 기본주당이익(EPS) 합계가 없으면 — 중단영업이 있는 회사는 계속영업·중단영업 EPS를 나눠 공시하고(삼성바이오로직스·카카오·
+    // 한화에어로스페이스 등), 표준 계정 ID 없이 계정명으로만 공시하는 회사도 있다(LG "보통주 기본/희석주당순이익") — 2026-10-11 105종목 점검.
+    private Long findEps(List<DartAccountItem> items, Function<DartAccountItem, String> amountField) {
+        Long total = findAmount(items, ACCOUNT_ID_EPS, INCOME_STATEMENTS, EPS_ACCOUNT_NAMES, amountField);
+        if (total != null) {
+            return total;
+        }
+        Long continuing = findAmount(items, ACCOUNT_ID_EPS_CONTINUING, INCOME_STATEMENTS, List.of(), amountField);
+        if (continuing == null) {
+            return null;
+        }
+        Long discontinued = findAmount(items, ACCOUNT_ID_EPS_DISCONTINUED, INCOME_STATEMENTS, List.of(), amountField);
+        return discontinued == null ? continuing : continuing + discontinued;
+    }
+
+    // 은행·보험·증권 등 금융업은 매출액(ifrs-full_Revenue) 대신 이자수익·보험수익·수수료수익으로 나눠 공시한다(KB금융·삼성생명 등 7곳,
+    // 2026-10-11 105종목 점검). 이 항목들을 더해 매출을 만들면 회사마다 기준이 달라져, 매출 관련 값은 비우고 금융업으로 표시한다.
+    private boolean isFinancialCompany(List<DartAccountItem> items) {
+        boolean hasRevenue = items.stream().anyMatch(item -> ACCOUNT_ID_REVENUE.equals(item.accountId())
+                && INCOME_STATEMENTS.contains(item.sjDiv()));
+        return !hasRevenue && items.stream().anyMatch(item -> FINANCIAL_REVENUE_ACCOUNT_IDS.contains(item.accountId())
+                && INCOME_STATEMENTS.contains(item.sjDiv()));
+    }
+
+    private DartFinancialDetailResponse toFinancialDetail(String corpCode, int year, FetchedAccounts fetched,
+                                                          Function<DartAccountItem, String> amountField) {
+        List<DartAccountItem> items = fetched.items();
+        List<String> balanceSheet = List.of(STATEMENT_BALANCE_SHEET);
+        List<String> cashFlow = List.of(STATEMENT_CASH_FLOW);
+        return new DartFinancialDetailResponse(
+                corpCode,
+                year,
+                REPORT_CODE_BUSINESS,
+                fetched.fsDiv(),
+                fetched.receiptNo(),
+                isFinancialCompany(items),
+                findAmount(items, ACCOUNT_ID_REVENUE, INCOME_STATEMENTS, List.of(ACCOUNT_REVENUE), amountField),
+                findAmount(items, ACCOUNT_ID_GROSS_PROFIT, INCOME_STATEMENTS, List.of(), amountField),
+                findAmount(items, ACCOUNT_ID_OPERATING_PROFIT, INCOME_STATEMENTS, List.of(ACCOUNT_OPERATING_PROFIT), amountField),
+                findAmount(items, ACCOUNT_ID_PROFIT_BEFORE_TAX, INCOME_STATEMENTS, List.of(), amountField),
+                findNetIncome(items, amountField),
+                findAmount(items, ACCOUNT_ID_NET_INCOME_OWNERS, INCOME_STATEMENTS, List.of(), amountField),
+                findEps(items, amountField),
+                findAmount(items, ACCOUNT_ID_CURRENT_ASSETS, balanceSheet, List.of(), amountField),
+                findAmount(items, ACCOUNT_ID_CURRENT_LIABILITIES, balanceSheet, List.of(), amountField),
+                findAmount(items, ACCOUNT_ID_CASH, balanceSheet, List.of(), amountField),
+                findAmount(items, ACCOUNT_ID_TOTAL_ASSETS, balanceSheet, List.of(ACCOUNT_TOTAL_ASSETS), amountField),
+                findAmount(items, ACCOUNT_ID_TOTAL_LIABILITIES, balanceSheet, List.of(ACCOUNT_TOTAL_LIABILITIES), amountField),
+                findAmount(items, ACCOUNT_ID_ISSUED_CAPITAL, balanceSheet, List.of(), amountField),
+                findAmount(items, ACCOUNT_ID_RETAINED_EARNINGS, balanceSheet, List.of(), amountField),
+                findAmount(items, ACCOUNT_ID_TOTAL_EQUITY, balanceSheet, List.of(ACCOUNT_TOTAL_EQUITY), amountField),
+                findAmount(items, ACCOUNT_ID_EQUITY_OWNERS, balanceSheet, List.of(), amountField),
+                findAmount(items, ACCOUNT_ID_OPERATING_CASH_FLOW, cashFlow, List.of(), amountField),
+                findAmount(items, ACCOUNT_ID_INVESTING_CASH_FLOW, cashFlow, List.of(), amountField),
+                findAmount(items, ACCOUNT_ID_FINANCING_CASH_FLOW, cashFlow, List.of(), amountField)
+        );
+    }
+
+    /**
+     * 종목 리서치 "재무제표"·"개요" 탭용 3개년 상세(fix/stock-detail-review) — request.year() 사업보고서 한 건에 당기·전기·전전기
+     * 값이 함께 오므로 DART를 더 부르지 않고 세 해를 만든다(최신순). 공시가 없으면 빈 목록, 값이 하나도 없는 해(상장 전 등)는 뺀다.
+     */
+    public List<DartFinancialDetailResponse> getFinancialTrend(DartFinancialRequest request) {
+        FetchedAccounts fetched = fetchAccounts(request.corpCode(), request.year(), REPORT_CODE_BUSINESS);
+        if (fetched == null) {
+            return List.of();
+        }
+        List<Function<DartAccountItem, String>> amountFields = List.of(
+                DartAccountItem::thstrmAmount, DartAccountItem::frmtrmAmount, DartAccountItem::bfefrmtrmAmount);
+        List<DartFinancialDetailResponse> years = new java.util.ArrayList<>();
+        for (int i = 0; i < amountFields.size(); i++) {
+            DartFinancialDetailResponse year = toFinancialDetail(request.corpCode(), request.year() - i, fetched, amountFields.get(i));
+            if (year.revenue() != null || year.operatingProfit() != null || year.netIncome() != null || year.totalAssets() != null) {
+                years.add(year);
+            }
+        }
+        return years;
+    }
+
+    /**
+     * 종목 리서치 "분기 실적" 탭용 — 가장 최근 분기 손익과 전년 같은 분기 손익(fix/stock-detail-review). 보고서 고르는 순서는
+     * {@link #getRecentQuarterlyFinancials(String)}와 같고, 분기 보고서를 못 찾으면 작년 사업보고서의 한 해 값과 전년 값을 쓴다.
+     */
+    public DartEarningsResponse getRecentEarnings(String corpCode) {
+        LocalDate today = LocalDate.now(KST);
+        if (isAnnualReportFirst(today)) {
+            FetchedAccounts annual = fetchAccounts(corpCode, today.getYear() - 1, REPORT_CODE_BUSINESS);
+            if (annual != null) {
+                return toEarningsResponse(corpCode, today.getYear() - 1, REPORT_CODE_BUSINESS, annual, DartAccountItem::frmtrmAmount);
+            }
+        }
+        ReportPeriod likelyAvailable = mostRecentLikelyAvailableQuarter(today);
+        int startIndex = QUARTERLY_REPORT_CODES_NEWEST_FIRST.indexOf(likelyAvailable.reportCode());
+        for (int i = startIndex; i < QUARTERLY_REPORT_CODES_NEWEST_FIRST.size(); i++) {
+            String reportCode = QUARTERLY_REPORT_CODES_NEWEST_FIRST.get(i);
+            FetchedAccounts fetched = fetchAccounts(corpCode, likelyAvailable.year(), reportCode);
+            if (fetched != null) {
+                return toEarningsResponse(corpCode, likelyAvailable.year(), reportCode, fetched, DartAccountItem::frmtrmQAmount);
+            }
+        }
+        int fallbackYear = LocalDate.now(KST).getYear() - ANNUAL_FALLBACK_YEAR_OFFSET;
+        FetchedAccounts annual = fetchAccounts(corpCode, fallbackYear, REPORT_CODE_BUSINESS);
+        if (annual != null) {
+            return toEarningsResponse(corpCode, fallbackYear, REPORT_CODE_BUSINESS, annual, DartAccountItem::frmtrmAmount);
+        }
+        return new DartEarningsResponse(corpCode, fallbackYear, null, null, null, false, null, null, null, null, null, null);
+    }
+
+    private DartEarningsResponse toEarningsResponse(String corpCode, int year, String reportCode, FetchedAccounts fetched,
+                                                    Function<DartAccountItem, String> previousField) {
+        DartFinancialResponse current = toFinancialResponse(corpCode, year, reportCode, fetched, DartAccountItem::thstrmAmount);
+        DartFinancialResponse previous = toFinancialResponse(corpCode, year - 1, reportCode, fetched, previousField);
+        return new DartEarningsResponse(corpCode, year, reportCode, fetched.fsDiv(), fetched.receiptNo(),
+                isFinancialCompany(fetched.items()),
+                current.revenue(), current.operatingProfit(), current.netIncome(),
+                previous.revenue(), previous.operatingProfit(), previous.netIncome());
+    }
+
+    // ===== 기업개황(종목 리서치 "개요" 탭, fix/stock-detail-review) =====
+    private static final String ENDPOINT_COMPANY = "company.json";
+    private static final String DART_COMPANY_URL = "https://dart.fss.or.kr/dsae001/selectPopup.ax?selectKey=";
+
+    /** DART 기업개황(대표자·설립일·결산월·홈페이지·주소 등). 공시 회사가 아니거나 조회 결과가 없으면 빈 값. */
+    @SuppressWarnings("unchecked")
+    public Optional<DartCompanyResponse> getCompany(String corpCode) {
+        String uri = apiUrl.substring(0, apiUrl.lastIndexOf('/') + 1) + ENDPOINT_COMPANY + "?crtfc_key={apiKey}&corp_code={corpCode}";
+        Map<String, Object> response = ExternalApiInvoker.call(() -> restClient.get()
+                        .uri(uri, apiKey, corpCode)
+                        .retrieve()
+                        .body(Map.class),
+                "DART 기업개황 조회 실패 - corpCode: {}", corpCode);
+        if (response == null) {
+            throw new CustomException(ErrorCode.EXTERNAL_API_ERROR);
+        }
+        String status = dividendText(response.get("status"));
+        if (NO_DATA_STATUS.equals(status)) {
+            return Optional.empty();
+        }
+        requireSuccessfulStatus(status, dividendText(response.get("message")));
+        return Optional.of(new DartCompanyResponse(
+                corpCode,
+                dividendText(response.get("corp_name")),
+                dividendText(response.get("corp_name_eng")),
+                dividendText(response.get("stock_name")),
+                dividendText(response.get("ceo_nm")),
+                dividendText(response.get("corp_cls")),
+                dividendText(response.get("est_dt")),
+                dividendText(response.get("acc_mt")),
+                absoluteUrl(dividendText(response.get("hm_url"))),
+                absoluteUrl(dividendText(response.get("ir_url"))),
+                dividendText(response.get("phn_no")),
+                dividendText(response.get("adres")),
+                dividendText(response.get("jurir_no")),
+                dividendText(response.get("bizr_no")),
+                dividendText(response.get("induty_code"))));
+    }
+
+    /** DART 기업개황 웹 페이지(공시 회사 정보 팝업) 주소. */
+    public static String companyPageUrl(String corpCode) {
+        return corpCode == null || corpCode.isBlank() ? null : DART_COMPANY_URL + corpCode;
+    }
+
+    // DART는 홈페이지를 "www.samsung.com/sec"처럼 프로토콜 없이 준다(105종목 중 99곳). 그대로 링크로 걸면 브라우저가 우리 사이트의
+    // 상대 경로로 해석해 404가 나므로 https://를 붙인다.
+    private static String absoluteUrl(String url) {
+        if (url == null) {
+            return null;
+        }
+        String trimmed = url.trim();
+        return trimmed.startsWith("http://") || trimmed.startsWith("https://") ? trimmed : "https://" + trimmed;
+    }
+
     private DartFinancialResponse emptyResponse(String corpCode, int year) {
-        return new DartFinancialResponse(corpCode, year, null, null, null, null, null, null);
+        return new DartFinancialResponse(corpCode, year, null, null, null, null, null, null, null, null, null);
     }
 
     private List<DartAccountItem> fetchAccountItems(String corpCode, int year, String reportCode, String fsDiv) {
@@ -601,16 +954,27 @@ public class DartApiClient {
     // 뻔했다). 정확히 일치하는 이름이 없으면 "(손실)"이 붙은 이름도 함께 확인한다.
     private static final String LOSS_SUFFIX = "(손실)";
 
-    // 후보 이름을 순서대로 시도한다 — 대부분의 계정은 후보가 1개뿐이지만(List.of(...)), 당기순이익은
-    // 보고서 종류에 따라 이름 자체가 다르므로(NET_INCOME_ACCOUNT_NAMES) 여러 후보를 순서대로 확인한다.
-    private Long findAmount(List<DartAccountItem> items, List<String> accountNameCandidates) {
+    // 1) DART 표준 계정 ID로 정해진 재무제표(statements 순서대로)에서 찾고, 2) 없으면(계정 ID가 없는 응답) 기존처럼
+    // 후보 계정명을 순서대로 시도한다 — 당기순이익은 보고서 종류에 따라 이름 자체가 다르므로(NET_INCOME_ACCOUNT_NAMES)
+    // 여러 후보를 확인한다. 계정명으로 찾을 때도 자본변동표·현금흐름표 줄은 건너뛴다(구성요소별 값이라 총액이 아니다).
+    private Long findAmount(List<DartAccountItem> items, String accountId, List<String> statements,
+                            List<String> accountNameCandidates, Function<DartAccountItem, String> amountField) {
+        for (String statement : statements) {
+            Optional<DartAccountItem> found = items.stream()
+                    .filter(item -> accountId.equals(item.accountId()) && statement.equals(item.sjDiv()))
+                    .findFirst();
+            if (found.isPresent()) {
+                return parseAmount(amountField.apply(found.get()));
+            }
+        }
         for (String accountName : accountNameCandidates) {
             String accountNameWithLossSuffix = accountName + LOSS_SUFFIX;
             Optional<DartAccountItem> found = items.stream()
+                    .filter(item -> item.sjDiv() == null || statements.contains(item.sjDiv()))
                     .filter(item -> accountName.equals(item.accountNm()) || accountNameWithLossSuffix.equals(item.accountNm()))
                     .findFirst();
             if (found.isPresent()) {
-                return parseAmount(found.get().thstrmAmount());
+                return parseAmount(amountField.apply(found.get()));
             }
         }
         return null;
@@ -929,7 +1293,13 @@ public class DartApiClient {
 
     private record DartAccountItem(
             @JsonProperty("account_nm") String accountNm,
-            @JsonProperty("thstrm_amount") String thstrmAmount
+            @JsonProperty("thstrm_amount") String thstrmAmount,
+            @JsonProperty("account_id") String accountId,
+            @JsonProperty("sj_div") String sjDiv,
+            @JsonProperty("rcept_no") String rceptNo,
+            @JsonProperty("frmtrm_amount") String frmtrmAmount,
+            @JsonProperty("bfefrmtrm_amount") String bfefrmtrmAmount,
+            @JsonProperty("frmtrm_q_amount") String frmtrmQAmount
     ) {
     }
 }

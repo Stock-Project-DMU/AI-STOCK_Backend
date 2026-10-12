@@ -9,7 +9,10 @@ public record HogaResponse(
         List<Long> askPrices,
         List<Long> askVolumes,
         List<Long> bidPrices,
-        List<Long> bidVolumes
+        List<Long> bidVolumes,
+        // 매도·매수 총잔량(2026-10-12) — 없으면 null
+        Long totalAskVolume,
+        Long totalBidVolume
 ) {
 
     public static HogaResponse from(HogaDto dto) {
@@ -18,7 +21,9 @@ public record HogaResponse(
                 dto.getAskPrices(),
                 dto.getAskVolumes(),
                 dto.getBidPrices(),
-                dto.getBidVolumes()
+                dto.getBidVolumes(),
+                dto.getTotalAskVolume(),
+                dto.getTotalBidVolume()
         );
     }
 }

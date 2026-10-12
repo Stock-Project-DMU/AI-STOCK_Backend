@@ -24,7 +24,8 @@ import com.teamfp.aistock.infra.marketdata.MarketDataApiClient;
 import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
 
 /** Uses a temporary user and transaction rollback; no real quote, notification or trade is sent. */
-@SpringBootTest
+// 정규장 외(주말·야간)에도 실제 주문 흐름을 검증할 수 있게 장 운영 시간 제한을 끈다(실시세 전환 2단계 MarketSessionService).
+@SpringBootTest(properties = "market-session.enforce-trading-hours=false")
 @Transactional(isolation = Isolation.READ_COMMITTED)
 class TradingFallbackIntegrationTest {
     @Autowired OrderService orders;

@@ -56,7 +56,9 @@ public class StockService {
                 dto.getAskPrices(),
                 dto.getAskVolumes(),
                 dto.getBidPrices(),
-                dto.getBidVolumes()
+                dto.getBidVolumes(),
+                dto.getTotalAskVolume(),
+                dto.getTotalBidVolume()
         );
     }
 }

@@ -39,8 +39,8 @@ class MarketQueryControllerTest {
     void setUp() {
         LocalMarketDataReader reader = new LocalMarketDataReader();
         ReflectionTestUtils.setField(reader, "localDataPath", tempDir.toString());
-        // 순위 조회 경로에서 쓰지 않는 클라이언트(현재가·뉴스·업종·투자정보·DART)는 null로 둔다.
-        MarketQueryService marketQueryService = new MarketQueryService(new HighItemApiClient(reader), null, null, null, null, null);
+        // 순위 조회 경로에서 쓰지 않는 클라이언트(현재가·뉴스·업종·투자정보·DART·배당 일정)는 null로 둔다.
+        MarketQueryService marketQueryService = new MarketQueryService(new HighItemApiClient(reader), null, null, null, null, null, null, null);
         mockMvc = MockMvcBuilders.standaloneSetup(new MarketQueryController(marketQueryService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();

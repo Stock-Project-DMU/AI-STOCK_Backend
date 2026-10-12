@@ -19,7 +19,8 @@ import lombok.NoArgsConstructor;
  * (MarketDataApiClient 클래스 주석 참고) 전용 타입을 둔다.
  */
 @Getter
-@Builder
+// toBuilder — LocalMarketDataReader가 파일 값에 실시간 스트림의 최신 체결(가격·등락·거래량·오늘 시고저)만 덮어 쓸 때 쓴다(실시세 전환 7단계).
+@Builder(toBuilder = true)
 @NoArgsConstructor
 @AllArgsConstructor
 public class CurrentPriceDetailDto {
@@ -55,4 +56,11 @@ public class CurrentPriceDetailDto {
     // 적어 넣는다. 실제 외부 시세 데이터 API(t1901)의 exchgubun 스펙과는 무관한 로컬 개발용 필드다
     // (ETF exchgubun 신규 필드 반영, #04, 2026-09-23).
     private String exchgubun; // ETF 거래소구분("K"=KRX) — ETF가 아닌 종목은 null
+
+    // 오늘(tradingDate) 시가·고가·저가 — 생성기가 LS 실시세(t8407·실시간 체결)에서 채운다(실시세 전환 5단계). 차트가 과거 봉
+    // (price_history.json) 위에 오늘 봉을 붙일 때 쓴다. 이전 시뮬레이션 데이터에는 없어 null일 수 있다.
+    private Long openPrice;
+    private Long highPrice;
+    private Long lowPrice;
+    private String tradingDate; // 지금 시세의 거래일(YYYYMMDD) — 장 시작 전·휴장일이면 직전 거래일
 }

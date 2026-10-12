@@ -40,7 +40,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * 실행 전 docker compose(MySQL 3306 또는 DB_PORT로 오버라이드한 포트, Redis 6379)가 떠 있어야 한다.
  */
-@SpringBootTest
+// 정규장 외(주말·야간)에도 실제 주문 흐름을 검증할 수 있게 장 운영 시간 제한을 끈다(실시세 전환 2단계 MarketSessionService).
+@SpringBootTest(properties = "market-session.enforce-trading-hours=false")
 class OrderExecutionIntegrationTest {
 
     @Autowired

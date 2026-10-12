@@ -89,6 +89,10 @@ class OrderServiceLimitOrderTest {
     @Mock
     private OrderExecutionService orderExecutionService;
 
+    // 정규장 판단(실시세 전환 2단계) — 목은 requireOpen()에서 아무것도 던지지 않아 기존 테스트는 정규장으로 동작한다.
+    @Mock
+    private com.teamfp.aistock.domain.stock.service.MarketSessionService marketSessionService;
+
     @InjectMocks
     private OrderService orderService;
 

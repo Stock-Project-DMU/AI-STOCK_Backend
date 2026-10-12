@@ -7,7 +7,7 @@ import lombok.NoArgsConstructor;
 
 /** 외부 시세 데이터 제공사 Open API 기간별주가(t1305) — 날짜별 시세+시가총액+외국인/개인 순매수. */
 @Getter
-@Builder
+@Builder(toBuilder = true)
 @AllArgsConstructor
 @NoArgsConstructor
 public class HistoricalPriceDto {

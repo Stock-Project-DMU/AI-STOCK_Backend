@@ -28,6 +28,10 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import com.teamfp.aistock.infra.dart.dto.DartCompanyResponse;
+import com.teamfp.aistock.infra.dart.dto.DartDividendResponse;
+import com.teamfp.aistock.infra.dart.dto.DartEarningsResponse;
+import com.teamfp.aistock.infra.dart.dto.DartFinancialDetailResponse;
 import com.teamfp.aistock.infra.dart.dto.DartFinancialRequest;
 import com.teamfp.aistock.infra.dart.dto.DartFinancialResponse;
 import com.teamfp.aistock.infra.dart.dto.ListedStock;
@@ -161,6 +165,360 @@ class DartApiClientTest {
     }
 
     @Nested
+    @DisplayName("DART 표준 계정 ID로 계정 찾기 (fix/stock-detail-review)")
+    class FindByAccountId {
+
+        @Test
+        @DisplayName("계정명이 회사마다 달라도(매출/반기손이익(손실)) 계정 ID로 찾고, 자본변동표 줄은 무시한다")
+        void success_matchesAccountIdInsteadOfName() {
+            // 에코프로비엠 2026 반기보고서 실응답 축약 — 포괄손익계산서(CIS) 하나로 공시하고 계정명이 표준과 다르다.
+            String json = """
+                    {"status":"000","message":"정상","list":[
+                      {"rcept_no":"20260814002535","sj_div":"BS","account_id":"ifrs-full_Assets","account_nm":"자산총계","thstrm_amount":"5431383326642"},
+                      {"rcept_no":"20260814002535","sj_div":"BS","account_id":"ifrs-full_Liabilities","account_nm":"부채총계","thstrm_amount":"3334884102497"},
+                      {"rcept_no":"20260814002535","sj_div":"BS","account_id":"ifrs-full_Equity","account_nm":"자본총계","thstrm_amount":"2096499224145"},
+                      {"rcept_no":"20260814002535","sj_div":"SCE","account_id":"ifrs-full_ProfitLoss","account_nm":"반기손이익(손실)","thstrm_amount":"999"},
+                      {"rcept_no":"20260814002535","sj_div":"CIS","account_id":"ifrs-full_Revenue","account_nm":"매출","thstrm_amount":"576711961931"},
+                      {"rcept_no":"20260814002535","sj_div":"CIS","account_id":"dart_OperatingIncomeLoss","account_nm":"영업이익","thstrm_amount":"18011340475"},
+                      {"rcept_no":"20260814002535","sj_div":"CIS","account_id":"ifrs-full_ProfitLoss","account_nm":"반기손이익(손실)","thstrm_amount":"-454805239"}
+                    ]}""";
+            mockServer.expect(requestTo(Matchers.startsWith(API_URL)))
+                    .andExpect(queryParam("fs_div", "CFS"))
+                    .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
+
+            DartFinancialResponse response = dartApiClient.getFinancials(new DartFinancialRequest(CORP_CODE, 2025));
+
+            assertThat(response.revenue()).isEqualTo(576711961931L);
+            assertThat(response.operatingProfit()).isEqualTo(18011340475L);
+            assertThat(response.netIncome()).isEqualTo(-454805239L);
+            assertThat(response.totalAssets()).isEqualTo(5431383326642L);
+            assertThat(response.totalLiabilities()).isEqualTo(3334884102497L);
+            assertThat(response.totalEquity()).isEqualTo(2096499224145L);
+            assertThat(response.reportCode()).isEqualTo("11011");
+            assertThat(response.fsDiv()).isEqualTo("CFS");
+            assertThat(response.receiptNo()).isEqualTo("20260814002535");
+        }
+
+        @Test
+        @DisplayName("손익계산서(IS)가 있으면 포괄손익계산서(CIS)보다 먼저 쓴다")
+        void success_prefersIncomeStatementOverComprehensive() {
+            String json = """
+                    {"status":"000","message":"정상","list":[
+                      {"sj_div":"CIS","account_id":"ifrs-full_ProfitLoss","account_nm":"반기순이익","thstrm_amount":"1"},
+                      {"sj_div":"IS","account_id":"ifrs-full_ProfitLoss","account_nm":"반기순이익","thstrm_amount":"71624461000000"}
+                    ]}""";
+            mockServer.expect(requestTo(Matchers.startsWith(API_URL)))
+                    .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
+
+            DartFinancialResponse response = dartApiClient.getFinancials(new DartFinancialRequest(CORP_CODE, 2025));
+
+            assertThat(response.netIncome()).isEqualTo(71624461000000L);
+        }
+
+        @Test
+        @DisplayName("연결재무제표가 없어 개별로 조회했으면 fsDiv가 OFS다")
+        void fsDivIsIndividual_whenFallingBackToOfs() {
+            mockServer.expect(requestTo(Matchers.startsWith(API_URL)))
+                    .andExpect(queryParam("fs_div", "CFS"))
+                    .andRespond(withSuccess("""
+                            {"status":"013","message":"조회된 데이타가 없습니다."}""", MediaType.APPLICATION_JSON));
+            mockServer.expect(requestTo(Matchers.startsWith(API_URL)))
+                    .andExpect(queryParam("fs_div", "OFS"))
+                    .andRespond(withSuccess(fullAccountsJson(), MediaType.APPLICATION_JSON));
+
+            DartFinancialResponse response = dartApiClient.getFinancials(new DartFinancialRequest(CORP_CODE, 2025));
+
+            assertThat(response.fsDiv()).isEqualTo("OFS");
+        }
+    }
+
+    @Nested
+    @DisplayName("재무제표 3개년·분기 실적·기업개황 (fix/stock-detail-review)")
+    class ResearchTabs {
+
+        @Test
+        @DisplayName("사업보고서 한 건의 당기·전기·전전기 값으로 3개년을 만든다(최신순)")
+        void financialTrend_buildsThreeYearsFromOneReport() {
+            // 삼성전자 2025 사업보고서 실응답 축약.
+            String json = """
+                    {"status":"000","message":"정상","list":[
+                      {"rcept_no":"20260310002820","sj_div":"IS","account_id":"ifrs-full_Revenue","account_nm":"매출액",
+                       "thstrm_amount":"333605938000000","frmtrm_amount":"300870903000000","bfefrmtrm_amount":"258935494000000"},
+                      {"rcept_no":"20260310002820","sj_div":"BS","account_id":"ifrs-full_Liabilities","account_nm":"부채총계",
+                       "thstrm_amount":"130621773000000","frmtrm_amount":"112339878000000","bfefrmtrm_amount":"92228115000000"}
+                    ]}""";
+            mockServer.expect(requestTo(Matchers.startsWith(API_URL)))
+                    .andExpect(queryParam("bsns_year", "2025"))
+                    .andExpect(queryParam("reprt_code", "11011"))
+                    .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
+
+            List<DartFinancialDetailResponse> years = dartApiClient.getFinancialTrend(new DartFinancialRequest(CORP_CODE, 2025));
+
+            assertThat(years).extracting(DartFinancialDetailResponse::bizYear).containsExactly(2025, 2024, 2023);
+            assertThat(years).extracting(DartFinancialDetailResponse::revenue)
+                    .containsExactly(333605938000000L, 300870903000000L, 258935494000000L);
+            assertThat(years).extracting(DartFinancialDetailResponse::totalLiabilities)
+                    .containsExactly(130621773000000L, 112339878000000L, 92228115000000L);
+            assertThat(years).extracting(DartFinancialDetailResponse::receiptNo).containsOnly("20260310002820");
+            assertThat(years).extracting(DartFinancialDetailResponse::isFinancialCompany).containsOnly(false);
+        }
+
+        @Test
+        @DisplayName("재무 상세는 손익·재무상태·현금흐름 계정을 각 재무제표에서 찾는다")
+        void financialTrend_readsDetailAccounts() {
+            String json = """
+                    {"status":"000","message":"정상","list":[
+                      {"sj_div":"IS","account_id":"ifrs-full_Revenue","account_nm":"매출액","thstrm_amount":"333000"},
+                      {"sj_div":"IS","account_id":"ifrs-full_GrossProfit","account_nm":"매출총이익","thstrm_amount":"129000"},
+                      {"sj_div":"IS","account_id":"ifrs-full_BasicEarningsLossPerShare","account_nm":"기본주당이익","thstrm_amount":"6605"},
+                      {"sj_div":"BS","account_id":"ifrs-full_CurrentAssets","account_nm":"유동자산","thstrm_amount":"247000"},
+                      {"sj_div":"BS","account_id":"ifrs-full_EquityAttributableToOwnersOfParent","account_nm":"지배기업 소유주지분","thstrm_amount":"420000"},
+                      {"sj_div":"SCE","account_id":"ifrs-full_EquityAttributableToOwnersOfParent","account_nm":"지배기업 소유주지분","thstrm_amount":"1"},
+                      {"sj_div":"CF","account_id":"ifrs-full_CashFlowsFromUsedInOperatingActivities","account_nm":"영업활동현금흐름","thstrm_amount":"-85000"}
+                    ]}""";
+            mockServer.expect(requestTo(Matchers.startsWith(API_URL)))
+                    .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
+
+            DartFinancialDetailResponse latest = dartApiClient.getFinancialTrend(new DartFinancialRequest(CORP_CODE, 2025)).get(0);
+
+            assertThat(latest.grossProfit()).isEqualTo(129000L);
+            assertThat(latest.eps()).isEqualTo(6605L);
+            assertThat(latest.currentAssets()).isEqualTo(247000L);
+            assertThat(latest.equityOwners()).isEqualTo(420000L);
+            assertThat(latest.operatingCashFlow()).isEqualTo(-85000L);
+        }
+
+        @Test
+        @DisplayName("EPS 합계가 없으면 계속영업 + 중단영업 EPS를 더하고, 표준 계정 ID가 없으면 계정명으로 찾는다")
+        void financialTrend_epsFallbacks() {
+            // 카카오 2025 연결 실응답 축약 — 계속영업 1,138원 + 중단영업 -20원.
+            String continuingJson = """
+                    {"status":"000","message":"정상","list":[
+                      {"sj_div":"CIS","account_id":"ifrs-full_Revenue","account_nm":"영업수익","thstrm_amount":"100"},
+                      {"sj_div":"CIS","account_id":"ifrs-full_BasicEarningsLossPerShareFromContinuingOperations","account_nm":"계속영업 기본주당순이익","thstrm_amount":"1138"},
+                      {"sj_div":"CIS","account_id":"ifrs-full_BasicEarningsLossPerShareFromDiscontinuedOperations","account_nm":"중단영업 기본주당순이익","thstrm_amount":"-20"}
+                    ]}""";
+            // LG 2025 연결 실응답 축약 — 표준 계정 ID 없이 계정명만 있다.
+            String nameOnlyJson = """
+                    {"status":"000","message":"정상","list":[
+                      {"sj_div":"IS","account_id":"ifrs-full_Revenue","account_nm":"매출액","thstrm_amount":"100"},
+                      {"sj_div":"IS","account_id":"-표준계정코드 미사용-","account_nm":"구형우선주 기본/희석주당순이익","thstrm_amount":"4830"},
+                      {"sj_div":"IS","account_id":"-표준계정코드 미사용-","account_nm":"보통주 기본/희석주당순이익","thstrm_amount":"4780"}
+                    ]}""";
+            mockServer.expect(requestTo(Matchers.startsWith(API_URL))).andExpect(queryParam("corp_code", "00000001"))
+                    .andRespond(withSuccess(continuingJson, MediaType.APPLICATION_JSON));
+            mockServer.expect(requestTo(Matchers.startsWith(API_URL))).andExpect(queryParam("corp_code", "00000002"))
+                    .andRespond(withSuccess(nameOnlyJson, MediaType.APPLICATION_JSON));
+
+            assertThat(dartApiClient.getFinancialTrend(new DartFinancialRequest("00000001", 2025)).get(0).eps()).isEqualTo(1118L);
+            assertThat(dartApiClient.getFinancialTrend(new DartFinancialRequest("00000002", 2025)).get(0).eps()).isEqualTo(4780L);
+        }
+
+        @Test
+        @DisplayName("매출액 없이 이자수익·보험수익으로 공시하면 금융업으로 판별한다")
+        void financialTrend_detectsFinancialCompany() {
+            // KB금융 2025 사업보고서 실응답 축약 — ifrs-full_Revenue가 없다.
+            String json = """
+                    {"status":"000","message":"정상","list":[
+                      {"sj_div":"CIS","account_id":"ifrs-full_RevenueFromInterest","account_nm":"이자수익","thstrm_amount":"29156100000000"},
+                      {"sj_div":"CIS","account_id":"dart_OperatingIncomeLoss","account_nm":"영업이익","thstrm_amount":"8517711000000"},
+                      {"sj_div":"CIS","account_id":"ifrs-full_ProfitLoss","account_nm":"당기순이익","thstrm_amount":"5840715000000"}
+                    ]}""";
+            mockServer.expect(requestTo(Matchers.startsWith(API_URL)))
+                    .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
+
+            DartFinancialDetailResponse latest = dartApiClient.getFinancialTrend(new DartFinancialRequest(CORP_CODE, 2025)).get(0);
+
+            assertThat(latest.isFinancialCompany()).isTrue();
+            assertThat(latest.revenue()).isNull();
+            assertThat(latest.operatingProfit()).isEqualTo(8517711000000L);
+        }
+
+        @Test
+        @DisplayName("당기순이익 합계가 없으면 지배기업 소유주지분 + 비지배지분으로 만든다")
+        void financialTrend_netIncomeFromOwnersAndNonControlling() {
+            // 레인보우로보틱스 2025 연결 실응답 축약 — ifrs-full_ProfitLoss가 없다.
+            String json = """
+                    {"status":"000","message":"정상","list":[
+                      {"sj_div":"CIS","account_id":"ifrs-full_Revenue","account_nm":"매출액","thstrm_amount":"100"},
+                      {"sj_div":"CIS","account_id":"ifrs-full_ProfitLossAttributableToOwnersOfParent","account_nm":"지배기업 소유주지분","thstrm_amount":"1421503230"},
+                      {"sj_div":"CIS","account_id":"ifrs-full_ProfitLossAttributableToNoncontrollingInterests","account_nm":"비지배지분","thstrm_amount":"5"}
+                    ]}""";
+            mockServer.expect(requestTo(Matchers.startsWith(API_URL)))
+                    .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
+
+            DartFinancialDetailResponse latest = dartApiClient.getFinancialTrend(new DartFinancialRequest(CORP_CODE, 2025)).get(0);
+
+            assertThat(latest.netIncome()).isEqualTo(1421503235L);
+            assertThat(latest.netIncomeOwners()).isEqualTo(1421503230L);
+        }
+
+        @Test
+        @DisplayName("사업보고서가 없으면 빈 목록을 돌려준다")
+        void financialTrend_emptyWhenNoReport() {
+            String emptyJson = """
+                    {"status":"013","message":"조회된 데이타가 없습니다."}""";
+            mockServer.expect(org.springframework.test.web.client.ExpectedCount.twice(), requestTo(Matchers.startsWith(API_URL)))
+                    .andRespond(withSuccess(emptyJson, MediaType.APPLICATION_JSON));
+
+            assertThat(dartApiClient.getFinancialTrend(new DartFinancialRequest(CORP_CODE, 2025))).isEmpty();
+        }
+
+        @Test
+        @DisplayName("분기 실적은 그 분기 3개월 값과 전년 같은 분기(frmtrm_q_amount)를 함께 돌려준다")
+        void recentEarnings_includesSameQuarterLastYear() {
+            DartApiClient.ReportPeriod expected = dartApiClient.mostRecentLikelyAvailableQuarter(LocalDate.now());
+            // 삼성전자 2026 반기보고서 실응답 축약.
+            String json = """
+                    {"status":"000","message":"정상","list":[
+                      {"rcept_no":"20260814003699","sj_div":"IS","account_id":"ifrs-full_Revenue","account_nm":"매출액",
+                       "thstrm_amount":"171499470000000","thstrm_add_amount":"305372914000000","frmtrm_q_amount":"74566317000000"},
+                      {"rcept_no":"20260814003699","sj_div":"IS","account_id":"ifrs-full_ProfitLoss","account_nm":"반기순이익",
+                       "thstrm_amount":"71624461000000","frmtrm_q_amount":"5116435000000"}
+                    ]}""";
+            mockServer.expect(requestTo(Matchers.startsWith(API_URL)))
+                    .andExpect(queryParam("reprt_code", expected.reportCode()))
+                    .andExpect(queryParam("fs_div", "CFS"))
+                    .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
+
+            DartEarningsResponse earnings = dartApiClient.getRecentEarnings(CORP_CODE);
+
+            assertThat(earnings.reportCode()).isEqualTo(expected.reportCode());
+            assertThat(earnings.bizYear()).isEqualTo(expected.year());
+            assertThat(earnings.revenue()).isEqualTo(171499470000000L);
+            assertThat(earnings.previousRevenue()).isEqualTo(74566317000000L);
+            assertThat(earnings.netIncome()).isEqualTo(71624461000000L);
+            assertThat(earnings.previousNetIncome()).isEqualTo(5116435000000L);
+            assertThat(earnings.receiptNo()).isEqualTo("20260814003699");
+            mockServer.verify();
+        }
+
+        @Test
+        @DisplayName("기업개황은 company.json에서 대표자·설립일·결산월 등을 읽는다")
+        void company_readsCompanyJson() {
+            mockServer.expect(requestTo(Matchers.startsWith("http://test-dart/company.json")))
+                    .andExpect(queryParam("corp_code", CORP_CODE))
+                    .andRespond(withSuccess("""
+                            {"status":"000","message":"정상","corp_code":"00126380","corp_name":"삼성전자(주)","stock_name":"삼성전자",
+                             "ceo_nm":"전영현, 노태문","corp_cls":"Y","est_dt":"19690113","acc_mt":"12","hm_url":"www.samsung.com/sec",
+                             "ir_url":"","adres":"경기도 수원시 영통구  삼성로 129 (매탄동)","corp_name_eng":"SAMSUNG ELECTRONICS CO,.LTD",
+                             "phn_no":"02-2255-0114","jurir_no":"1301110006246","bizr_no":"1248100998","induty_code":"264"}""", MediaType.APPLICATION_JSON));
+
+            DartCompanyResponse company = dartApiClient.getCompany(CORP_CODE).orElseThrow();
+
+            assertThat(company.corpName()).isEqualTo("삼성전자(주)");
+            assertThat(company.ceoName()).isEqualTo("전영현, 노태문");
+            assertThat(company.establishedDate()).isEqualTo("19690113");
+            assertThat(company.settlementMonth()).isEqualTo("12");
+            // DART는 프로토콜 없이 주므로 https://를 붙인다(그대로 링크로 걸면 404).
+            assertThat(company.homepageUrl()).isEqualTo("https://www.samsung.com/sec");
+            assertThat(company.irUrl()).isNull();
+            assertThat(company.corpNameEng()).isEqualTo("SAMSUNG ELECTRONICS CO,.LTD");
+            assertThat(company.phoneNumber()).isEqualTo("02-2255-0114");
+            assertThat(DartApiClient.companyPageUrl(CORP_CODE))
+                    .isEqualTo("https://dart.fss.or.kr/dsae001/selectPopup.ax?selectKey=00126380");
+        }
+
+        @Test
+        @DisplayName("기업개황이 없으면 빈 값을 돌려준다")
+        void company_emptyWhenNoData() {
+            mockServer.expect(requestTo(Matchers.startsWith("http://test-dart/company.json")))
+                    .andRespond(withSuccess("""
+                            {"status":"013","message":"조회된 데이타가 없습니다."}""", MediaType.APPLICATION_JSON));
+
+            assertThat(dartApiClient.getCompany(CORP_CODE)).isEmpty();
+        }
+    }
+
+    @Nested
+    @DisplayName("배당 공시 조회 (getDividendDisclosure)")
+    class GetDividendDisclosure {
+
+        private static final String DIVIDEND_URL = "http://test-dart/alotMatter.json";
+
+        // 삼성전자 2025 사업보고서 배당에 관한 사항 실응답(15줄) 중 일부.
+        private String dividendJson() {
+            return """
+                    {"status":"000","message":"정상","list":[
+                      {"rcept_no":"20260310002820","se":"주당액면가액(원)","stock_knd":"-","thstrm":"100","frmtrm":"100","lwfr":"100","stlm_dt":"2025-12-31"},
+                      {"rcept_no":"20260310002820","se":"(연결)당기순이익(백만원)","stock_knd":"-","thstrm":"44,260,956","frmtrm":"33,621,363","lwfr":"14,473,401","stlm_dt":"2025-12-31"},
+                      {"rcept_no":"20260310002820","se":"(별도)당기순이익(백만원)","stock_knd":"-","thstrm":"33,686,601","frmtrm":"23,582,565","lwfr":"25,397,099","stlm_dt":"2025-12-31"},
+                      {"rcept_no":"20260310002820","se":"현금배당금총액(백만원)","stock_knd":"-","thstrm":"11,107,906","frmtrm":"9,810,767","lwfr":"9,809,438","stlm_dt":"2025-12-31"},
+                      {"rcept_no":"20260310002820","se":"주식배당금총액(백만원)","stock_knd":"-","thstrm":"-","frmtrm":"-","lwfr":"-","stlm_dt":"2025-12-31"},
+                      {"rcept_no":"20260310002820","se":"(연결)현금배당성향(%)","stock_knd":"-","thstrm":"25.10","frmtrm":"29.20","lwfr":"67.80","stlm_dt":"2025-12-31"},
+                      {"rcept_no":"20260310002820","se":"현금배당수익률(%)","stock_knd":"보통주","thstrm":"1.50","frmtrm":"2.70","lwfr":"1.90","stlm_dt":"2025-12-31"},
+                      {"rcept_no":"20260310002820","se":"주당 현금배당금(원)","stock_knd":"보통주","thstrm":"1,668","frmtrm":"1,446","lwfr":"1,444","stlm_dt":"2025-12-31"}
+                    ]}""";
+        }
+
+        @Test
+        @DisplayName("줄 수 제한 없이 받아 배당 지표만 남기고, 주당 현금배당금부터 정렬한다")
+        void success_keepsDividendIndicatorsInOrder() {
+            int lastYear = LocalDate.now().getYear() - 1;
+            mockServer.expect(requestTo(Matchers.startsWith(DIVIDEND_URL)))
+                    .andExpect(queryParam("bsns_year", String.valueOf(lastYear)))
+                    .andExpect(queryParam("reprt_code", "11011"))
+                    .andRespond(withSuccess(dividendJson(), MediaType.APPLICATION_JSON));
+
+            DartDividendResponse response = dartApiClient.getDividendDisclosure(CORP_CODE);
+
+            assertThat(response.bizYear()).isEqualTo(lastYear);
+            assertThat(response.receiptNo()).isEqualTo("20260310002820");
+            assertThat(response.settlementDate()).isEqualTo("2025-12-31");
+            assertThat(response.indicators()).extracting(DartDividendResponse.DividendIndicator::label).containsExactly(
+                    "주당 현금배당금(원)", "현금배당수익률(%)", "(연결)현금배당성향(%)", "현금배당금총액(백만원)",
+                    "(연결)당기순이익(백만원)");
+            DartDividendResponse.DividendIndicator dps = response.indicators().get(0);
+            assertThat(dps.stockKind()).isEqualTo("보통주");
+            assertThat(dps.currentValue()).isEqualTo(1668.0);
+            assertThat(dps.previousValue()).isEqualTo(1446.0);
+            assertThat(dps.beforePreviousValue()).isEqualTo(1444.0);
+            assertThat(response.indicators().get(2).stockKind()).isNull();
+            mockServer.verify();
+        }
+
+        @Test
+        @DisplayName("작년 사업보고서가 아직 없으면 재작년 사업보고서로 대체한다")
+        void fallsBackToTwoYearsAgo_whenLastYearIsMissing() {
+            int lastYear = LocalDate.now().getYear() - 1;
+            mockServer.expect(requestTo(Matchers.startsWith(DIVIDEND_URL)))
+                    .andExpect(queryParam("bsns_year", String.valueOf(lastYear)))
+                    .andRespond(withSuccess("""
+                            {"status":"013","message":"조회된 데이타가 없습니다."}""", MediaType.APPLICATION_JSON));
+            mockServer.expect(requestTo(Matchers.startsWith(DIVIDEND_URL)))
+                    .andExpect(queryParam("bsns_year", String.valueOf(lastYear - 1)))
+                    .andRespond(withSuccess(dividendJson(), MediaType.APPLICATION_JSON));
+
+            DartDividendResponse response = dartApiClient.getDividendDisclosure(CORP_CODE);
+
+            assertThat(response.bizYear()).isEqualTo(lastYear - 1);
+            assertThat(response.indicators()).isNotEmpty();
+            mockServer.verify();
+        }
+
+        @Test
+        @DisplayName("두 해 모두 공시가 없으면 빈 지표 목록을 돌려준다")
+        void returnsEmpty_whenNoDisclosure() {
+            mockServer.expect(org.springframework.test.web.client.ExpectedCount.twice(), requestTo(Matchers.startsWith(DIVIDEND_URL)))
+                    .andRespond(withSuccess("""
+                            {"status":"013","message":"조회된 데이타가 없습니다."}""", MediaType.APPLICATION_JSON));
+
+            DartDividendResponse response = dartApiClient.getDividendDisclosure(CORP_CODE);
+
+            assertThat(response.indicators()).isEmpty();
+            assertThat(response.receiptNo()).isNull();
+        }
+
+        @Test
+        @DisplayName("DART 원문 주소는 접수번호로 만든다")
+        void viewerUrl_buildsFromReceiptNo() {
+            assertThat(DartApiClient.viewerUrl("20260310002820"))
+                    .isEqualTo("https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260310002820");
+            assertThat(DartApiClient.viewerUrl(null)).isNull();
+        }
+    }
+
+    @Nested
     @DisplayName("가장 최근 공시됐을 법한 분기 계산 (mostRecentLikelyAvailableQuarter)")
     class MostRecentLikelyAvailableQuarter {
 
@@ -181,6 +539,19 @@ class DartApiClientTest {
 
             assertThat(result.year()).isEqualTo(expectedYear);
             assertThat(result.reportCode()).isEqualTo(expectedReportCode);
+        }
+
+        @ParameterizedTest(name = "{0}이면 작년 사업보고서 우선 = {1}")
+        @DisplayName("4월 1일~5월 15일에는 작년 사업보고서(3월 말 공시)를 작년 3분기보다 먼저 찾는다(2026-10-12 코드리뷰)")
+        @CsvSource({
+                "2026-03-31, false",
+                "2026-04-01, true",
+                "2026-05-15, true",
+                "2026-05-16, false",
+                "2026-10-12, false",
+        })
+        void annualReportFirstWindow(String today, boolean expected) {
+            assertThat(dartApiClient.isAnnualReportFirst(LocalDate.parse(today))).isEqualTo(expected);
         }
     }
 
