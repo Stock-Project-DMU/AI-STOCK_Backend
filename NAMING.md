@@ -1732,3 +1732,16 @@ local-market-data-generator의 `dividend_collector.py`가 만든 `dividends.json
 - OAuthProviderClient: authorizationUrl, getUserInfo — 제공자 실제 인증 URL/토큰/프로필 연동. OAuthAuthorizationController: authorize — 브라우저 세션에 state(10분) 보관, consumeState — 콜백 일회 검증.
 - ProfileUpdateRequest / UserService.updateProfile: 개인정보·성향·선택적 비밀번호를 한 트랜잭션에서 저장.
 - MarketQueryService.searchStock / MarketQueryController.searchStock: 종목명 또는 6자리 코드 검색.
+
+## fix/admin-account-api-errors — 관리자 기본 계좌 및 오류 응답 보정
+
+| 대상 | 이름 및 역할 |
+|---|---|
+| 시작 시 계좌 복구 | `AdminAccountRepairRunner` (`domain/account/service`, `ApplicationRunner`) — `run(ApplicationArguments args)`에서 계좌 없는 활성 관리자만 `AccountService.createAccount()`로 기본 계좌 개설 |
+| 관리자 조회 | `UserRepository.findActiveUserIdsWithoutAccount(Role role)` — 해당 역할의 활성 사용자 중 계좌가 없는 사용자 ID 목록 |
+| 관리자 생성 | `AdminUserService.accountService`, `InitialAdminService.accountService` — 관리자 저장 후 기존 표준 계좌 개설 절차 호출 |
+| 공통 오류 응답 | `ApiResponse.code` (`String`), `ApiResponse.error(String code, String message)` — 기존 `error(String message)` 유지, 오류 코드 전달 |
+| 요청 형식 오류 | `GlobalExceptionHandler.handleUnreadableBody(HttpMessageNotReadableException e)` — 400 / `INVALID_INPUT` |
+| 요청 방식 오류 | `GlobalExceptionHandler.handleUnsupportedMethod(HttpRequestMethodNotSupportedException e)` — 405 / `METHOD_NOT_ALLOWED` |
+| 미디어 타입 오류 | `GlobalExceptionHandler.handleUnsupportedMediaType(HttpMediaTypeNotSupportedException e)` — 415 / `UNSUPPORTED_MEDIA_TYPE` |
+| 회귀 테스트 | `AdminAccountRepairRunnerTest` — 계좌 누락 관리자 복구 및 대상 없을 때 미생성 검증 |

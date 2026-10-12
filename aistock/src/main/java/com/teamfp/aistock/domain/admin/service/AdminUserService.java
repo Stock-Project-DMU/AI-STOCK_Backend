@@ -15,6 +15,8 @@ import org.springframework.transaction.annotation.Transactional;
 import com.teamfp.aistock.domain.account.dto.response.AccountInfoResponse;
 import com.teamfp.aistock.domain.account.dto.response.ProfitResponse;
 import com.teamfp.aistock.domain.account.entity.Account;
+import com.teamfp.aistock.domain.account.service.AccountService;
+import com.teamfp.aistock.domain.account.dto.request.CreateAccountRequest;
 import com.teamfp.aistock.domain.account.entity.ChargeRequest;
 import com.teamfp.aistock.domain.account.repository.AccountRepository;
 import com.teamfp.aistock.domain.account.repository.ChargeRequestRepository;
@@ -78,6 +80,7 @@ public class AdminUserService {
 
     private final UserRepository userRepository;
     private final AccountRepository accountRepository;
+    private final AccountService accountService;
     private final PasswordEncoder passwordEncoder;
     private final AuditLogService auditLogService;
     private final OrderRepository orderRepository;
@@ -172,6 +175,7 @@ public class AdminUserService {
             throw new CustomException(ErrorCode.DUPLICATE_EMAIL);
         }
 
+        accountService.createAccount(admin.getUserId(), new CreateAccountRequest("기본 계좌"));
         auditLogService.record(adminUserId, AuditLogService.ACTION_ADMIN_CREATE, AuditLogService.TARGET_ADMIN,
                 admin.getUserId(), null, admin.getLoginId(), "관리자 계정 생성");
 

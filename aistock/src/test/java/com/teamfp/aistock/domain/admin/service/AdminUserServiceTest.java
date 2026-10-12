@@ -63,6 +63,9 @@ class AdminUserServiceTest {
     private AccountRepository accountRepository;
 
     @Mock
+    private com.teamfp.aistock.domain.account.service.AccountService accountService;
+
+    @Mock
     private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
 
     @Mock
@@ -110,7 +113,7 @@ class AdminUserServiceTest {
 
     @BeforeEach
     void setUp() {
-        adminUserService = new AdminUserService(userRepository, accountRepository, passwordEncoder, auditLogService, orderRepository,
+        adminUserService = new AdminUserService(userRepository, accountRepository, accountService, passwordEncoder, auditLogService, orderRepository,
                 holdingValuationService, socialAccountRepository, investmentProfileRepository, chargeRequestRepository,
                 inquiryRepository, watchlistRepository, recentViewedRepository, newsBriefingSettingRepository,
                 auditLogRepository);
@@ -592,6 +595,11 @@ class AdminUserServiceTest {
     @Test
     @DisplayName("createAdmin()은 중복 아이디/이메일이 없으면 role=ADMIN으로 저장한다")
     void createAdmin_success() {
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> {
+            User saved = invocation.getArgument(0);
+            ReflectionTestUtils.setField(saved, "userId", 3L);
+            return saved;
+        });
         when(userRepository.existsByLoginId("admin02")).thenReturn(false);
         when(userRepository.existsByEmail("admin02@example.com")).thenReturn(false);
         when(passwordEncoder.encode("temporary-password1")).thenReturn("encoded-password");
@@ -604,6 +612,7 @@ class AdminUserServiceTest {
 
         assertThat(result.loginId()).isEqualTo("admin02");
         assertThat(result.role()).isEqualTo(Role.ADMIN);
+        verify(accountService).createAccount(org.mockito.ArgumentMatchers.eq(3L), any());
         verify(userRepository).save(argThat(u -> u.getRole() == Role.ADMIN
                 && u.getLoginId().equals("admin02")
                 && u.getPassword().equals("encoded-password")));

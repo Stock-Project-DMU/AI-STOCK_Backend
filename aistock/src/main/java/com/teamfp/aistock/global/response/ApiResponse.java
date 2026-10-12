@@ -10,6 +10,7 @@ public class ApiResponse<T> {
 
     private boolean success;
     private String message;
+    private String code;
     private T data;
 
     private ApiResponse(boolean success, String message, T data) {
@@ -28,5 +29,11 @@ public class ApiResponse<T> {
 
     public static <T> ApiResponse<T> error(String message) {
         return new ApiResponse<>(false, message, null);
+    }
+
+    public static <T> ApiResponse<T> error(String code, String message) {
+        ApiResponse<T> response = error(message);
+        response.code = code;
+        return response;
     }
 }

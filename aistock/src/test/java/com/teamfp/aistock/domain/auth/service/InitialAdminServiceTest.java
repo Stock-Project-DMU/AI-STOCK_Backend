@@ -43,6 +43,8 @@ class InitialAdminServiceTest {
     @Mock
     private AuditLogService auditLogService;
     @Mock
+    private com.teamfp.aistock.domain.account.service.AccountService accountService;
+    @Mock
     private PlatformTransactionManager transactionManager;
     @Mock
     private RedisAuthCodeService redisAuthCodeService;
@@ -81,6 +83,7 @@ class InitialAdminServiceTest {
         assertThat(captor.getValue().getPassword()).isEqualTo("encoded");
         assertThat(response.getRole()).isEqualTo(Role.ADMIN);
         assertThat(response.getUserId()).isEqualTo(1L);
+        verify(accountService).createAccount(eq(1L), any());
         verify(auditLogService).record(eq(1L), eq(AuditLogService.ACTION_ADMIN_CREATE), eq(AuditLogService.TARGET_ADMIN),
                 eq(1L), eq(null), eq("firstadmin"), eq(InitialAdminService.AUDIT_REASON));
     }
@@ -154,7 +157,7 @@ class InitialAdminServiceTest {
     }
 
     private InitialAdminService service(String setupCode) {
-        return new InitialAdminService(userRepository, passwordEncoder, auditLogService, transactionManager,
+        return new InitialAdminService(userRepository, passwordEncoder, auditLogService, accountService, transactionManager,
                 redisAuthCodeService, setupCode);
     }
 
