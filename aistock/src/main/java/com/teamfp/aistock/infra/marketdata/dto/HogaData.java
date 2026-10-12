@@ -24,4 +24,7 @@ public class HogaData {
     private List<Long> askVolumes;
     private List<Long> bidPrices;
     private List<Long> bidVolumes;
+    // 매도·매수 총잔량 — 생성기가 LS 실시간 호가(totofferrem/totbidrem)·t1101(offer/bid)에서 채운다(2026-10-12). 없으면 null.
+    private Long totalAskVolume;
+    private Long totalBidVolume;
 }

@@ -9,6 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.teamfp.aistock.infra.marketdata.LocalMarketDataReader;
 import com.teamfp.aistock.infra.marketdata.MarketDataListener;
 import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
@@ -30,21 +31,21 @@ import lombok.extern.slf4j.Slf4j;
  * (CLAUDE.md 4번, {@link MarketDataListener} 참고). 반대로 domain이 infra 클라이언트
  * ({@link LocalMarketDataReader})를 주입받아 쓰는 것은 정상적인 방향이다.</p>
  *
- * <p>5초마다 {@code market_data.json} 전체를 한 번만 읽어({@link LocalMarketDataReader#getAllCurrentPrices()}
- * 사용 — 구독 종목 수만큼 파일을 반복해서 열지 않기 위함) 지금 구독 중인 종목만 순회하며,
- * 직전에 브로드캐스트한 시점의 {@code updatedAt}과 다를 때만 {@link MarketDataListener}
- * 구현체({@code StockBroadcastService})에 tick/호가를 전달한다. generator.py의 폴링 주기(기본
- * 10초, {@code local-market-data-generator/.env}의 {@code POLL_INTERVAL_SECONDS})보다 짧게 잡아
- * 화면 반영 지연을 최대 5초로 따라잡는다(실시간 시세 자동 갱신, 2026-09-30 20초→5초).</p>
+ * <p>1초({@code market-data.poll-interval-millis})마다 {@code market_data.json} 전체를 한 번만 읽어
+ * ({@link LocalMarketDataReader#getAllCurrentPrices()} 사용 — 구독 종목 수만큼 파일을 반복해서 열지 않기 위함) 지금 구독 중인
+ * 종목만 순회하며, 직전에 브로드캐스트한 시점의 {@code updatedAt}과 다를 때만 {@link MarketDataListener}
+ * 구현체({@code StockBroadcastService})에 tick/호가를 전달한다. 생성기가 바뀐 내용을 1초마다 저장하므로 화면 반영 지연은 약 1초다
+ * (2026-09-30 20초→5초, 2026-10-11 5초→1초). 정규장이 아니면({@link MarketSessionService#isBroadcastWindow()}) 보내지 않는다 —
+ * 장외에는 시세 변동이 없어야 하고, 지정가 체결도 이 전송을 계기로만 일어나므로 장외 체결도 함께 막힌다.</p>
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class MockMarketDataGenerator {
 
-    private static final long POLL_INTERVAL_MILLIS = 5_000L;
-
     private final LocalMarketDataReader localMarketDataReader;
+    // 정규장(+마감 직후 잠깐)에만 실시간 시세를 보낸다 — 장외에는 시세 변동이 없어야 한다(실시세 전환 2단계).
+    private final MarketSessionService marketSessionService;
     private final StockSubscriptionManager stockSubscriptionManager;
     private final List<MarketDataListener> listeners;
 
@@ -55,8 +56,13 @@ public class MockMarketDataGenerator {
     // 최신값을 받아오므로 중복 수신되어도 화면에는 영향이 없다).
     private final ConcurrentHashMap<String, LocalDateTime> lastBroadcastedAt = new ConcurrentHashMap<>();
 
-    @Scheduled(fixedDelay = POLL_INTERVAL_MILLIS)
+    // 생성기가 바뀐 내용을 1초마다 저장하므로 1초마다 확인한다(이전 5초 고정 — 화면 반영이 최대 5초 늦었다).
+    // 실시간 시세 전용 스케줄러(스레드 1개) — 시황 브리핑처럼 오래 걸리는 다른 예약 작업에 막히지 않게 한다(2026-10-12 코드리뷰).
+    @Scheduled(fixedDelayString = "${market-data.poll-interval-millis:1000}", scheduler = "marketDataScheduler")
     public void pollAndBroadcast() {
+        if (!marketSessionService.isBroadcastWindow()) {
+            return;
+        }
         Set<String> subscribedStockCodes = stockSubscriptionManager.getActiveSubscribedStockCodes();
         if (subscribedStockCodes.isEmpty()) {
             return;
@@ -65,7 +71,8 @@ public class MockMarketDataGenerator {
         Map<String, CurrentPriceDetailDto> currentPrices = localMarketDataReader.getAllCurrentPrices();
         for (String stockCode : subscribedStockCodes) {
             CurrentPriceDetailDto price = currentPrices.get(stockCode);
-            if (price == null || price.getUpdatedAt() == null || !hasChanged(stockCode, price.getUpdatedAt())) {
+            if (price == null || price.getCurrentPrice() <= 0 || price.getUpdatedAt() == null
+                    || !hasChanged(stockCode, price.getUpdatedAt())) {
                 continue;
             }
 
@@ -74,9 +81,55 @@ public class MockMarketDataGenerator {
         }
     }
 
+    /**
+     * 생성기 실시간 스트림(실시세 전환 7단계, {@code MarketDataStreamSubscriber})의 한 묶음을 보낸다 — 파일 저장·폴링을 기다리지 않아
+     * 화면 반영이 빠르다. 묶음의 각 종목에는 이번에 바뀐 쪽(tick·hoga)이 표시돼 있다. tick은 {@link #pollAndBroadcast()}와 같은
+     * {@code lastBroadcastedAt}으로 거르므로 스트림과 폴링이 같은 체결을 두 번 보내지 않는다(스트림이 끊기면 폴링이 이어받는다).
+     */
+    public void broadcastStreamUpdates(JsonNode events) {
+        if (events == null || !events.isArray() || !marketSessionService.isBroadcastWindow()) {
+            return;
+        }
+        Set<String> subscribedStockCodes = stockSubscriptionManager.getActiveSubscribedStockCodes();
+        if (subscribedStockCodes.isEmpty()) {
+            return;
+        }
+        for (JsonNode event : events) {
+            String stockCode = event.path("stockCode").asText("");
+            if (!subscribedStockCodes.contains(stockCode)) {
+                continue;
+            }
+            if (event.path("tick").asBoolean(false)) {
+                localMarketDataReader.convert(event, CurrentPriceDetailDto.class)
+                        // 현재가 0 이하(첫 시세 전·불완전한 수신)는 보내지 않는다 — 0원 tick이 매수 지정가를 모두 체결시키는 것을 막는다.
+                        .filter(price -> price.getCurrentPrice() > 0 && price.getUpdatedAt() != null
+                                && hasChanged(stockCode, price.getUpdatedAt()))
+                        .ifPresent(this::broadcastTick);
+            }
+            if (event.path("hoga").asBoolean(false)) {
+                localMarketDataReader.convert(event, HogaData.class)
+                        .filter(hoga -> hoga.getAskPrices() != null)
+                        .ifPresent(this::broadcastHoga);
+            }
+        }
+    }
+
+    // 직전에 보낸 체결보다 "새로운" 것만 보낸다 — 스트림이 최신 값을 먼저 보낸 뒤 1초 늦은 파일을 읽은 폴링이 지나간 체결을 다시 보내
+    // 화면 가격이 잠깐 뒤로 가는 일을 막는다(생성기의 updatedAt은 계속 증가한다). 단, 30초 넘게 뒤로 가면 생성기가 재시작했거나 시계가
+    // 바뀐 것이라 다시 받는다 — 그렇지 않으면 백엔드를 재시작할 때까지 그 종목 시세가 멈춘다(2026-10-12 코드리뷰).
+    static final long CLOCK_RESET_TOLERANCE_SECONDS = 30;
+
     private boolean hasChanged(String stockCode, LocalDateTime updatedAt) {
-        LocalDateTime previous = lastBroadcastedAt.put(stockCode, updatedAt);
-        return previous == null || !previous.isEqual(updatedAt);
+        boolean[] isNewer = {false};
+        lastBroadcastedAt.compute(stockCode, (code, previous) -> {
+            if (previous == null || updatedAt.isAfter(previous)
+                    || updatedAt.isBefore(previous.minusSeconds(CLOCK_RESET_TOLERANCE_SECONDS))) {
+                isNewer[0] = true;
+                return updatedAt;
+            }
+            return previous;
+        });
+        return isNewer[0];
     }
 
     private void broadcastTick(CurrentPriceDetailDto price) {

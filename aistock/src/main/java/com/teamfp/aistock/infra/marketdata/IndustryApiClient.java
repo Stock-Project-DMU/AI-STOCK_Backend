@@ -32,11 +32,24 @@ public class IndustryApiClient {
     private static final int MAX_PERIOD_MONTHS = 24;
     private static final Map<String, Double> MOCK_BASE_INDEX_VALUE = Map.of("코스피", 3200.0, "코스닥", 780.0);
     private static final Map<String, String> MOCK_MARKET_BY_NAME = Map.of("코스피", "KOSPI", "코스닥", "KOSDAQ");
+    // 생성기가 LS 실제 지수를 담는 _market 하위 키 — {"코스피": IndustryPriceDto, "코스닥": IndustryPriceDto}.
+    private static final String REAL_INDEXES_FIELD = "indexes";
 
     private final LocalMarketDataReader localMarketDataReader;
 
-    /** 업종지수 현재가 스냅샷. marketName은 "코스피" 또는 "코스닥" — 그 외 이름이나 해당 시장 종목이 없으면 빈 값. */
+    /**
+     * 업종지수 현재가 스냅샷. marketName은 "코스피" 또는 "코스닥" — 그 외 이름이나 해당 시장 종목이 없으면 빈 값.
+     *
+     * <p>생성기가 LS증권 실제 지수(t1511·실시간 IJ_)를 {@code _market.indexes}에 넣어 두면 그 값을 그대로 쓴다(실시세 전환 3단계).
+     * 없을 때(시뮬레이션 모드 등)만 아래의 근사치(기준값 × 같은 시장 종목 평균 등락률)로 대신한다.</p>
+     */
     public Optional<IndustryPriceDto> getCurrentPrice(String marketName) {
+        Optional<IndustryPriceDto> real = localMarketDataReader.convert(
+                localMarketDataReader.getMarketField(REAL_INDEXES_FIELD).path(marketName == null ? "" : marketName),
+                IndustryPriceDto.class);
+        if (real.isPresent() && real.get().getIndexValue() != null) {
+            return real;
+        }
         String upcode = INDUSTRY_CODE_BY_NAME.getOrDefault(marketName, "001");
         String market = MOCK_MARKET_BY_NAME.get(marketName);
         Double baseIndexValue = MOCK_BASE_INDEX_VALUE.get(marketName);

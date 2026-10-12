@@ -16,6 +16,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.teamfp.aistock.infra.marketdata.dto.ForeignInstitutionalTrendDto;
+import com.teamfp.aistock.infra.marketdata.dto.MarketCapPeersDto;
 import com.teamfp.aistock.infra.marketdata.dto.RankingItemDto;
 import com.teamfp.aistock.infra.marketdata.dto.ThemeConstituentDto;
 
@@ -59,11 +60,12 @@ class LocalMarketDataClientsTest {
                     "shareholderMeetings": [{"date":"20270320","eventName":"정기주주총회"}],
                     "master": {"upperLimitPrice":90000,"lowerLimitPrice":48700,"isSpac":false}},
                  "000660": {"stockCode":"000660","stockName":"SK하이닉스","currentPrice":200000,"changeRate":-2.0,"volume":3000,
-                    "listingShares":700,"market":"KOSPI","etf":false},
+                    "listingShares":700,"market":"KOSPI","etf":false,"per":12.5,"pbr":1.8,"opinionsCollectedAt":"2026-10-11"},
                  "069500": {"stockCode":"069500","stockName":"KODEX 200","currentPrice":30000,"changeRate":0.5,"volume":10,
                     "market":"KOSPI","etf":true,
                     "etfConstituents":[{"stockCode":"005930","stockName":"삼성전자","price":70000,"changeRate":1.0,"weight":60.0}]},
                  "_market": {
+                    "indexes": {"코스닥": {"industryCode":"301","industryName":"코스닥","indexValue":892.27,"changeRate":-0.69}},
                     "investorSummary": {"individualNetBuy":-100,"foreignNetBuy":70,"institutionNetBuy":30},
                     "marketComparison": [{"marketName":"코스피","individualNetBuy":-100,"foreignNetBuy":70,"institutionNetBuy":30}],
                     "programSnapshot": {"offerValue":10,"bidValue":30,"netValue":20},
@@ -178,12 +180,39 @@ class LocalMarketDataClientsTest {
         IndustryApiClient client = new IndustryApiClient(reader);
         assertThat(client.getCurrentPrice("코스피")).get().satisfies(i -> assertThat(i.getIndustryCode()).isEqualTo("001"));
         assertThat(client.getCurrentPrice("나스닥")).isEmpty();
+        // 생성기가 LS 실제 지수를 _market.indexes에 넣었으면 근사치 대신 그 값을 쓴다(실시세 전환 3단계).
+        assertThat(client.getCurrentPrice("코스닥")).get().satisfies(i -> {
+            assertThat(i.getIndexValue()).isEqualTo(892.27);
+            assertThat(i.getChangeRate()).isEqualTo(-0.69);
+        });
         assertThat(client.getRecentTrend("코스피")).singleElement().satisfies(t -> assertThat(t.getIndexValue()).isEqualTo(3200.5));
         assertThat(client.getTrend("코스피", 1)).hasSize(1);
         assertThat(client.getTrend("코스피", 12)).hasSize(2);
         assertThat(client.getExpectedIndex("코스피", "장후")).get()
                 .satisfies(e -> assertThat(e.getUpperLimitStockCount()).isEqualTo(1L));
         assertThat(client.getExpectedIndex("코스닥", "장전")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("투자의견 — 최근 1년 안의 의견만, 목표주가가 기준 주가(발표일 종가, 없으면 현재가)의 0.2~5배를 벗어나는 줄은 뺀다")
+    void investmentOpinions_recentAndPlausibleOnly(@TempDir Path dir) throws IOException {
+        Files.writeString(dir.resolve("market_data.json"), """
+                {"035420": {"stockCode":"035420","currentPrice":180000,"opinionsCollectedAt":"2026-10-12","opinions": [
+                   {"date":"20261008","securitiesFirm":"메리츠","targetPriceAfter":330000,"closePriceOnDate":null},
+                   {"date":"20261002","securitiesFirm":"한화투자","targetPriceAfter":30000,"closePriceOnDate":192200},
+                   {"date":"20261001","securitiesFirm":"LS증권","targetPriceAfter":293000,"closePriceOnDate":191900},
+                   {"date":"20251013","securitiesFirm":"유안타","targetPriceAfter":250000,"closePriceOnDate":200000},
+                   {"date":"20251011","securitiesFirm":"대신","targetPriceAfter":240000,"closePriceOnDate":200000},
+                   {"date":"20110714","securitiesFirm":"대  신","targetPriceAfter":27500,"closePriceOnDate":22100}]}}""");
+        LocalMarketDataReader fileReader = new LocalMarketDataReader();
+        ReflectionTestUtils.setField(fileReader, "localDataPath", dir.toString());
+        InvestInfoApiClient client = new InvestInfoApiClient(fileReader);
+        ReflectionTestUtils.setField(client, "clock",
+                java.time.Clock.fixed(java.time.Instant.parse("2026-10-12T06:00:00Z"), java.time.ZoneId.of("Asia/Seoul")));
+
+        assertThat(client.getInvestmentOpinions("035420"))
+                .extracting(o -> o.getSecuritiesFirm())
+                .containsExactly("메리츠", "LS증권", "유안타"); // 한화투자(0.16배)·1년 넘은 대신(2025-10-11)·2011년 의견 제외
     }
 
     @Test
@@ -200,6 +229,9 @@ class LocalMarketDataClientsTest {
         assertThat(client.getOverseasIndex("S", "UNKNOWN")).isEmpty();
         assertThat(client.getRecentMarketLiquidityTrend()).hasSize(2);
         assertThat(client.getMarketLiquidityTrend(3)).hasSize(1);
+        // opinionsCollectedAt이 있으면 LS증권 실제 투자의견 스냅샷, 없으면 모의 의견(fix/stock-detail-review).
+        assertThat(client.getInvestmentOpinionCollectedAt("000660")).contains("2026-10-11");
+        assertThat(client.getInvestmentOpinionCollectedAt("005930")).isEmpty();
     }
 
     @Nested
@@ -224,6 +256,54 @@ class LocalMarketDataClientsTest {
                     .satisfies(r -> assertThat(r.getExtraInfo()).contains("120%"));
             assertThat(client.getTopAfterHoursPriceChangeRate()).hasSize(1);
             assertThat(client.getTopAfterHoursVolume()).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("시가총액 비교는 보고 있는 종목의 같은 시장 순위와 시장 내 상위 목록을 돌려준다(fix/stock-detail-review)")
+        void marketCapPeers() {
+            HighItemApiClient client = new HighItemApiClient(reader);
+
+            MarketCapPeersDto peers = client.getMarketCapPeers("000660");
+
+            assertThat(peers.market()).isEqualTo("KOSPI");
+            assertThat(peers.stockName()).isEqualTo("SK하이닉스");
+            assertThat(peers.rank()).isEqualTo(2);
+            // ETF(069500)는 상장주식수가 없어 비교 대상에서 빠진다.
+            assertThat(peers.totalCount()).isEqualTo(2);
+            assertThat(peers.items()).extracting(RankingItemDto::getStockCode).containsExactly("005930", "000660");
+            assertThat(peers.items()).extracting(RankingItemDto::getRank).containsExactly(1, 2);
+        }
+
+        @Test
+        @DisplayName("ETF를 보면 시가총액 비교 순위 없이 시장만 돌려준다")
+        void marketCapPeers_etf() {
+            MarketCapPeersDto peers = new HighItemApiClient(reader).getMarketCapPeers("069500");
+
+            assertThat(peers.market()).isEqualTo("KOSPI");
+            assertThat(peers.rank()).isNull();
+            assertThat(peers.items()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("시가총액 비교 행에는 시가총액(원)·PER·PBR을 채운다")
+        void marketCapPeers_fillsMarketCapAndValuation() {
+            RankingItemDto hynix = new HighItemApiClient(reader).getMarketCapPeers("000660").items().get(1);
+
+            assertThat(hynix.getMarketCap()).isEqualTo(200000L * 700 * 1000);
+            assertThat(hynix.getPer()).isEqualTo(12.5);
+            assertThat(hynix.getPbr()).isEqualTo(1.8);
+            // PER·PBR 0(우선주 등 미계산)은 null, 적자 기업의 음수 PER은 그대로.
+            assertThat(HighItemApiClient.valuation(0.0)).isNull();
+            assertThat(HighItemApiClient.valuation(-159.0)).isEqualTo(-159.0);
+        }
+
+        @Test
+        @DisplayName("시세 데이터에 없는 종목이면 순위 없이 빈 목록을 돌려준다")
+        void marketCapPeers_unknownStock() {
+            MarketCapPeersDto peers = new HighItemApiClient(reader).getMarketCapPeers("999999");
+
+            assertThat(peers.rank()).isNull();
+            assertThat(peers.items()).isEmpty();
         }
     }
 }

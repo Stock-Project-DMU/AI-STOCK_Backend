@@ -2,6 +2,7 @@ package com.teamfp.aistock.domain.stock.controller;
 
 import com.teamfp.aistock.domain.stock.service.MarketQueryService;
 import com.teamfp.aistock.infra.marketdata.dto.*;
+import com.teamfp.aistock.domain.stock.dto.response.StockResearchResponse;
 import com.teamfp.aistock.domain.stock.dto.response.StockSearchSuggestion;
 import com.teamfp.aistock.infra.naver.dto.NaverNewsSearchResponse;
 import com.teamfp.aistock.global.response.ApiResponse;
@@ -24,7 +25,7 @@ public class MarketQueryController {
     @GetMapping("/indexes") public ApiResponse<List<IndustryPriceDto>> getIndexes() {
         return ApiResponse.success(marketQueryService.getIndexes());
     }
-    @GetMapping("/stocks/{stockCode}/research") public ApiResponse<Object> getResearch(@PathVariable String stockCode, @RequestParam String section) {
+    @GetMapping("/stocks/{stockCode}/research") public ApiResponse<StockResearchResponse> getResearch(@PathVariable String stockCode, @RequestParam String section) {
         return ApiResponse.success(marketQueryService.getResearch(stockCode, section));
     }
     @GetMapping("/rankings") public ApiResponse<List<RankingItemDto>> getRankings(@RequestParam(defaultValue = "volume") String sort,

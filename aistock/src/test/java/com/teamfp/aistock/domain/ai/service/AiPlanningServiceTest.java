@@ -298,7 +298,8 @@ class AiPlanningServiceTest {
             when(dartApiClient.resolveCorpCodeByName("삼성전자")).thenReturn(Optional.of("00126380"));
             when(dartApiClient.getRecentQuarterlyFinancials("00126380")).thenReturn(
                     new DartFinancialResponse("00126380", 2026, 333_605_938_000_000L, 43_601_051_000_000L,
-                            45_206_805_000_000L, 566_942_110_000_000L, 130_621_773_000_000L, 436_320_337_000_000L));
+                            45_206_805_000_000L, 566_942_110_000_000L, 130_621_773_000_000L, 436_320_337_000_000L,
+                            "11011", "CFS", "20260310002820"));
 
             AiChatResponse response = aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("삼성전자 실적이랑 뉴스 같이 알려줘"));
 
@@ -657,7 +658,8 @@ class AiPlanningServiceTest {
             when(dartApiClient.resolveCorpCodeByName("삼성전자")).thenReturn(Optional.of("00126380"));
             when(dartApiClient.getRecentQuarterlyFinancials("00126380")).thenReturn(
                     new DartFinancialResponse("00126380", 2026, 333_605_938_000_000L, 43_601_051_000_000L,
-                            45_206_805_000_000L, 566_942_110_000_000L, 130_621_773_000_000L, 436_320_337_000_000L));
+                            45_206_805_000_000L, 566_942_110_000_000L, 130_621_773_000_000L, 436_320_337_000_000L,
+                            "11011", "CFS", "20260310002820"));
 
             aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("삼성전자 실적 어때?"));
 

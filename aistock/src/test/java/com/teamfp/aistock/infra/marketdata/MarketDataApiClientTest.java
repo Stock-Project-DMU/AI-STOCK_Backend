@@ -88,6 +88,92 @@ class MarketDataApiClientTest {
         assertThat(client.getMultiStockPrices(List.of())).isEmpty();
     }
 
+    // 실시세(실시세 전환 5단계): 생성기가 tradingDate·오늘 시가/고가/저가를 주는 시세 + 실제 과거 봉.
+    private void writeLiveQuoteAndHistory(String tradingDate) throws IOException {
+        Files.writeString(tempDir.resolve("market_data.json"), """
+                {"005930": {"stockCode":"005930","stockName":"삼성전자","currentPrice":264000,"changeAmount":1000,
+                   "changeRate":0.38,"volume":5000000,"listingShares":5846279,
+                   "openPrice":262500,"highPrice":265000,"lowPrice":261500,"tradingDate":"%s"},
+                 "_market": {}}""".formatted(tradingDate));
+        Files.writeString(tempDir.resolve("price_history.json"), """
+                {"stocks":{"005930":{
+                  "day":[{"date":"20261008","open":269500,"high":270000,"low":262000,"close":263000,"volume":21259056},
+                         {"date":"20261007","open":268000,"high":270500,"low":266000,"close":268500,"volume":15000000}],
+                  "month":[{"date":"20261008","open":250000,"high":275000,"low":248000,"close":263000,"volume":300000000},
+                           {"date":"20260930","open":240000,"high":255000,"low":238000,"close":250000,"volume":400000000}]}}}""");
+    }
+
+    @Test
+    @DisplayName("실시세: 장중(새 거래일)에는 실제 과거 일봉은 그대로 두고 오늘 봉을 맨 앞에 붙인다")
+    void chart_realBars_prependsTodayBar() throws IOException {
+        writeLiveQuoteAndHistory("20261012");
+
+        List<HistoricalPriceDto> result = client.getChartPrices(STOCK_CODE, 1, 60);
+
+        assertThat(result).extracting(HistoricalPriceDto::getDate).containsExactly("20261012", "20261008", "20261007");
+        HistoricalPriceDto today = result.get(0);
+        assertThat(List.of(today.getOpen(), today.getHigh(), today.getLow(), today.getClose()))
+                .containsExactly(262500L, 265000L, 261500L, 264000L);
+        assertThat(today.getVolume()).isEqualTo(5_000_000L);
+        // 과거 봉은 비율 조정하지 않는다(실제 값 그대로)
+        assertThat(result.get(1).getClose()).isEqualTo(263000L);
+        assertThat(result.get(2).getClose()).isEqualTo(268500L);
+    }
+
+    @Test
+    @DisplayName("실시세: 오늘 봉이 이미 수집돼 있으면(장 마감 후) 그 봉을 실시세로 덮고, 월봉은 같은 달이면 종가·고가·저가만 갱신한다")
+    void chart_realBars_updatesSamePeriod() throws IOException {
+        writeLiveQuoteAndHistory("20261008");
+
+        List<HistoricalPriceDto> daily = client.getChartPrices(STOCK_CODE, 1, 60);
+        assertThat(daily).extracting(HistoricalPriceDto::getDate).containsExactly("20261008", "20261007");
+        assertThat(daily.get(0).getClose()).isEqualTo(264000L);
+
+        List<HistoricalPriceDto> monthly = client.getChartPrices(STOCK_CODE, 3, 60);
+        assertThat(monthly).extracting(HistoricalPriceDto::getDate).containsExactly("20261008", "20260930");
+        assertThat(monthly.get(0).getClose()).isEqualTo(264000L);
+        assertThat(monthly.get(0).getOpen()).isEqualTo(250000L);   // 달 시가는 그대로
+        assertThat(monthly.get(0).getHigh()).isEqualTo(275000L);   // 달 고가가 오늘 고가보다 높으면 그대로
+        assertThat(monthly.get(1).getClose()).isEqualTo(250000L);  // 지난달은 그대로
+        assertThat(monthly.get(0).getVolume()).isEqualTo(300_000_000_000L); // 천 주 → 주, 오늘까지 담긴 봉이라 더하지 않는다
+    }
+
+    @Test
+    @DisplayName("실시세: 주·월봉 거래량(LS 천 주)은 주 단위로 내려주고, 새 주 봉은 오늘 거래량으로 붙이고 같은 달 봉엔 오늘 거래량을 더한다")
+    void chart_realBars_weekMonthVolumeInShares() throws IOException {
+        Files.writeString(tempDir.resolve("market_data.json"), """
+                {"005930": {"stockCode":"005930","stockName":"삼성전자","currentPrice":264000,"changeAmount":1000,
+                   "changeRate":0.38,"volume":9063220,"listingShares":5846279,
+                   "openPrice":262500,"highPrice":265000,"lowPrice":261500,"tradingDate":"20261012"},
+                 "_market": {}}""");
+        Files.writeString(tempDir.resolve("price_history.json"), """
+                {"stocks":{"005930":{
+                  "week":[{"date":"20261008","open":278500,"high":279500,"low":262000,"close":263000,"volume":50568}],
+                  "month":[{"date":"20261008","open":266500,"high":279500,"low":262000,"close":263000,"volume":75811}]}}}""");
+
+        List<HistoricalPriceDto> weekly = client.getChartPrices(STOCK_CODE, 2, 60);
+        assertThat(weekly).extracting(HistoricalPriceDto::getDate).containsExactly("20261012", "20261008");
+        assertThat(weekly.get(0).getVolume()).isEqualTo(9_063_220L);   // 오늘 거래량(주)
+        assertThat(weekly.get(1).getVolume()).isEqualTo(50_568_000L);  // 지난주 50,568천 주 → 주
+
+        List<HistoricalPriceDto> monthly = client.getChartPrices(STOCK_CODE, 3, 60);
+        assertThat(monthly).extracting(HistoricalPriceDto::getDate).containsExactly("20261008");
+        assertThat(monthly.get(0).getVolume()).isEqualTo(75_811_000L + 9_063_220L);
+    }
+
+    @Test
+    @DisplayName("실시세: 최신 봉에 날짜가 없으면(불완전한 스냅샷) 오류 없이 봉을 그대로 돌려준다(2026-10-12 마지막 리뷰)")
+    void chart_realBars_nullDateBar_noError() throws IOException {
+        writeLiveQuoteAndHistory("20261012");
+        Files.writeString(tempDir.resolve("price_history.json"), """
+                {"stocks":{"005930":{"day":[{"open":269500,"high":270000,"low":262000,"close":263000,"volume":1}]}}}""");
+
+        List<HistoricalPriceDto> result = client.getChartPrices(STOCK_CODE, 1, 60);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getDate()).isNull();
+    }
+
     @Test
     @DisplayName("과거 시세 스냅샷이 있으면 최신 종가를 현재가에 맞춰 비율 조정하고 기간 수익률은 그대로 둔다")
     void chart_usesSnapshotRescaledToCurrentPrice() throws IOException {

@@ -30,6 +30,7 @@ import com.teamfp.aistock.domain.order.event.AdminOrderCancelledEvent;
 import com.teamfp.aistock.domain.order.repository.HoldingRepository;
 import com.teamfp.aistock.domain.order.repository.OrderRepository;
 import com.teamfp.aistock.domain.stock.dto.StockPriceDto;
+import com.teamfp.aistock.domain.stock.service.MarketSessionService;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.redis.RedisPendingOrderService;
@@ -77,6 +78,8 @@ public class OrderService {
     // 설계와 어긋난다. 이벤트를 구독해 실제로 감사 로그를 남기는 쪽은
     // domain/admin/service/AdminAuditEventListener다.
     private final ApplicationEventPublisher eventPublisher;
+    // 정규장(평일 09:00~15:30, 휴장일 제외) 외에는 주문 생성을 막는다(실시세 전환 2단계). 미체결 주문 취소는 장외에도 허용한다.
+    private final MarketSessionService marketSessionService;
 
     /**
      * 현재가(시장가) 주문 — 잔고/보유수량을 확인한 뒤 실시간 현재가로 즉시 체결한다.
@@ -95,6 +98,7 @@ public class OrderService {
         if (account.getStatus() == AccountStatus.SUSPENDED) {
             throw new CustomException(ErrorCode.ACCOUNT_SUSPENDED);
         }
+        marketSessionService.requireOpen();
 
         // 캐시(TTL 5초)에 최근 tick이 없으면 null — 종목 자체가 없는 게 아니라 시세를 일시적으로
         // REST 조회도 실패하면 종목 없음과 구분되는 시세 조회 오류를 반환한다.
@@ -210,6 +214,7 @@ public class OrderService {
         if (account.getStatus() == AccountStatus.SUSPENDED) {
             throw new CustomException(ErrorCode.ACCOUNT_SUSPENDED);
         }
+        marketSessionService.requireOpen();
 
         // MARKET 주문에서는 0을 허용하지만(@PositiveOrZero), 지정가 주문에서 0원은 의미가 없으므로
         // 여기서 별도로 막는다. priceType에 따라 허용 범위가 달라져 DTO의 필드 단위 애노테이션만으로는

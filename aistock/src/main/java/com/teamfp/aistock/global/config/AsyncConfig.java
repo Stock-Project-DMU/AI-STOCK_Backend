@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import java.util.concurrent.Executor;
 
@@ -69,5 +70,31 @@ public class AsyncConfig {
         executor.setThreadNamePrefix("ai-tool-executor-");
         executor.initialize();
         return executor;
+    }
+
+    /**
+     * 기본 예약 작업 스케줄러(스레드 4개) — 시황 브리핑·정지 해제·배당·이자 등 {@code @Scheduled} 기본값이 쓴다. 이름이 {@code taskScheduler}여야
+     * 스케줄러 빈이 여러 개일 때 기본으로 선택된다. 이전에는 WebSocket 스케줄러(코어 수만큼)가 기본으로 쓰였으므로, 시황 브리핑(Gemini 호출)이
+     * 오래 걸려도 다른 예약 작업이 기다리지 않게 여러 개를 둔다 — 쉬는 스레드는 CPU를 거의 쓰지 않는다(2026-10-12 코드리뷰).
+     */
+    @Bean
+    public ThreadPoolTaskScheduler taskScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(4);
+        scheduler.setThreadNamePrefix("scheduling-");
+        return scheduler; // 초기화는 컨테이너가 한다(afterPropertiesSet) — 직접 부르면 두 번 초기화된다
+    }
+
+    /**
+     * 실시간 시세 전용 스케줄러(스레드 1개) — 1초 폴링({@code MockMarketDataGenerator.pollAndBroadcast})과 스트림 감시
+     * ({@code MarketDataStreamSubscriber.checkIdle})가 오래 걸리는 다른 예약 작업(Gemini 호출 등)에 막히지 않게 분리한다.
+     * 스레드를 1개만 더 써서 자원 증가는 최소다.
+     */
+    @Bean
+    public ThreadPoolTaskScheduler marketDataScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("market-data-");
+        return scheduler; // 초기화는 컨테이너가 한다(afterPropertiesSet) — 직접 부르면 두 번 초기화된다
     }
 }

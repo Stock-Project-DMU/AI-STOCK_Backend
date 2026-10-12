@@ -127,9 +127,86 @@ public class MarketDataApiClient {
         CurrentPriceDetailDto current = currentOpt.get();
         List<HistoricalPriceDto> snapshot = localMarketDataReader.getPriceHistory(stockCode, dwmcode);
         if (!snapshot.isEmpty() && snapshot.get(0).getClose() != null && snapshot.get(0).getClose() > 0) {
-            return rescaledBars(snapshot, current, cnt);
+            // 생성기가 실시세 거래일(tradingDate)을 주면 실제 과거 봉 그대로 + 오늘 봉(실시세 전환 5단계). 없으면(이전 시뮬레이션
+            // 데이터) 예전처럼 현재가에 맞춰 비율 조정한다.
+            return current.getTradingDate() != null
+                    ? realBars(snapshot, current, dwmcode, cnt)
+                    : rescaledBars(snapshot, current, cnt);
         }
         return syntheticBars(current, dwmcode, cnt);
+    }
+
+    /**
+     * 실제 과거 봉(price_history.json, 장 마감 후 매일 수집) 위에 오늘 봉을 얹는다 — 과거 봉은 손대지 않는다.
+     * 일봉: 오늘 날짜 봉이 이미 있으면(장 마감 후 수집) 실시세로 덮고, 없으면 맨 앞에 붙인다. 주봉·월봉: 최신 봉이 오늘과 같은
+     * 주·월이면 종가·고가·저가만 오늘 값으로 갱신하고, 다른 주·월이면 오늘 봉을 새로 붙인다.
+     */
+    private List<HistoricalPriceDto> realBars(List<HistoricalPriceDto> snapshot, CurrentPriceDetailDto current, int dwmcode,
+                                              int cnt) {
+        List<HistoricalPriceDto> result = new ArrayList<>(snapshot);
+        String tradingDate = current.getTradingDate();
+        long price = current.getCurrentPrice();
+        if (price > 0) {
+            HistoricalPriceDto latest = result.get(0);
+            boolean samePeriod = samePeriod(latest.getDate(), tradingDate, dwmcode);
+            if (samePeriod && dwmcode == DWMCODE_DAY) {
+                result.set(0, todayBar(current, tradingDate));
+            } else if (samePeriod) {
+                long high = Math.max(latest.getHigh() != null ? latest.getHigh() : price, todayHigh(current));
+                long low = Math.min(latest.getLow() != null ? latest.getLow() : price, todayLow(current));
+                // 주·월봉 날짜는 그 봉에 담긴 마지막 거래일이다 — 오늘보다 앞이면 오늘 거래량이 아직 빠져 있으니 더한다
+                // (장 마감 후 수집으로 오늘까지 담긴 봉이면 그대로 둔다).
+                Long volume = latest.getVolume();
+                if (latest.getDate().compareTo(tradingDate) < 0) {
+                    volume = (volume != null ? volume : 0L) + current.getVolume();
+                }
+                result.set(0, latest.toBuilder().close(price).high(high).low(low).volume(volume)
+                        .marketCap(marketCapMillion(price, current)).build());
+            } else if (latest.getDate() != null && tradingDate.compareTo(latest.getDate()) > 0) {
+                // 날짜 없는 봉(불완전한 스냅샷)이면 오늘 봉을 붙이지 않고 그대로 둔다 — NullPointerException으로 차트가 500이 나지 않게.
+                result.add(0, todayBar(current, tradingDate));
+            }
+        }
+        return result.size() > cnt ? result.subList(0, cnt) : result;
+    }
+
+    private HistoricalPriceDto todayBar(CurrentPriceDetailDto current, String tradingDate) {
+        long price = current.getCurrentPrice();
+        return HistoricalPriceDto.builder()
+                .date(tradingDate)
+                .open(current.getOpenPrice() != null && current.getOpenPrice() > 0 ? current.getOpenPrice() : price)
+                .high(todayHigh(current))
+                .low(todayLow(current))
+                .close(price)
+                .changeRate(current.getChangeRate())
+                .volume(current.getVolume())
+                .marketCap(marketCapMillion(price, current))
+                .build();
+    }
+
+    private static long todayHigh(CurrentPriceDetailDto current) {
+        Long high = current.getHighPrice();
+        return high != null && high > 0 ? Math.max(high, current.getCurrentPrice()) : current.getCurrentPrice();
+    }
+
+    private static long todayLow(CurrentPriceDetailDto current) {
+        Long low = current.getLowPrice();
+        return low != null && low > 0 ? Math.min(low, current.getCurrentPrice()) : current.getCurrentPrice();
+    }
+
+    // 같은 일·주(ISO 주)·월인지 — 날짜는 YYYYMMDD.
+    private static boolean samePeriod(String barDate, String tradingDate, int dwmcode) {
+        if (barDate == null || tradingDate == null) {
+            return false;
+        }
+        LocalDate bar = LocalDate.parse(barDate, HISTORY_DATE_FORMAT);
+        LocalDate today = LocalDate.parse(tradingDate, HISTORY_DATE_FORMAT);
+        return switch (dwmcode) {
+            case DWMCODE_DAY -> bar.equals(today);
+            case DWMCODE_WEEK -> bar.get(java.time.temporal.IsoFields.WEEK_BASED_YEAR) == today.get(java.time.temporal.IsoFields.WEEK_BASED_YEAR)
+                    && bar.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR) == today.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR);
+            default -> bar.getYear() == today.getYear() && bar.getMonthValue() == today.getMonthValue();
+        };
     }
 
     private List<HistoricalPriceDto> rescaledBars(List<HistoricalPriceDto> snapshot, CurrentPriceDetailDto current, int cnt) {

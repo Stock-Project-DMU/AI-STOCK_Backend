@@ -80,6 +80,10 @@ class OrderServiceTest {
     @Mock
     private com.teamfp.aistock.domain.account.service.AccountTransactionService accountTransactionService;
 
+    // 정규장 판단(실시세 전환 2단계) — 목은 requireOpen()에서 아무것도 던지지 않아 기존 테스트는 정규장으로 동작한다.
+    @Mock
+    private com.teamfp.aistock.domain.stock.service.MarketSessionService marketSessionService;
+
     @InjectMocks
     private OrderService orderService;
 
@@ -119,6 +123,21 @@ class OrderServiceTest {
         ReflectionTestUtils.setField(orderService, "holdingSettlementService", new HoldingSettlementService(holdingRepository));
         // TradeFeeService도 실제 구현을 쓴다 — 매도 시 잔고에서 수수료가 빠지는지까지 검증한다.
         ReflectionTestUtils.setField(orderService, "tradeFeeService", new TradeFeeService(accountTransactionService));
+    }
+
+    @Test
+    void marketOrderIsRejectedOutsideTradingHours() {
+        org.mockito.Mockito.doThrow(new CustomException(com.teamfp.aistock.global.exception.ErrorCode.MARKET_CLOSED))
+                .when(marketSessionService).requireOpen();
+
+        assertThatThrownBy(() -> orderService.createMarketOrder(USER_ID, requestOf(OrderType.BUY, 1)))
+                .isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException) e).getErrorCode())
+                .isEqualTo(com.teamfp.aistock.global.exception.ErrorCode.MARKET_CLOSED);
+        // 장외 주문은 시세 조회·잔고 변경 전에 막힌다.
+        verify(stockQuoteService, never()).getStockPrice(anyString());
+        verify(orderRepository, never()).save(any());
+        assertThat(account.getBalance()).isEqualTo(1_000_000L);
     }
 
     @Test

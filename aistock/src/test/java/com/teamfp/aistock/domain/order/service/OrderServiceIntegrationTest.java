@@ -41,7 +41,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * application-dev.yml(로컬 docker MySQL 3306/Redis 6379) 설정으로 붙는다. 실행 전
  * `docker compose up -d`로 로컬 MySQL/Redis가 떠 있어야 한다.
  */
-@SpringBootTest
+// 정규장 외(주말·야간)에도 실제 주문 흐름을 검증할 수 있게 장 운영 시간 제한을 끈다(실시세 전환 2단계 MarketSessionService).
+@SpringBootTest(properties = "market-session.enforce-trading-hours=false")
 class OrderServiceIntegrationTest {
 
     @Autowired

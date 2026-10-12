@@ -24,9 +24,11 @@ import lombok.NoArgsConstructor;
 public class HogaDto {
 
     private String stockCode;        // 종목코드
-    private List<Long> askPrices;    // 매도 호가 1~5단계 (오름차순, 0번째가 가장 낮은=우선순위 높은 매도호가)
+    private List<Long> askPrices;    // 매도 호가 1~10단계 (오름차순, 0번째가 가장 낮은=우선순위 높은 매도호가)
     private List<Long> askVolumes;   // 매도 호가별 잔량 (askPrices와 인덱스 대응)
-    private List<Long> bidPrices;    // 매수 호가 1~5단계 (내림차순, 0번째가 가장 높은=우선순위 높은 매수호가)
+    private List<Long> bidPrices;    // 매수 호가 1~10단계 (내림차순, 0번째가 가장 높은=우선순위 높은 매수호가)
     private List<Long> bidVolumes;   // 매수 호가별 잔량 (bidPrices와 인덱스 대응)
+    private Long totalAskVolume;     // 매도 총잔량(2026-10-12) — 없으면 null
+    private Long totalBidVolume;     // 매수 총잔량(2026-10-12) — 없으면 null
     private LocalDateTime updatedAt; // 이 호가 데이터를 수신/저장한 시각 (캐시 신선도 판단용)
 }

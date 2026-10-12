@@ -14,7 +14,7 @@ import lombok.NoArgsConstructor;
  * describe 단계에서 자연어로 풀어쓴다.
  */
 @Getter
-@Builder
+@Builder(toBuilder = true)
 @AllArgsConstructor
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class RankingItemDto {
@@ -30,4 +30,9 @@ public class RankingItemDto {
     // 과거 대비 가격 등)를 사람이 읽을 수 있는 한 문장으로 미리 만들어 담는다 — DTO를 9종류로
     // 쪼개는 대신, describe 단계 로직을 클라이언트 쪽(랭킹 종류를 아는 쪽)에 두기 위함이다.
     private String extraInfo;
+    // 종목 리서치 "시가총액 비교"(HighItemApiClient.getMarketCapPeers)에서만 채운다 — 다른 순위에서는 null
+    // (fix/stock-detail-review). marketCap은 원 단위(모의 현재가 × 상장주식수).
+    private Long marketCap;
+    private Double per;
+    private Double pbr;
 }
