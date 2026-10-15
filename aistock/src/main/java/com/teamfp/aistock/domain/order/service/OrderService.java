@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,6 +21,7 @@ import com.teamfp.aistock.domain.order.dto.PendingOrderDto;
 import com.teamfp.aistock.domain.order.dto.request.CreateOrderRequest;
 import com.teamfp.aistock.domain.order.dto.response.CreateOrderResponse;
 import com.teamfp.aistock.domain.order.dto.response.HoldingResponse;
+import com.teamfp.aistock.domain.order.dto.response.OrderHistoryPageResponse;
 import com.teamfp.aistock.domain.order.dto.response.OrderHistoryResponse;
 import com.teamfp.aistock.domain.order.entity.Holding;
 import com.teamfp.aistock.domain.order.entity.Order;
@@ -45,6 +47,10 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class OrderService {
 
+    // 주문내역 나눠 받기(getMyOrderHistoryPage) 묶음 크기 — 기본 20건, 한 번에 최대 100건(2026-10-13)
+    static final int ORDER_HISTORY_DEFAULT_SIZE = 20;
+    static final int ORDER_HISTORY_MAX_SIZE = 100;
+
     private final OrderRepository orderRepository;
     private final HoldingRepository holdingRepository;
     // 계좌 소유권 검증(findByAccountIdAndUserId + ACCOUNT_NOT_FOUND)은 AccountService.
@@ -67,11 +73,11 @@ public class OrderService {
     private final OrderExecutionService orderExecutionService;
     // 주문 체결 시 알림 발송 — 도메인 간 직접 참조 대신 서비스 계층(NotificationService)을 통해 호출한다.
     private final NotificationService notificationService;
-    // 잔고 변동 원장 기록(ADMIN_API_BACKEND_HANDOFF.md 4.3) — 매수/매도/취소 환불 시점에 record()를 호출한다.
+    // 잔고 변동 원장 기록(관리자 API — 충전·잔액 변동 원장) — 매수/매도/취소 환불 시점에 record()를 호출한다.
     private final AccountTransactionService accountTransactionService;
     // 매도 거래 수수료 차감(지정가 매도 OrderExecutionService와 공용).
     private final TradeFeeService tradeFeeService;
-    // 관리자 강제취소 감사 로그(ADMIN_API_BACKEND_HANDOFF.md 5.2) — 이 서비스가 admin 도메인의
+    // 관리자 강제취소 감사 로그(관리자 API — 관리자 작업 감사 로그) — 이 서비스가 admin 도메인의
     // AuditLogService를 직접 호출하지 않고 AdminOrderCancelledEvent를 발행하기만 한다
     // (코드리뷰 반영, 2026-09) — order가 admin의 서비스를 직접 주입받으면 admin↔order 양방향
     // 패키지 의존이 생겨 CLAUDE.md 4번이 정한 "admin이 다른 도메인을 조합만 한다"는 단방향
@@ -131,7 +137,7 @@ public class OrderService {
         order.execute(currentPrice);
         orderRepository.save(order);
 
-        // 원장 기록(4.3) — Order 저장 뒤에 기록해야 orderId를 relatedOrderId로 남길 수 있다.
+        // 원장 기록(관리자 API — 충전·잔액 변동 원장) — Order 저장 뒤에 기록해야 orderId를 relatedOrderId로 남길 수 있다.
         boolean isBuy = request.orderType() == OrderType.BUY;
         accountTransactionService.record(account, isBuy ? AccountTransactionType.ORDER_BUY : AccountTransactionType.ORDER_SELL,
                 isBuy ? -totalAmount : totalAmount, balanceBefore, order.getOrderId(), null, null,
@@ -275,7 +281,7 @@ public class OrderService {
                 .build();
         orderRepository.save(order);
 
-        // 원장 기록(4.3) — 지정가 매수는 등록 시점에 freezeForOrder로 balance가 이미 줄어드므로
+        // 원장 기록(관리자 API — 충전·잔액 변동 원장) — 지정가 매수는 등록 시점에 freezeForOrder로 balance가 이미 줄어드므로
         // 그 시점을 ORDER_BUY로 기록한다. 매도는 이 메서드에서 balance를 건드리지 않으므로
         // (보유 주식을 이미 갖고 있어 별도 예약 잠금이 필요 없음) 기록하지 않는다.
         if (request.orderType() == OrderType.BUY) {
@@ -379,8 +385,8 @@ public class OrderService {
     }
 
     /**
-     * 관리자 강제 취소(ADMIN_API_BACKEND_HANDOFF.md 3.3, feature/admin-api-p0 — "구현 전 결정이
-     * 필요한 정책" 2번 항목이었으나 우선 구현해두고 정책이 다르게 정해지면 조정하기로 함).
+     * 관리자 강제 취소(관리자 API — 전체 거래 관리, feature/admin-api-p0 — 당시 미확정
+     * 정책이었으나 우선 구현해두고 정책이 다르게 정해지면 조정하기로 함).
      * cancelOrder()와 로직은 거의 같지만 소유자 본인 여부를 확인하지 않는다 — 관리자는 어느
      * 유저의 주문이든 취소할 수 있어야 하므로 findByOrderIdAndUserIdForUpdate 대신
      * findByIdForUpdate를 쓴다. 계좌 정지 여부도 확인하지 않는다 — 이미 정지된 계좌의 PENDING
@@ -515,6 +521,20 @@ public class OrderService {
         return orderRepository.findAllByAccountIdOrderByOrderedAtDesc(accountId).stream()
                 .map(OrderHistoryResponse::from)
                 .toList();
+    }
+
+    /**
+     * 주문내역 나눠 받기(2026-10-13) — 주문 목록 영역 안에서 스크롤하면 다음 묶음을 이어 붙이는 화면용. size가 없으면
+     * ORDER_HISTORY_DEFAULT_SIZE, 최대 ORDER_HISTORY_MAX_SIZE건이다. 소유권 검증은 getMyOrderHistory()와 같다.
+     */
+    @Transactional(readOnly = true)
+    public OrderHistoryPageResponse getMyOrderHistoryPage(Long userId, Long accountId, int page, Integer size) {
+        int pageSize = size == null ? ORDER_HISTORY_DEFAULT_SIZE : size;
+        if (page < 0 || pageSize < 1 || pageSize > ORDER_HISTORY_MAX_SIZE) {
+            throw new CustomException(ErrorCode.INVALID_INPUT);
+        }
+        accountService.getOwnedAccount(userId, accountId);
+        return OrderHistoryPageResponse.from(orderRepository.findSliceByAccountId(accountId, PageRequest.of(page, pageSize)));
     }
 
     /**

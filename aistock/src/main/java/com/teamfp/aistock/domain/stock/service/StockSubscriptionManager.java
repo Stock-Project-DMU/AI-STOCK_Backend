@@ -20,7 +20,7 @@ import lombok.extern.slf4j.Slf4j;
  * 합산한 참조 카운트로 관리한다. 카운트가 1 이상인 종목만 실시간 시세(STOMP)를 보낸다.
  *
  * 단일 서버 운영을 전제로 서버 메모리(ConcurrentHashMap)로 카운트를 관리한다. 다중 서버로
- * 확장되면 Redis 키로 승격이 필요하다(KNOWN_ISSUES.md 3번 참고).
+ * 확장되면 Redis 키로 승격이 필요하다.
  *
  * 외부 시세 데이터 실시간 구독은 없다(fix/local-market-data-stable에서 real 모드 제거) — 이 카운트는
  * MockMarketDataGenerator가 market_data.json에서 어느 종목을 실시간으로 보낼지 정하는 데 쓰인다.

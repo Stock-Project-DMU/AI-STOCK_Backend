@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * feature/admin-api-p0 — AccountRepository.searchAccountsWithUser() 실제 MySQL 연동 테스트
- * (관리자 계좌 목록·검색용, ADMIN_API_BACKEND_HANDOFF.md 3.4). 유닛 테스트(AdminAccountServiceTest)는
+ * (관리자 계좌 목록·검색용, 관리자 API — 계좌별 정지·해제). 유닛 테스트(AdminAccountServiceTest)는
  * Repository를 Mockito로 대체해서 str/concat 없이도 검증되지만, 실제 JPQL(fetch join + count
  * 쿼리 분리 + query/status 동적 조건)이 MySQL에서 문법 오류 없이 의도한 대로 동작하는지는
  * 실제 DB로만 확인할 수 있다.

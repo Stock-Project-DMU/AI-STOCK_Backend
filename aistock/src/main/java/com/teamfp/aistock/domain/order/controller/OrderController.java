@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.teamfp.aistock.domain.order.dto.request.CreateOrderRequest;
 import com.teamfp.aistock.domain.order.dto.response.CreateOrderResponse;
 import com.teamfp.aistock.domain.order.dto.response.HoldingResponse;
+import com.teamfp.aistock.domain.order.dto.response.OrderHistoryPageResponse;
 import com.teamfp.aistock.domain.order.dto.response.OrderHistoryResponse;
 import com.teamfp.aistock.domain.order.entity.PriceType;
 import com.teamfp.aistock.domain.order.service.OrderService;
@@ -63,10 +64,19 @@ public class OrderController {
 
     // 계좌 A/B/C는 서로 독립된 영역이라 항상 accountId로 특정 계좌를 지정해서 조회한다
     // (유저의 전체 계좌 합산이 아님 — NAMING.md 8-8 참고).
+    // page가 없으면 예전처럼 전체 목록(List<OrderHistoryResponse>), 있으면 나눠 받기(OrderHistoryPageResponse — 주문 목록
+    // 영역 안 스크롤로 다음 묶음을 이어 붙이는 화면용, 2026-10-13). 기존 호출(page 없음)은 응답 모양이 그대로다.
     @GetMapping
-    public ApiResponse<List<OrderHistoryResponse>> getMyOrderHistory(@RequestParam Long accountId) {
+    public ApiResponse<?> getMyOrderHistory(@RequestParam Long accountId,
+                                            @RequestParam(required = false) Integer page,
+                                            @RequestParam(required = false) Integer size) {
         Long userId = SecurityUtil.getCurrentUserId();
-        return ApiResponse.success(orderService.getMyOrderHistory(userId, accountId));
+        if (page == null) {
+            List<OrderHistoryResponse> orders = orderService.getMyOrderHistory(userId, accountId);
+            return ApiResponse.success(orders);
+        }
+        OrderHistoryPageResponse orderPage = orderService.getMyOrderHistoryPage(userId, accountId, page, size);
+        return ApiResponse.success(orderPage);
     }
 
     @GetMapping("/holdings")

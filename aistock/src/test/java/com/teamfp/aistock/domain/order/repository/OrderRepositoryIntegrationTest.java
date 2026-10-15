@@ -87,6 +87,28 @@ class OrderRepositoryIntegrationTest {
     }
 
     @Test
+    @DisplayName("findSliceByAccountId는 최신 주문부터 묶음으로 나누고, 묶음 사이에 빠지거나 겹치는 주문이 없다(2026-10-13)")
+    void findSliceByAccountId_pagesNewestFirstWithoutGapsOrDuplicates() {
+        Account account = newAccount(String.valueOf(System.nanoTime()));
+        List<Long> savedIds = new java.util.ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            savedIds.add(newExecutedOrder(account, 70_000L, 1).getOrderId());
+        }
+        java.util.Collections.reverse(savedIds); // 최신 주문이 먼저
+
+        var first = orderRepository.findSliceByAccountId(account.getAccountId(), PageRequest.of(0, 2));
+        var second = orderRepository.findSliceByAccountId(account.getAccountId(), PageRequest.of(1, 2));
+        var last = orderRepository.findSliceByAccountId(account.getAccountId(), PageRequest.of(2, 2));
+
+        assertThat(first.hasNext()).isTrue();
+        assertThat(second.hasNext()).isTrue();
+        assertThat(last.hasNext()).isFalse();
+        List<Long> pagedIds = java.util.stream.Stream.of(first, second, last)
+                .flatMap(slice -> slice.getContent().stream()).map(Order::getOrderId).toList();
+        assertThat(pagedIds).containsExactlyElementsOf(savedIds);
+    }
+
+    @Test
     @DisplayName("countByStatus(EXECUTED)는 체결된 주문 수만 센다")
     void countByStatus_countsOnlyExecutedOrders() {
         Account account = newAccount(String.valueOf(System.nanoTime()));

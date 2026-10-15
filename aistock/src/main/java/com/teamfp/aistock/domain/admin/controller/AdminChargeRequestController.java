@@ -29,7 +29,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 /**
- * 관리자 — 충전 요청 목록·상세 조회 및 승인·거절 API(ADMIN_API_BACKEND_HANDOFF.md 4.2).
+ * 관리자 — 충전 요청 목록·상세 조회 및 승인·거절 API(관리자 API — 추가 충전 요청·승인).
  * SecurityConfig에서 "/api/admin/**"는 hasRole("ADMIN")로 이미 제한되어 있어 여기서는 별도의
  * 권한 검사를 하지 않는다.
  */

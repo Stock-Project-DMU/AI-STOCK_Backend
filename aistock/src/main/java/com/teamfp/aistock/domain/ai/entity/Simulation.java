@@ -26,7 +26,7 @@ import lombok.NoArgsConstructor;
 
 /**
  * 저장된 목표 도달 시뮬레이션(feature/goal-simulation-v2, 2026-10-01 — 단일 종목 구조에서
- * "보유종목 유지 vs 리밸런싱" 비교 구조로 바꿈, simulation_v2_migration.sql 참고).
+ * "보유종목 유지 vs 리밸런싱" 비교 구조로 바꿈, db/migrations/012_simulation_v2.sql 참고).
  * 실행할 때마다 저장하지 않고 사용자가 저장 버튼을 눌렀을 때만 행이 생긴다.
  */
 @Entity

@@ -122,10 +122,13 @@ public class UserService {
         // SurveyLevelEvaluator.evaluate()가 answers의 문항 개수·선택지 범위를 검증하므로,
         // 아래 SurveyTendencyEvaluator 호출들은 이 검증을 통과한 뒤에만 실행되어야 한다(순서 유지).
         var investmentLevel = SurveyLevelEvaluator.evaluate(request.answers());
+        // 4번 문항 중복 선택: 1~6 중 겹치지 않게 1개 이상, 6(없음)은 혼자만, 대표 답(answers 4번째)은 가장 작은 번호.
+        // 아무것도 고르지 않은 빈 목록은 받지 않는다(프론트가 필수 응답으로 막고, 여기서 한 번 더 막는다).
         var experienceAnswers = request.experienceAnswers();
         if (experienceAnswers != null && (experienceAnswers.isEmpty()
-                || experienceAnswers.stream().anyMatch(answer -> answer == null || answer < 1 || answer > 5)
+                || experienceAnswers.stream().anyMatch(answer -> answer == null || answer < 1 || answer > SurveyTendencyEvaluator.NO_EXPERIENCE_ANSWER)
                 || experienceAnswers.stream().distinct().count() != experienceAnswers.size()
+                || (experienceAnswers.contains(SurveyTendencyEvaluator.NO_EXPERIENCE_ANSWER) && experienceAnswers.size() > 1)
                 || experienceAnswers.stream().mapToInt(Integer::intValue).min().orElseThrow() != request.answers().get(3))) {
             throw new CustomException(ErrorCode.INVALID_INPUT);
         }
@@ -169,7 +172,7 @@ public class UserService {
         return InvestmentProfileResponse.from(profile);
     }
 
-    // 비밀번호 확인(ADMIN_API_BACKEND_HANDOFF.md 5.3). 실패해도 예외만 던지고 별도 반환값은
+    // 비밀번호 확인(관리자 API — 비밀번호 확인·변경). 실패해도 예외만 던지고 별도 반환값은
     // 없다 — 컨트롤러가 "예외 없이 통과 = 확인 성공"으로 응답한다(AuthService.login()의
     // 비밀번호 검증과 동일한 방식).
     @Transactional(readOnly = true)
@@ -179,7 +182,7 @@ public class UserService {
 
     /**
      * 비밀번호 변경. 현재 비밀번호를 먼저 확인한 뒤 새 비밀번호로 교체하고, 변경 성공 시 기존
-     * Refresh Token을 폐기한다(handoff 문서 5.3 요구사항 — 비밀번호가 바뀌면 그 전에 발급된
+     * Refresh Token을 폐기한다(당시 관리자 API 요청서 요구사항 — 비밀번호가 바뀌면 그 전에 발급된
      * 세션은 더 이상 유효하지 않아야 하므로, AuthService.logout()과 동일하게
      * RedisTokenService.deleteRefreshToken()을 호출한다). Access Token까지 즉시 무효화하려면
      * 블랙리스트 등록이 필요하지만, 이 메서드는 Access Token 문자열 자체를 받지 않으므로(요청

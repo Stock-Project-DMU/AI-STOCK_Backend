@@ -80,7 +80,7 @@ public class AccountController {
         return ApiResponse.success(accountService.getProfit(userId, accountId));
     }
 
-    // 추가 충전 요청(ADMIN_API_BACKEND_HANDOFF.md 4.2) — 직접 충전(POST .../charge) 3회 한도를
+    // 추가 충전 요청(관리자 API — 추가 충전 요청·승인) — 직접 충전(POST .../charge) 3회 한도를
     // 다 쓴 사용자만 관리자 승인을 받기 위해 요청을 남길 수 있다(남아 있으면 CHARGE_REQUEST_NOT_ALLOWED).
     @PostMapping("/{accountId}/charge-requests")
     public ApiResponse<ChargeRequestResponse> createChargeRequest(
@@ -116,7 +116,7 @@ public class AccountController {
         return ApiResponse.success(chargeRequestService.getMyRequestDetail(userId, accountId, requestId));
     }
 
-    // 잔고 변동 원장 조회(ADMIN_API_BACKEND_HANDOFF.md 4.3). 소유권 검증은 getOwnedAccount()로
+    // 잔고 변동 원장 조회(관리자 API — 충전·잔액 변동 원장). 소유권 검증은 getOwnedAccount()로
     // 먼저 확인한 뒤 조회를 위임한다 — AccountTransactionService 자체는 계좌 소유자가 누구인지
     // 모르므로(admin 조회 API와 공유하는 계층) 이 컨트롤러가 사용자 조회 경로에서만 검증한다.
     @GetMapping("/{accountId}/transactions")
@@ -126,6 +126,6 @@ public class AccountController {
     ) {
         Long userId = SecurityUtil.getCurrentUserId();
         accountService.getOwnedAccount(userId, accountId);
-        return ApiResponse.success(accountTransactionService.getTransactions(accountId, pageable));
+        return ApiResponse.success(accountTransactionService.getMyTransactions(accountId, pageable));
     }
 }

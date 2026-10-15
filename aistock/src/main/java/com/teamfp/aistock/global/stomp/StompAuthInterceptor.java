@@ -32,7 +32,8 @@ import lombok.RequiredArgsConstructor;
  *
  * 비회원 호가 제공(#06): Authorization 헤더 없이 CONNECT하면 인증 정보 없는 익명 세션으로
  * 연결을 허용한다. 익명 세션은 REST에서도 공개된 종목 현재가·호가 토픽
- * (/topic/stock/{stockCode}, /topic/stock/{stockCode}/hoga)만 구독할 수 있고, 그 외 구독과
+ * (/topic/stock/{stockCode}, /topic/stock/{stockCode}/hoga)와 메인 화면 지수·순위 토픽(/topic/market/indexes,
+ * /topic/market/rankings/{sort}, 2026-10-13)만 구독할 수 있고, 그 외 구독과
  * SEND는 ACCESS_DENIED로 막는다. 헤더가 있는데 토큰이 무효·만료인 경우는 익명으로 강등하지
  * 않고 기존처럼 INVALID_TOKEN으로 거부한다 — 로그인 사용자가 모르는 사이에 익명 세션이 되어
  * 개인 알림(/user/queue)을 못 받는 상황을 숨기지 않기 위해서다.
@@ -43,6 +44,8 @@ public class StompAuthInterceptor implements ChannelInterceptor {
 
     // 비회원에게 공개하는 토픽 — StockBroadcastService가 브로드캐스트하는 가격/호가 토픽과 동일한 형태
     private static final Pattern PUBLIC_STOCK_TOPIC_PATTERN = Pattern.compile("^/topic/stock/[A-Za-z0-9]+(/hoga)?$");
+    // 메인 화면 지수·순위 토픽(MarketOverviewBroadcastService, 2026-10-13) — 메인 화면은 로그인 없이도 보이므로 비회원에게 공개한다.
+    private static final Pattern PUBLIC_MARKET_TOPIC_PATTERN = Pattern.compile("^/topic/market/(indexes|rankings/[a-z-]+)$");
 
     private final JwtProvider jwtProvider;
     private final CustomUserDetailsService customUserDetailsService;
@@ -103,7 +106,8 @@ public class StompAuthInterceptor implements ChannelInterceptor {
     }
 
     private boolean isPublicDestination(String destination) {
-        return destination != null && PUBLIC_STOCK_TOPIC_PATTERN.matcher(destination).matches();
+        return destination != null && (PUBLIC_STOCK_TOPIC_PATTERN.matcher(destination).matches()
+                || PUBLIC_MARKET_TOPIC_PATTERN.matcher(destination).matches());
     }
 
     /**

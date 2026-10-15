@@ -267,7 +267,8 @@ STOMP 엔드포인트: `/ws-stomp`
 ### `StompAuthInterceptor`
 메서드: `preSend(Message<?> message, MessageChannel channel)`, `onSessionDisconnect(SessionDisconnectEvent event)`
 (private) `authenticate(StompHeaderAccessor)`, `isAnonymous(StompHeaderAccessor)`, `isPublicDestination(String)` /
-상수: `PUBLIC_STOCK_TOPIC_PATTERN` (`^/topic/stock/[A-Za-z0-9]+(/hoga)?$`)
+상수: `PUBLIC_STOCK_TOPIC_PATTERN` (`^/topic/stock/[A-Za-z0-9]+(/hoga)?$`), `PUBLIC_MARKET_TOPIC_PATTERN`
+(`^/topic/market/(indexes|rankings/[a-z-]+)$`, 메인 화면 지수·순위 — 2026-10-13)
 
 > **비회원 호가 제공 (#06, 2026-09-25)**: CONNECT에 `Authorization` 헤더가 **없으면** 익명 세션으로
 > 연결을 허용한다(`accessor.setUser()` 미호출, `admin:online:users` 집계 제외). 헤더가 있는데
@@ -606,9 +607,12 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 >   먼저 호출한 뒤 아래 두 메서드를 호출한다.
 > - `SurveyTendencyEvaluator.evaluateInvestmentTendency(List<Integer> answers)` → `int`(1~5).
 >   2·3·4·5·6·7번 문항 가중합산(6번×3, 4·7번×2, 나머지×1) 후 10~44점을 폭 7점씩 5구간으로 매핑.
+>   4번 문항(투자 경험, 체크박스)은 `6 - 답`(가장 위험한 경험 기준)이고, 상수
+>   `SurveyTendencyEvaluator.NO_EXPERIENCE_ANSWER`(=6, "없음")는 0점이라 합계 8·9점도 1구간이다(2026-10-13).
+>   `SurveyRequest.experienceAnswers`의 6은 혼자만 고를 수 있다(`UserService.saveSurvey()` 검증).
 > - `SurveyTendencyEvaluator.evaluateFundTendency(List<Integer> answers)` → `int`(1~3, 2026-09-28
 >   리뷰 반려 사유 3번 대응으로 4→3 축소). 1번 문항 답을 그대로 반환(선택지 순서가 등급
->   순서와 1:1로 맞춰져 있다는 전제 — `FRONTEND_API_IMPLEMENTATION.md`가 문서화한 실제 프론트
+>   순서와 1:1로 맞춰져 있다는 전제 — 실제 프론트
 >   `surveyQuestions.ts` 1번 문항 순서 "자산증식→수익추구형/생활비→자유소비형/채무상환→목표달성형"
 >   기준).
 
@@ -724,7 +728,9 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
   `GROUP_NAME_ALIASES`(SK↔에스케이/LG↔엘지/GS↔지에스/CJ↔씨제이/KT↔케이티, 보수적으로 확인된 것만
   등록)로 그룹명을 치환해 재시도. 라이브 테스트로 "sk쉴더스"가 DART 원본엔 "에스케이쉴더스"로만
   등록돼 있어 정확 일치로 못 찾던 문제 실측 후 추가(뉴스 검색의 `NewsRelevanceMatcher.KNOWN_ALIASES`와
-  같은 원칙)
+  같은 원칙). 고유번호 목록(corpCode.xml)을 받지 못하거나 상장사가 0개면(잘못된 키 등 오류 응답) 캐시하지 않고
+  `CORP_CODE_RETRY_DELAY_MILLIS`(60초, 필드 `corpCodeRetryAfterMillis`) 뒤 다시 받으며, 그동안
+  `resolveCorpCodeByStockCode()`는 "공시 회사 없음"과 구분하려고 `EXTERNAL_API_ERROR`를 던진다(2026-10-13)
 - `DartFinancialRequest`(corpCode, year), `DartFinancialResponse`(corpCode, bizYear, revenue, operatingProfit,
   netIncome, totalAssets, totalLiabilities, totalEquity)
 
@@ -1045,7 +1051,7 @@ confirmedCurrentPrices`(`executeTool()`이 `aiToolTaskExecutor`로 동시 실행
 > 재사용하고 있어 동일한 패턴으로 통일 — 주문 자체의 필드는 `order: OrderHistoryResponse`로
 > 위임하고, 관리자 화면에만 필요한 `userName`/`loginId`만 이 레코드가 따로 갖는다.
 
-> **검색·필터 추가 (feature/admin-api-p0, ADMIN_API_BACKEND_HANDOFF.md 3.3)**: `GET
+> **검색·필터 추가 (feature/admin-api-p0, 관리자 API — 전체 거래 관리)**: `GET
 > /api/admin/trades`에 `query`(주문번호/회원 아이디/계좌번호/종목코드/종목명 통합검색),
 > `status`, `orderType`, `priceType`, `stockCode`(정확일치), `from`~`to`(orderedAt 구간) 쿼리
 > 파라미터를 추가했다. 전부 선택값이며 비어 있으면 기존과 동일하게 전체 목록을 반환한다.
@@ -1053,8 +1059,8 @@ confirmedCurrentPrices`(`executeTool()`이 `aiToolTaskExecutor`로 동시 실행
 > 처리하고, `findAllOrdersWithUser(Pageable)`는 더 이상 쓰지 않지만 다른 호출부가 없어
 > Repository 메서드 자체는 남겨뒀다.
 
-> **주문 강제취소 추가 (2026-09-07, handoff 문서 9번 "구현 전 결정이 필요한 정책" 2번 —
-> 정책 확정 전 우선 구현하기로 함)**: `PATCH /api/admin/trades/{orderId}/cancel`(body:
+> **주문 강제취소 추가 (2026-09-07, 당시 미확정 정책이던 관리자 강제 취소를
+> 우선 구현하기로 함)**: `PATCH /api/admin/trades/{orderId}/cancel`(body:
 > `reason`) 추가. `AdminTradeService.cancelTrade(Long adminUserId, Long orderId,
 > AdminOrderCancelRequest request)`가 `OrderService.adminCancelOrder(Long adminUserId,
 > Long orderId, String reason)`(신규)에 위임한다. `OrderService.cancelOrder()`(8-6)와
@@ -1073,7 +1079,7 @@ confirmedCurrentPrices`(`executeTool()`이 `aiToolTaskExecutor`로 동시 실행
 | Request DTO | `AdminAccountStatusRequest`(status) |
 | Response DTO | `AdminAccountDetailResponse`(accountId, userName, accountNumber, balance, frozenBalance, baseBalance, status — feat/admin-improvements에서 필드 대폭 추가, 목록은 `AdminAccountListResponse`로 분리 8-29) |
 
-> **계좌 목록·검색 추가 (feature/admin-api-p0, ADMIN_API_BACKEND_HANDOFF.md 3.4)**: `GET
+> **계좌 목록·검색 추가 (feature/admin-api-p0, 관리자 API — 계좌별 정지·해제)**: `GET
 > /api/admin/accounts`를 추가했다. `query`(계좌 소유자 아이디/이름/계좌번호 통합검색),
 > `status`는 선택 파라미터, 기본 정렬은 `createdAt,desc`. 목록 전용 DTO를 새로 만들지 않고
 > 상세와 동일한 `AdminAccountDetailResponse`를 그대로 재사용한다(admin-trade가 목록/상세를
@@ -1101,7 +1107,7 @@ confirmedCurrentPrices`(`executeTool()`이 `aiToolTaskExecutor`로 동시 실행
 | Request DTO | `AdminUserStatusRequest`(status) |
 | Response DTO | `AdminUserListResponse`(userId, loginId, name, email, role, status, createdAt), `AdminUserDetailResponse`(기본정보 필드 + `accounts`: `List<AccountInfoResponse>` 재사용 + `holdings`: `List<HoldingResponse>` 재사용 + `orders`: `List<OrderHistoryResponse>` 재사용 — 최근 20건만 + `orderCount`: 전체 주문 건수, feat/admin-improvements) |
 
-> **검색·필터 추가 (feature/admin-api-p0, ADMIN_API_BACKEND_HANDOFF.md 3.2)**: `GET
+> **검색·필터 추가 (feature/admin-api-p0, 관리자 API — 회원 검색·필터·정렬)**: `GET
 > /api/admin/users`에 `query`(회원번호/아이디/이름/이메일 통합검색), `status`, `role` 쿼리
 > 파라미터를 추가했다. 전부 선택값이며 비어 있으면 기존과 동일하게 전체 목록을 반환한다.
 > 기본 정렬은 `createdAt,desc`. `UserRepository.searchUsers(...)`가 실제 조건을 처리하고,
@@ -1110,7 +1116,7 @@ confirmedCurrentPrices`(`executeTool()`이 `aiToolTaskExecutor`로 동시 실행
 >
 > `AdminUserDetailResponse`는 기존 마이페이지용 DTO(`AccountInfoResponse`, `HoldingResponse`, `OrderHistoryResponse`)를 그대로 내부 필드로 재사용한다 — 동일한 형태의 응답 DTO를 중복 정의하지 않는다.
 >
-> **탈퇴 회원 조회 추가 (2026-09-07, handoff 문서 5.4 — 3가지 옵션 중 정책 확정 전 옵션2
+> **탈퇴 회원 조회 추가 (2026-09-07, 당시 관리자 API 요청서 — 3가지 옵션 중 정책 확정 전 옵션2
 > "익명화된 탈퇴 이력만 별도 조회"로 우선 구현하기로 함)**: `GET /api/admin/users/withdrawn`
 > 추가. `AdminUserService.getWithdrawnUsers(Pageable pageable)` → `UserRepository.
 > findAllByIsActiveFalse(pageable)`. 응답 DTO는 `AdminWithdrawnUserResponse`(userId, loginId,
@@ -1271,7 +1277,7 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 
 > **알림 연동**: 브리핑 생성 시 `NotificationService.notify(userId, NotificationType.NEWS, ...)`를
 > 함께 호출한다(2026-08-24 확정). `NotificationType`에 `NEWS` 값 추가, `notifications.type`
-> ENUM에도 `NEWS` 추가(schema.sql v12, `news_briefing_migration.sql`).
+> ENUM에도 `NEWS` 추가(schema.sql v12, `db/migrations/003_news_briefing.sql`).
 
 > **`searchByOutlet()` 페이지네이션 (2026-08-24 추가)**: 첫 실측 때 29곳 중 16곳이 0건으로
 > 나왔는데, 500건(5페이지)까지 더 파보니 그중 15곳은 실제로 오늘 기사가 있었고 전부 오늘
@@ -1366,7 +1372,7 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 | ErrorCode | `PASSWORD_NOT_SET`(401) — 소셜 로그인 전용 계정(password=null)이 확인/변경을 시도한 경우 |
 
 > `changePassword()` 성공 시 `RedisTokenService.deleteRefreshToken()`으로 기존 Refresh Token을
-> 폐기한다(handoff 문서 5.3 요구사항). Access Token 블랙리스트 등록까지는 하지 않는다 — 이
+> 폐기한다(당시 관리자 API 요청서 요구사항). Access Token 블랙리스트 등록까지는 하지 않는다 — 이
 > 메서드는 Access Token 문자열을 받지 않으므로(요청 헤더 필요) 다음 재발급 시점에 자연히 막힌다.
 
 ### 8-22. feature/admin-api-p0 (2026-09-07 신규 — 관리자 계정 관리)
@@ -1390,8 +1396,8 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 > `getUserDetail()`과 조회 로직은 같지만 role이 ADMIN이 아니면 `USER_NOT_FOUND`로 막아
 > "관리자 전용 목록에서 조회"라는 URL 의미를 지킨다.
 >
-> **`POST /api/admin/admins` 추가 (2026-09-07, handoff 문서 9번 "구현 전 결정이 필요한 정책"
-> 6번 — 정책 확정 전 "별도 생성 방식"으로 우선 구현하기로 함)**: `AdminUserService.
+> **`POST /api/admin/admins` 추가 (2026-09-07, 당시 미확정 정책이던 관리자 생성 방식을
+> "별도 생성 방식"으로 우선 구현하기로 함)**: `AdminUserService.
 > createAdmin(AdminCreateRequest request)`(loginId, password, name, email) — 승격 방식이
 > 아니라 신규 User(role=ADMIN)를 직접 만든다. `AuthService.signup()`과 동일한 패턴으로
 > 중복 아이디/이메일을 먼저 걸러내고, `save()` 시점 동시 가입 경합은 `DataIntegrityViolationException`을
@@ -1426,7 +1432,7 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 
 | 구분 | 이름 |
 |---|---|
-| 엔드포인트 | `GET /api/admin/users/export`, `GET /api/admin/trades/export`(handoff 문서는 `/api/admin/orders/export`를 제안했으나 기존 목록 API가 이미 `/api/admin/trades`라 같은 경로 아래 통일) |
+| 엔드포인트 | `GET /api/admin/users/export`, `GET /api/admin/trades/export`(당시 관리자 API 요청서는 `/api/admin/orders/export`를 제안했으나 기존 목록 API가 이미 `/api/admin/trades`라 같은 경로 아래 통일) |
 | Controller 메서드 | `AdminUserController.exportUsers()`, `AdminTradeController.exportTrades()` — 둘 다 `ResponseEntity<byte[]>` 반환(파일 다운로드라 `ApiResponse<T>` JSON 포맷 예외) |
 | Service 메서드 | `AdminUserService.exportUsersCsv(String query, UserStatus status, Role role, Sort sort)`, `AdminTradeService.exportTradesCsv(String query, OrderStatus status, OrderType orderType, PriceType priceType, String stockCode, LocalDateTime from, LocalDateTime to, Sort sort)` |
 | 공용 유틸 | `global/util/CsvWriter`(신규) — `write(List<String> headers, List<List<String>> rows)`, UTF-8 BOM 부착, RFC 4180 이스케이프 |
@@ -1450,7 +1456,7 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 
 ### 8-25. feature/admin-api-p0 (2026-09-07 신규 — 충전 요청·승인, 새 테이블)
 
-`charge_requests` 테이블 신규 생성(사용자 승인, ADMIN_API_BACKEND_HANDOFF.md 4.2 — 자동 충전
+`charge_requests` 테이블 신규 생성(사용자 승인, 관리자 API — 추가 충전 요청·승인 — 자동 충전
 3회 한도를 넘긴 사용자가 관리자 승인을 받는 절차).
 
 | 구분 | 이름 |
@@ -1466,7 +1472,7 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 | Account 엔티티 메서드 | `applyAdminCharge(long amount)` — `chargeBalance()`와 달리 `chargeCount`를 안 올린다 |
 | ErrorCode | `CHARGE_REQUEST_NOT_FOUND`(404), `CHARGE_REQUEST_ALREADY_PENDING`(400 — 계좌당 PENDING 1건 제한, 정책 미확정 상태에서 우선 구현), `CHARGE_REQUEST_ALREADY_PROCESSED`(409) |
 
-> 계좌별 미처리 요청 중복 생성 방지는 handoff 문서가 "정책 필요"로 남긴 항목이라, 우선
+> 계좌별 미처리 요청 중복 생성 방지는 당시 관리자 API 요청서가 "정책 필요"로 남긴 항목이라, 우선
 > "동시에 PENDING 1건만 허용"으로 구현했다. 승인·거절 금액의 일·월 누적 한도 검증도 문서가
 > 요구하지만 구체적 허용 범위가 미확정이라 넣지 않았다 — 정해지면 `AdminChargeRequestService.
 > decide()`에 검증을 추가해야 한다.
@@ -1484,17 +1490,17 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 
 ### 8-26. feature/admin-api-p0 (2026-09-07 신규 — 잔고 변동 원장, 새 테이블)
 
-`account_transactions` 테이블 신규 생성(사용자 승인, ADMIN_API_BACKEND_HANDOFF.md 4.3).
+`account_transactions` 테이블 신규 생성(사용자 승인, 관리자 API — 충전·잔액 변동 원장).
 
 | 구분 | 이름 |
 |---|---|
 | Entity | `AccountTransaction`(domain/account/entity) — append-only(수정 메서드 없음). transactionId, account, type(`AccountTransactionType`: INITIAL_GRANT/AUTO_CHARGE/ADMIN_CHARGE/ADMIN_DEDUCTION/ORDER_BUY/ORDER_SELL/ORDER_REFUND/INTEREST/TRADE_FEE/AUTO_DEDUCTION — AUTO_DEDUCTION은 8-29), amount(부호 있는 증감액), balanceBefore, balanceAfter, relatedOrderId/relatedChargeRequestId/processedBy(전부 FK 아닌 단순 참조 ID), reason, createdAt |
 | Repository | `AccountTransactionRepository`(domain/account/repository) — `findAllByAccount_AccountId` |
-| Service | `AccountTransactionService`(domain/account/service) — `record(Account account, AccountTransactionType type, long amount, long balanceBefore, Long relatedOrderId, Long relatedChargeRequestId, Long processedBy, String reason)`, `getTransactions(Long accountId, Pageable pageable)` |
+| Service | `AccountTransactionService`(domain/account/service) — `record(Account account, AccountTransactionType type, long amount, long balanceBefore, Long relatedOrderId, Long relatedChargeRequestId, Long processedBy, String reason)`, `getTransactions(Long accountId, Pageable pageable)`(관리자 — 원래 사유), `getMyTransactions(Long accountId, Pageable pageable)`(사용자 — 관리자 지급·차감 사유를 고정 문구로, 2026-10-13) |
 | 사용자 엔드포인트 | `GET /api/accounts/{accountId}/transactions` (AccountController에 추가) |
 | 관리자 엔드포인트 | `GET /api/admin/accounts/{accountId}/transactions`, `POST /api/admin/accounts/{accountId}/adjustments` (AdminAccountController에 추가) |
 | Request DTO | `AdminAccountAdjustmentRequest`(type: ADMIN_CHARGE/ADMIN_DEDUCTION만 허용, amount, reason) |
-| Response DTO | `AccountTransactionResponse` |
+| Response DTO | `AccountTransactionResponse` — `from(AccountTransaction)`(관리자), `forUser(AccountTransaction)`(사용자 — ADMIN_CHARGE→"관리자 지급", ADMIN_DEDUCTION→"관리자 차감", 2026-10-13) |
 | Account 엔티티 메서드 | `applyAdminDeduction(long amount)` — `applyAdminCharge()`와 대칭 |
 
 > **record() 호출 지점(잔고를 바꾸는 모든 곳에 연결 완료)**:
@@ -1531,14 +1537,14 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 
 ### 8-27. feature/admin-api-p0 (2026-09-07 신규 — 관리자 작업 감사 로그, 새 테이블)
 
-`audit_logs` 테이블 신규 생성(사용자 승인, ADMIN_API_BACKEND_HANDOFF.md 5.2).
+`audit_logs` 테이블 신규 생성(사용자 승인, 관리자 API — 관리자 작업 감사 로그).
 
 | 구분 | 이름 |
 |---|---|
 | Entity | `AuditLog`(domain/admin/entity) — append-only(수정 메서드 없음). auditLogId, adminUserId, adminLoginId(기록 시점 스냅샷), action, targetType, targetId, beforeValue, afterValue, reason, requestIp(코드리뷰 반영 이후 실제로 채워짐 — 아래 참고), createdAt |
 | Repository | `AuditLogRepository`(domain/admin/repository) — `search(action, adminId, targetType, targetId, from, to, pageable)` |
 | Service | `AuditLogService`(domain/admin/service) — `record(Long adminUserId, String action, String targetType, Long targetId, String beforeValue, String afterValue, String reason)`, `search(...)`, `getDetail(Long auditLogId)`. action/targetType 문자열 상수(`ACTION_*`/`TARGET_*`, `ACTION_ACCOUNT_ADJUSTMENT` 코드리뷰 반영으로 추가)를 이 클래스에 모아둔다 |
-| 엔드포인트 | `GET /api/admin/audit-logs`, `GET /api/admin/audit-logs/{auditLogId}` (수정·삭제 API 없음 — handoff 문서 "관리자도 수정·삭제할 수 없게 한다") |
+| 엔드포인트 | `GET /api/admin/audit-logs`, `GET /api/admin/audit-logs/{auditLogId}` (수정·삭제 API 없음 — 당시 관리자 API 요청서 "관리자도 수정·삭제할 수 없게 한다") |
 | Controller | `AdminAuditLogController` |
 | Response DTO | `AuditLogResponse` |
 | ErrorCode | `AUDIT_LOG_NOT_FOUND`(404) |
@@ -1598,7 +1604,7 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 | Response DTO 필드 추가 | `AccountInfoResponse.maxChargeCount`, `AccountInfoResponse.interestRate`, `AccountInfoResponse.totalInterest`, `OrderHistoryResponse.fee` |
 | 보유종목 평가 | `HoldingValuationService`가 `StockQuoteService`를 추가로 주입받아, Redis 시세 캐시가 빈 종목은 `fetchLastQuote(String stockCode)`로 마지막 시세(장 마감 후 종가)를 조회한다. 실패 시에만 평단가로 대체 |
 | ErrorCode | `DEPOSIT_LIMIT_EXCEEDED`(400 — 충전 후 예치금이 1조원을 넘는 직접 충전·충전 요청·관리자 승인·관리자 증액), `CHARGE_REQUEST_NOT_ALLOWED`, `ACCOUNT_SUSPENDED_CHARGE`(400 — 거래 정지 계좌의 직접 충전·충전 요청. 주문용 `ACCOUNT_SUSPENDED`와 문구 분리) |
-| Migration | `mypage_account_migration.sql`(저장소 루트, schema.sql v17) |
+| Migration | `db/migrations/013_mypage_account.sql`(저장소 루트, schema.sql v17) |
 | Order 엔티티 메서드 | `describeStockAndQuantity()` — 원장 사유용 "종목명 N주" 문구 |
 
 > - **예치 이자율**: 모든 계좌는 개설 시 연 0.50% 고정. 매월 1일 0시(KST) `AccountInterestJob`이 계좌마다
@@ -1632,7 +1638,7 @@ local-market-data-generator의 `dividend_collector.py`가 만든 `dividends.json
 | 사용자 엔드포인트 | `GET /api/dividends/schedule?stockCode=&year=`, `GET /api/dividends/my`, `GET /api/dividends/upcoming` — `DividendController`(domain/stock/controller) `getSchedules`, `getMyDividends`, `getUpcomingDividends` |
 | 관리자 엔드포인트 | `POST /api/admin/dividend/reload` — `AdminDividendController.reloadSchedules`(domain/admin/controller) |
 | Response DTO | `DividendScheduleResponse`, `DividendEntitlementResponse`, `UpcomingDividendResponse`(isEntitled, isPayDateEstimated, expectedAmount — 정적 팩토리 `ofEntitlement`, `ofSchedule`), `DividendScheduleReloadResponse`(totalCount, createdCount, updatedCount) |
-| Migration | `dividend_migration.sql`(저장소 루트, schema.sql v19) |
+| Migration | `db/migrations/015_dividend.sql`(저장소 루트, schema.sql v19) |
 | Test | `DividendScheduleReaderTest`(infra/marketdata), `DividendFlowIntegrationTest`(domain/stock/service — 실제 MySQL) |
 
 > - **배당 권리**: 매일 06:00(KST) 그날이 배당락일인 회차마다 1주 이상 보유한 계좌에 PENDING 권리를 만든다(06:00 보유 수량 =
@@ -1677,7 +1683,8 @@ local-market-data-generator의 `dividend_collector.py`가 만든 `dividends.json
 | 알림 관리·공지 팝업 | 새 테이블 `notices` — Entity `Notice`(domain/notification/entity: noticeId, type, title, content, targetType, targetCount, sentCount, popupEndDate, createdBy, createdByLoginId, createdAt, updatedAt — `recordSendResult(int, int)`, `changePopupEndDate(LocalDate)`, `endPopup(LocalDate)`, `isPopup()`, `isPopupActive(LocalDate)`), `NoticeTargetType`(SINGLE, ALL, SEARCH, SELECTED), `NoticeRepository.search(query, pattern, queryId, field, exact, Boolean popup, Pageable)`. `Notification.notice`(notifications.notice_id, 마이그레이션 8번). 발송: `AdminNotificationService.notifyUser(Long adminUserId, Long userId, …)`/`broadcast(Long adminUserId, …)`/`send(Long adminUserId, …)`가 공지를 남기고 `NotificationService.notifyNotice(Long userId, Notice notice)` 호출, `AdminNotificationSendResponse`에 `noticeId` 추가, 요청 DTO의 `popup`(Boolean)·`popupEndDate`(LocalDate), `AdminNotificationService.INVALID_POPUP_END_DATE_MESSAGE`, `NO_RECIPIENT_MESSAGE`(받을 회원 0명이면 공지를 남기지 않고 거절). 세 발송은 바깥 트랜잭션 없이 공지를 먼저 저장하고 회원마다 `notifyNotice()`가 각자 커밋한다(실패한 회원만 빠짐). 관리: `GET /api/admin/notices?query=&field=&matchType=&popup=&sortBy=&sortColumn=&direction=&page=&size=`, `GET /api/admin/notices/{noticeId}`, `PATCH /api/admin/notices/{noticeId}/popup`(body `AdminNoticePopupRequest`: popupEndDate), `PATCH /api/admin/notices/{noticeId}/popup-end`, `DELETE /api/admin/notices/{noticeId}` — `AdminNoticeController`(`getNotices`, `getNoticeDetail`, `changePopupEndDate`, `endPopup`, `deleteNotice`), `AdminNoticeService`(같은 이름 메서드, 상수 `INVALID_POPUP_END_DATE_MESSAGE`, `POPUP_END_REASON`, `POPUP_CHANGE_REASON`, `DELETE_REASON`), `AdminNoticeResponse`(noticeId, type, title, content, targetType, targetCount, sentCount, popup, popupEndDate, popupActive, createdBy, createdByLoginId, createdAt, updatedAt, recipientCount, readCount — `from(Notice, LocalDate)`, `of(Notice, LocalDate, Long, Long)`), `AdminNoticeSearchField`(ALL, NOTICE_ID, TITLE, ADMIN_LOGIN_ID), `AdminNoticeSortType`(LATEST, OLDEST), `AdminNoticeSortColumn`(NOTICE_ID, TITLE, TYPE, TARGET_TYPE, SENT_COUNT, POPUP_END_DATE, CREATED_BY, CREATED_AT), `AdminSortSupport.notices()`. `NotificationRepository.countByNoticeId`, `countReadByNoticeId`, `deleteByNoticeId`(공지 삭제 시 받은 회원 알림도 삭제), `findActivePopups(Long userId, LocalDate today)`. 감사 로그 `NOTICE_POPUP_CHANGE`, `NOTICE_DELETE`, 대상 `NOTICE`. `ErrorCode.NOTICE_NOT_FOUND`(404). 사용자: `GET /api/notifications/popups` — `NotificationController.getActivePopups()`, `NotificationService.getActivePopups(Long userId)`, `NoticePopupResponse`(noticeId, notiId, type, title, content, popupEndDate, createdAt). 닫은 기록은 저장하지 않아 기한까지 로그인할 때마다 다시 뜬다. `NotificationResponse`에 `noticeId` 추가 |
 | 문의 관리 | `GET /api/admin/inquiries?query=&field=&matchType=&status=&sortBy=&sortColumn=&direction=&page=&size=` — `AdminInquiryService.getInquiries(AdminSearchConditionDto search, InquiryStatus status, Pageable pageable)`, `InquiryRepository.searchWithUser(query, pattern, queryId, field, exact, status, Pageable)`(기존 `findAllByOrderByStatusDescCreatedAtDesc(Pageable)` 대체), `AdminInquirySearchField`(ALL, INQUIRY_ID, LOGIN_ID, NAME, TITLE), `AdminInquirySortType`(PENDING_FIRST 기본, LATEST, OLDEST), `AdminInquirySortColumn`(INQUIRY_ID, USER, TITLE, STATUS, CREATED_AT, ANSWERED_AT), `AdminSortSupport.inquiries()`(PENDING_FIRST는 ENUM 정의 순서와 무관하게 "대기면 0" 식으로 정렬 — 상수 `INQUIRY_PENDING_FIRST`) |
 | 관리자 계정 폐기 | `UserWithdrawalRequest`에 `adminCode` 추가(2인자 생성자 유지). 관리자 계정이면 `UserWithdrawalService.withdraw()`가 본인 확인 후 `InitialAdminService.verifyAdminCode("user:{userId}", adminCode)`로 관리자 인증 코드를 확인(불일치 `INVALID_ADMIN_CODE`, 3번째 불일치·잠금 중 `ADMIN_CODE_LOCKED` — 상수 `UserWithdrawalService.ADMIN_DISPOSE_LOCK_PREFIX`="user:")하고 감사 로그 `ADMIN_DISPOSE`(상수 `AuditLogService.ACTION_ADMIN_DISPOSE`, `UserWithdrawalService.ADMIN_DISPOSE_REASON`)를 남긴다. 마지막 관리자도 폐기할 수 있다(이전의 `LAST_ADMIN_SUSPEND_NOT_ALLOWED` 탈퇴 차단 제거 — 정지 차단은 그대로) |
-| 인덱스 | `idx_user_created_at`(users.created_at), `idx_order_ordered_at`(orders.ordered_at), `idx_charge_request_requested_at`(charge_requests.requested_at) — `admin_improvements_migration.sql` |
+| 이메일 없는 소셜 회원 탈퇴 (2026-10-13) | `UserWithdrawalRequest`에 `confirmText` 추가(2·3인자 생성자 유지). `loginId`·`email`이 모두 없는 소셜 계정은 `UserWithdrawalService.WITHDRAWAL_CONFIRM_TEXT`("탈퇴하겠습니다")를 정확히 입력해야 탈퇴된다(이메일 있는 소셜 계정은 이메일, 일반 계정은 비밀번호 그대로). 탈퇴 삭제 목록에 `dividend_entitlements`(account_id 기준) 추가 |
+| 인덱스 | `idx_user_created_at`(users.created_at), `idx_order_ordered_at`(orders.ordered_at), `idx_charge_request_requested_at`(charge_requests.requested_at) — `db/migrations/014_admin_improvements.sql` |
 
 > 관리자 계정 계좌(`Account.isChargeUnlimited()`)는 셀프 충전 횟수·1회 금액 제한이 없고 예치금 한도만 999조원이다
 > (프론트 JS Number 정밀도 2^53 안쪽). 관리자 직접 차감은 balance·baseBalance 중 작은 값까지만 가능하며 원장에
@@ -1799,3 +1806,22 @@ local-market-data-generator의 `dividend_collector.py`가 만든 `dividends.json
 | 요청 방식 오류 | `GlobalExceptionHandler.handleUnsupportedMethod(HttpRequestMethodNotSupportedException e)` — 405 / `METHOD_NOT_ALLOWED` |
 | 미디어 타입 오류 | `GlobalExceptionHandler.handleUnsupportedMediaType(HttpMediaTypeNotSupportedException e)` — 415 / `UNSUPPORTED_MEDIA_TYPE` |
 | 회귀 테스트 | `AdminAccountRepairRunnerTest` — 계좌 누락 관리자 복구 및 대상 없을 때 미생성 검증 |
+
+### 8-32. 메인 화면 실시간 갱신 (2026-10-13 — fix/overall-improvements)
+
+| 항목 | 이름 |
+|---|---|
+| Service | `MarketOverviewBroadcastService`(domain/stock/service) — `broadcast()`(`@Scheduled(fixedRate = 1000, scheduler = "marketDataScheduler")`, 정규장·마감 후 60초에만), `sendIfChanged(String topic, List<?> payload)`(지난번 JSON과 같으면 생략) |
+| 상수 | `INDEX_TOPIC`(`/topic/market/indexes`), `RANKING_TOPIC_PREFIX`(`/topic/market/rankings/`), `RANKING_SORTS`(volume·value·rise·fall·market-cap), `RANKING_EVERY_TICKS`(2 — 순위는 2초마다) |
+| 내용 | 지수 = `MarketQueryService.getIndexes()`(`List<IndustryPriceDto>`), 순위 = `getRankings(sort, true)`(`List<RankingItemDto>`, 등록 종목 전체) — REST와 같은 DTO |
+| 비회원 | `StompAuthInterceptor.PUBLIC_MARKET_TOPIC_PATTERN`으로 구독 허용 |
+
+### 8-33. 주문내역 나눠 받기 (2026-10-13 — fix/overall-improvements)
+
+| 항목 | 이름 |
+|---|---|
+| 엔드포인트 | `GET /api/orders?accountId=&page=&size=` — `page`가 없으면 예전처럼 전체 목록(`List<OrderHistoryResponse>`), 있으면 `OrderHistoryPageResponse` |
+| Response DTO | `OrderHistoryPageResponse(List<OrderHistoryResponse> orders, int page, int size, boolean hasNext)` — `from(Slice<Order>)` |
+| Service | `OrderService.getMyOrderHistoryPage(Long userId, Long accountId, int page, Integer size)`, 상수 `ORDER_HISTORY_DEFAULT_SIZE`(20), `ORDER_HISTORY_MAX_SIZE`(100) — 범위 밖은 `INVALID_INPUT` |
+| Repository | `OrderRepository.findSliceByAccountId(Long accountId, Pageable pageable)` — 주문 시각 → 주문번호 내림차순, `idx_account_order` 사용, count 쿼리 없음(Slice) |
+

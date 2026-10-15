@@ -96,7 +96,7 @@ public class AdminUserService {
     private final NewsBriefingSettingRepository newsBriefingSettingRepository;
     private final AuditLogRepository auditLogRepository;
 
-    // 회원 검색·필터(ADMIN_API_BACKEND_HANDOFF.md 3.2). query/status/role이 전부 비어 있으면
+    // 회원 검색·필터(관리자 API — 회원 검색·필터·정렬). query/status/role이 전부 비어 있으면
     // 기존 findAllByIsActiveTrue(pageable)와 동일하게 전체 목록을 반환한다 — searchUsers()가
     // null 파라미터를 "조건 없음"으로 처리하므로 별도 분기가 필요 없다. 탈퇴(deactivate)한
     // 유저는 searchUsers() 쿼리 자체가 isActive=true로 걸러 목록에서 제외한다.
@@ -105,13 +105,13 @@ public class AdminUserService {
         return userRepository.searchUsers(search.query(), search.pattern(), search.queryId(), search.field(), search.exact(), status, role, pageable).map(AdminUserListResponse::from);
     }
 
-    // 빈 문자열은 "조건 없음"으로 취급한다(3.2 요구사항) — searchUsers()의 "query is null" 분기를
+    // 빈 문자열은 "조건 없음"으로 취급한다(관리자 API — 회원 검색·필터·정렬 요구사항) — searchUsers()의 "query is null" 분기를
     // 그대로 타게 하기 위해 컨트롤러에서 넘어온 빈 문자열을 여기서 null로 정규화한다.
 
     private static final List<String> USER_CSV_HEADERS = List.of("회원번호", "아이디", "이름", "이메일", "역할", "상태", "가입일");
 
     /**
-     * 회원 목록 CSV 내보내기(ADMIN_API_BACKEND_HANDOFF.md 6.2). 화면과 동일한 검색·필터 조건을
+     * 회원 목록 CSV 내보내기(관리자 API — CSV 내보내기). 화면과 동일한 검색·필터 조건을
      * 그대로 받아 searchUsers()에 넘기되, 전역 설정(application.yml의
      * spring.data.web.pageable.max-page-size=100)에 걸리지 않도록 요청 파라미터로 만들어진
      * Pageable이 아니라 이 메서드 안에서 직접 만든 "충분히 큰" PageRequest를 쓴다 — 그 설정은
@@ -143,7 +143,7 @@ public class AdminUserService {
     }
 
     /**
-     * 관리자 신규 생성(ADMIN_API_BACKEND_HANDOFF.md 5.1, "구현 전 결정이 필요한 정책" 6번 —
+     * 관리자 신규 생성(관리자 API — 관리자 계정 관리, 당시 미확정 정책인 관리자 생성 방식 —
      * 정책 확정 전 "별도 생성 방식"으로 우선 구현). AuthService.signup()과 동일한 패턴으로
      * 중복 아이디/이메일을 먼저 걸러내고, save() 시점에 동시 가입 경합으로 UNIQUE 제약을
      * 위반하면 같은 트랜잭션에서 재조회해 원인을 가려 DUPLICATE_*로 변환한다.
@@ -182,7 +182,7 @@ public class AdminUserService {
         return AdminUserListResponse.from(admin);
     }
 
-    // 탈퇴 회원 조회(ADMIN_API_BACKEND_HANDOFF.md 5.4 옵션2). 정책이 아직 팀에서 확정되지 않아
+    // 탈퇴 회원 조회(관리자 API — 탈퇴 회원 조회 — 익명화된 탈퇴 이력만 별도 조회하는 방식). 정책이 아직 팀에서 확정되지 않아
     // 잠정적으로 만들어둔 API — 최종 정책이 다르게 정해지면(예: 완전 제외) 이 메서드와
     // AdminUserController의 대응 엔드포인트를 함께 제거하면 된다.
     @Transactional(readOnly = true)
@@ -190,7 +190,7 @@ public class AdminUserService {
         return userRepository.findAllByIsActiveFalse(pageable).map(AdminWithdrawnUserResponse::from);
     }
 
-    // 관리자 계정 관리(ADMIN_API_BACKEND_HANDOFF.md 5.1) — GET /api/admin/admins/{adminId}용.
+    // 관리자 계정 관리(관리자 API — 관리자 계정 관리) — GET /api/admin/admins/{adminId}용.
     // getUserDetail()과 조회 로직 자체는 같지만, "관리자 전용 목록에서 이 id를 찾을 수 없음"이
     // 정확한 의미가 되도록 role이 ADMIN이 아니면 일반 유저 상세와 구분 없이 USER_NOT_FOUND로
     // 막는다 — 예를 들어 일반 회원의 userId를 이 경로로 넣었을 때 상세가 그대로 보이면
@@ -205,7 +205,7 @@ public class AdminUserService {
     }
 
     /**
-     * 관리자 계정 관리(5.1) — PATCH /api/admin/admins/{adminId}/status용. getAdminDetail()과
+     * 관리자 계정 관리(관리자 API — 관리자 계정 관리) — PATCH /api/admin/admins/{adminId}/status용. getAdminDetail()과
      * 동일하게 role이 ADMIN이 아니면 USER_NOT_FOUND로 막은 뒤 updateUserStatus()에 위임한다
      * (코드리뷰 반영, 2026-09) — updateUserStatus() 자체는 역할과 무관하게 모든 유저를 대상으로
      * 하므로(PATCH /api/admin/users/{userId}/status가 의도적으로 그렇게 동작함), 이 메서드가

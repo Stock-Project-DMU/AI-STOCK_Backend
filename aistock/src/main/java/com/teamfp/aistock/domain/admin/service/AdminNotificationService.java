@@ -30,7 +30,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 관리자 — 사용자 알림 발송(ADMIN_API_BACKEND_HANDOFF.md 4.4). admin 도메인은 자체
+ * 관리자 — 사용자 알림 발송(관리자 API — 관리자 알림 발송). admin 도메인은 자체
  * Entity/Repository를 두지 않고 notification 도메인의 NotificationService.notify()를 그대로
  * 재사용한다(CLAUDE.md 4번) — DB 저장 + 커밋 후 STOMP 유니캐스팅까지 이미 처리해주므로
  * 알림 저장 로직을 여기서 중복 구현하지 않는다.
@@ -66,7 +66,7 @@ public class AdminNotificationService {
 
     /**
      * 전체 발송(탈퇴하지 않은 회원 전체, 검색·제외 없음). NotificationService가 유저 1명당 DB insert 1건 +
-     * 커밋 후 STOMP 유니캐스팅 1건을 처리하므로, 대상자 수만큼 순차 반복 호출한다. handoff 문서 4.4는
+     * 커밋 후 STOMP 유니캐스팅 1건을 처리하므로, 대상자 수만큼 순차 반복 호출한다. 당시 관리자 API 요청서는
      * "대량 insert·비동기 처리 여부를 검토"하라고 남겨뒀지만, 이 서비스의 활성 유저 규모(모의투자
      * 학습 서비스, 수백~수천 단위)에서는 순차 처리로도 충분하다고 판단해 별도 배치/비동기
      * 처리는 넣지 않았다 — 이후 유저 규모가 실제로 커지면 그때 배치 insert로 전환한다.

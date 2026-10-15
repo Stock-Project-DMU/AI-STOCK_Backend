@@ -27,7 +27,7 @@ import lombok.NoArgsConstructor;
 
 /**
  * 계좌 자동 충전(최대 3회) 한도를 초과한 사용자가 관리자에게 추가 충전을 요청하는 테이블
- * (ADMIN_API_BACKEND_HANDOFF.md 4.2, feature/admin-api-p0 — 새 테이블 3개 중 하나, 2026-09-07
+ * (관리자 API — 추가 충전 요청·승인, feature/admin-api-p0 — 새 테이블 3개 중 하나, 2026-09-07
  * 사용자 승인으로 신규 생성). 승인·거절은 한 번만 가능하다(handoff 요구사항) — `decide()`가
  * PENDING이 아니면 스스로 막지 않고, 호출부(AdminChargeRequestService)가 비관적 락으로 조회한
  * 뒤 상태를 먼저 확인해 `CHARGE_REQUEST_ALREADY_PROCESSED`를 던진다(Order.cancel()과 동일한

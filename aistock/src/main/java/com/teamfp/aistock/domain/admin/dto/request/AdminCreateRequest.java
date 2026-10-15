@@ -8,7 +8,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 /**
- * 관리자 신규 생성 요청 DTO(ADMIN_API_BACKEND_HANDOFF.md 5.1). "구현 전 결정이 필요한 정책" 6번
+ * 관리자 신규 생성 요청 DTO(관리자 API — 관리자 계정 관리). 당시 미확정 정책인 관리자 생성 방식
  * (기존 회원 승격 방식 vs 별도 생성 방식)이 아직 팀 확정 전이라, 우선 "별도 생성 방식"(문서가
  * 제시한 요청 예시 그대로)으로 구현해뒀다 — 승격 방식으로 정책이 정해지면 이 API 자체를
  * 제거하고 기존 `PATCH /api/admin/users/{userId}/status`류로 역할만 바꾸는 방향으로 대체해야 한다.

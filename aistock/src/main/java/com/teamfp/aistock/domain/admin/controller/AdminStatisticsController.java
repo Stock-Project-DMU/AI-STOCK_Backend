@@ -19,7 +19,7 @@ import com.teamfp.aistock.global.response.ApiResponse;
 import lombok.RequiredArgsConstructor;
 
 /**
- * 관리자 — 기간별 통계 API(ADMIN_API_BACKEND_HANDOFF.md 6.1). from/to는 날짜(자정 기준)로 받아
+ * 관리자 — 기간별 통계 API(관리자 API — 기간별 통계). from/to는 날짜(자정 기준)로 받아
  * from은 00:00:00, to는 23:59:59.999999999까지 포함하도록 하루 끝 시각으로 넓혀 서비스에 넘긴다
  * — 사용자가 "8/31까지"라고 요청했을 때 8/31 하루 전체가 빠짐없이 포함되어야 하기 때문이다.
  * SecurityConfig에서 "/api/admin/**"는 hasRole("ADMIN")로 이미 제한되어 있어 여기서는 별도의

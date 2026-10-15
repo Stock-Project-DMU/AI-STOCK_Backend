@@ -33,6 +33,15 @@ class UserWithdrawalIntegrationTest {
         long beforeAccounts = accounts.count();
         accountService.createAccount(user.getUserId(), new CreateAccountRequest("롤백 테스트 계좌"));
         goals.saveAndFlush(GoalPlan.from(user.getUserId(), new GoalPlanRequest("house", 100_000, 5, 0, false)));
+        // 배당 권리는 account_id에 FK가 없어 계좌를 지워도 남던 데이터 — 탈퇴 때 함께 지워져야 한다(2026-10-13).
+        Long accountId = accounts.findAllByUserIdForUpdate(user.getUserId()).get(0).getAccountId();
+        entityManager.createNativeQuery("insert into dividend_schedules (stock_code, fiscal_year, period, created_at, updated_at)"
+                        + " values ('999999', '2099', 'Q4', now(), now())")
+                .executeUpdate();
+        Object scheduleId = entityManager.createNativeQuery("select last_insert_id()").getSingleResult();
+        entityManager.createNativeQuery("insert into dividend_entitlements (account_id, dividend_schedule_id, stock_code, quantity, dps_cash,"
+                        + " total_amount, status, ex_dividend_date, created_at) values (:accountId, :scheduleId, '999999', 1, 100, 100, 'PENDING', '2099-12-30', now())")
+                .setParameter("accountId", accountId).setParameter("scheduleId", scheduleId).executeUpdate();
         withdrawal.withdraw(user.getUserId(), new UserWithdrawalRequest("testpass123", null));
         entityManager.clear();
         var deactivated = users.findById(user.getUserId()).orElseThrow();
@@ -42,5 +51,7 @@ class UserWithdrawalIntegrationTest {
         assertThat(deactivated.getEmail()).isNull();
         assertThat(accounts.count()).isEqualTo(beforeAccounts);
         assertThat(goals.findTop100ByUserIdOrderByCreatedAtDesc(user.getUserId())).isEmpty();
+        assertThat(((Number) entityManager.createNativeQuery("select count(*) from dividend_entitlements where account_id = :accountId")
+                .setParameter("accountId", accountId).getSingleResult()).longValue()).isZero();
     }
 }

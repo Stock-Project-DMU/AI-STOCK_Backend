@@ -21,7 +21,7 @@ import com.teamfp.aistock.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 
 /**
- * 관리자 작업 감사 로그 기록·조회(ADMIN_API_BACKEND_HANDOFF.md 5.2). AuditLog 클래스 Javadoc의
+ * 관리자 작업 감사 로그 기록·조회(관리자 API — 관리자 작업 감사 로그). AuditLog 클래스 Javadoc의
  * "admin 도메인 원칙 예외" 참고 — 다른 도메인 서비스(order 등)가 이 서비스를 직접 호출한다.
  *
  * action/targetType 상수는 이 클래스에 모아둔다 — 호출부마다 문자열을 따로 적으면 오타로

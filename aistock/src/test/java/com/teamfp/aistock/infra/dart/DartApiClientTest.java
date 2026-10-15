@@ -909,6 +909,29 @@ class DartApiClientTest {
     }
 
     @Test
+    @DisplayName("고유번호 목록 대신 오류 응답(잘못된 키 등)이 오면 캐시하지 않고 DART 장애로 알리며, 대기 시간이 지나면 다시 받는다")
+    void resolveCorpCodeByStockCode_errorResponseIsNotCached() throws IOException {
+        mockServer.expect(requestTo(Matchers.startsWith(CORP_CODE_URL)))
+                .andRespond(withSuccess("{\"status\":\"010\",\"message\":\"등록되지 않은 키입니다.\"}", MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> dartApiClient.resolveCorpCodeByStockCode("005930"))
+                .isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException) e).getErrorCode())
+                .isEqualTo(ErrorCode.EXTERNAL_API_ERROR);
+        // 대기 시간 안에는 다시 내려받지 않는다(요청마다 DART를 부르지 않음 — 추가 expect가 없으니 다운로드하면 실패한다).
+        assertThatThrownBy(() -> dartApiClient.resolveCorpCodeByStockCode("005930")).isInstanceOf(CustomException.class);
+        mockServer.verify();
+
+        // 대기 시간이 지나면(복구) 서버 재시작 없이 다시 받아 정상 동작한다.
+        mockServer.reset();
+        mockServer.expect(requestTo(Matchers.startsWith(CORP_CODE_URL)))
+                .andRespond(withSuccess(sampleCorpCodeZip(), MediaType.APPLICATION_OCTET_STREAM));
+        ReflectionTestUtils.setField(dartApiClient, "corpCodeRetryAfterMillis", 0L);
+        assertThat(dartApiClient.resolveCorpCodeByStockCode("005930")).contains(CORP_CODE);
+        mockServer.verify();
+    }
+
+    @Test
     @DisplayName("DART 종목코드로 회사를 찾고, 등록되지 않은 우선주는 보통주 회사 코드로 연결한다")
     void resolveCorpCodeByStockCode_handlesPreferredStock() throws IOException {
         mockServer.expect(requestTo(Matchers.startsWith(CORP_CODE_URL)))

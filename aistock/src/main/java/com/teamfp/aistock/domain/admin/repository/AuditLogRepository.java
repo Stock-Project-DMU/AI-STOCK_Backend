@@ -14,7 +14,7 @@ import com.teamfp.aistock.domain.admin.entity.AuditLog;
 
 public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
 
-    // 관리자 작업 감사 로그 검색·목록(ADMIN_API_BACKEND_HANDOFF.md 5.2). action/adminId/
+    // 관리자 작업 감사 로그 검색·목록(관리자 API — 관리자 작업 감사 로그). action/adminId/
     // targetType/targetId/from~to 전부 선택 필터다 — UserRepository.searchUsers() 등과 동일한
     // "null이면 조건 없음" 패턴.
     @Query(value = "select a from AuditLog a where "

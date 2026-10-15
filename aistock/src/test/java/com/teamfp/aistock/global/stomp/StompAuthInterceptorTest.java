@@ -161,7 +161,8 @@ class StompAuthInterceptorTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"/topic/stock/005930", "/topic/stock/005930/hoga"})
+    @ValueSource(strings = {"/topic/stock/005930", "/topic/stock/005930/hoga", "/topic/market/indexes", "/topic/market/rankings/volume",
+            "/topic/market/rankings/market-cap"})
     @DisplayName("SUBSCRIBE — 비회원도 종목 현재가·호가 토픽은 구독할 수 있다")
     void subscribe_anonymous_publicStockTopic_allowed(String destination) {
         Message<byte[]> message = subscribeMessage(destination, null);
@@ -170,7 +171,8 @@ class StompAuthInterceptorTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"/user/queue", "/queue/notifications", "/topic/stock/005930/orders", "/topic/stock/", "/topic/admin"})
+    @ValueSource(strings = {"/user/queue", "/queue/notifications", "/topic/stock/005930/orders", "/topic/stock/", "/topic/admin",
+            "/topic/market/", "/topic/market/rankings/", "/topic/market/indexes/extra"})
     @DisplayName("SUBSCRIBE — 비회원이 공개 토픽 외 목적지를 구독하면 ACCESS_DENIED 예외를 던진다")
     void subscribe_anonymous_privateDestination_denied(String destination) {
         assertThatThrownBy(() -> stompAuthInterceptor.preSend(subscribeMessage(destination, null), null))

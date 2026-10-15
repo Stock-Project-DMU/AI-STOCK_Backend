@@ -62,7 +62,7 @@ public class AdminUserController {
                 AdminSortSupport.users(pageable, sortBy, sortColumn, direction)));
     }
 
-    // 화면과 동일한 검색·필터 조건(query/status/role)을 그대로 받는다(6.2 요구사항). sort는
+    // 화면과 동일한 검색·필터 조건(query/status/role)을 그대로 받는다(관리자 API — CSV 내보내기 요구사항). sort는
     // 목록 API와 동일하게 createdAt 내림차순 기본값을 쓴다.
     @GetMapping("/export")
     public ResponseEntity<byte[]> exportUsers(

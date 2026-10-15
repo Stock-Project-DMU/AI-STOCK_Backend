@@ -24,7 +24,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
- * 계좌 잔고 변동 원장(ADMIN_API_BACKEND_HANDOFF.md 4.3, feature/admin-api-p0 — 새 테이블 3개 중
+ * 계좌 잔고 변동 원장(관리자 API — 충전·잔액 변동 원장, feature/admin-api-p0 — 새 테이블 3개 중
  * 하나, 2026-09-07 사용자 승인으로 신규 생성). 문서 권장대로 append-only다 — 수정·삭제 메서드를
  * 두지 않는다. 한 행은 "그 순간 balance가 amount만큼 바뀌어 balanceBefore에서 balanceAfter가
  * 됐다"는 사실만 기록한다.

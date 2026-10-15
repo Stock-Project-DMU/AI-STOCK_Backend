@@ -4,7 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
- * 관리자 CSV 내보내기(ADMIN_API_BACKEND_HANDOFF.md 6.2)용 최소 CSV 작성 유틸. 값에 쉼표/큰따옴표/
+ * 관리자 CSV 내보내기(관리자 API — CSV 내보내기)용 최소 CSV 작성 유틸. 값에 쉼표/큰따옴표/
  * 줄바꿈이 섞여 있으면 큰따옴표로 감싸고 내부 큰따옴표는 두 번 반복해 이스케이프한다(RFC 4180).
  * 엑셀에서 한글이 깨지지 않도록 UTF-8 BOM을 파일 맨 앞에 붙인다.
  *

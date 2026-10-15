@@ -7,7 +7,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 /**
- * 관리자 충전 요청 승인·거절 요청 DTO(ADMIN_API_BACKEND_HANDOFF.md 4.2). decision은 APPROVED
+ * 관리자 충전 요청 승인·거절 요청 DTO(관리자 API — 추가 충전 요청·승인). decision은 APPROVED
  * 또는 REJECTED만 허용한다 — PENDING을 다시 보내는 것은 의미가 없어 서비스 레이어에서 막는다.
  */
 public record AdminChargeDecisionRequest(
