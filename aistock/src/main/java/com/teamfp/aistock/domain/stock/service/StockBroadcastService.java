@@ -140,9 +140,7 @@ public class StockBroadcastService implements MarketDataListener {
         }
         pendingHogas.computeIfPresent(stockCode, (code, pending) -> pending.receivedAt() <= receivedAt ? null : pending);
 
-        HogaDto dto = toHogaDto(hogaData);
-        redisStockCacheService.saveHogaData(stockCode, dto);
-        broadcastHoga(stockCode, dto);
+        broadcastHoga(stockCode, toHogaDto(hogaData));
     }
 
     // 보내려는 값이 마지막에 보낸 값보다 늦게 받은 것일 때만 true — 같은 종목 안에서 보내는 순서가 받은 순서를 거스르지 않게 한다.

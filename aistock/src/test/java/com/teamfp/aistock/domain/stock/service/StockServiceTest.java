@@ -127,7 +127,7 @@ class StockServiceTest {
                     .extracting(e -> ((CustomException) e).getErrorCode())
                     .isEqualTo(ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
 
-            verify(redisStockCacheService, never()).getHogaData(STOCK_CODE);
+            verifyNoInteractions(redisStockCacheService);
         }
     }
 }

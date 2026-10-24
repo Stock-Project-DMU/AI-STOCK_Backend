@@ -234,7 +234,6 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
 | `auth:login_fail:{loginId}` | 10분 | 로그인 실패 카운터 (5회 잠금) |
 | `auth:admin_code_fail:{initial \| user:{userId}}` | 10분 | 관리자 인증 코드 틀린 횟수 (3회 잠금 — 최초 관리자 생성은 `initial` 하나로 합쳐서, 관리자 계정 폐기는 계정별. feat/admin-improvements, 2026-10-06) |
 | `stock:price:{stockCode}` | 5초 | 현재가 캐시 |
-| `stock:hoga:{stockCode}` | 2초 | 호가 캐시 |
 | `pending:orders:{stockCode}` | 없음 | 지정가 미체결 주문 |
 | `gemini:rate:{userId}:minute` | 1분 | Gemini Rate Limiter (분당 3회) — SimulationService만 사용, AI 재무설계사는 2026-09-21부터 미적용 |
 | `gemini:rate:{userId}:daily` | 1일 | Gemini Rate Limiter (일일 10회) — SimulationService만 사용, AI 재무설계사는 2026-09-21부터 미적용 |

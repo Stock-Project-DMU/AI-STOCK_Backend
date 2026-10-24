@@ -24,8 +24,7 @@ import lombok.RequiredArgsConstructor;
 /**
  * 종목 시세 — 현재가(+PER/PBR/52주 최고·최저 등), 차트·기간별 시세, 여러 종목 현재가, 관리·투자경고 여부, 피봇 지지·저항선,
  * 동시호가 예상체결가. 모두 {@link LocalMarketDataReader}(local-market-data-generator의 market_data.json·price_history.json)로
- * 응답한다(fix/local-market-data-stable — 이전 real 모드에서는 외부 시세 데이터 t1102/t1305/t8407/t1404/t1405/t1105/t1486을
- * 호출했다). 데이터가 없으면 빈 값이다.
+ * 응답한다. 데이터가 없으면 빈 값이다.
  */
 @Component
 @RequiredArgsConstructor

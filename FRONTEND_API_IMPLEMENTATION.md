@@ -153,8 +153,7 @@ npm run dev
 
 | 기능 | 필요한 설정 | 현재 검증 상태 |
 | --- | --- | --- |
-| 외부 시세 데이터 시세·차트·환율 | MARKET_DATA_APP_KEY, MARKET_DATA_APP_SECRET | 미설정 안내 HTTP 503 확인 |
-| 외부 시세 데이터 실시간 | 위 키 + MARKET_DATA_MODE=real, 계정에 맞는 MARKET_DATA_WEBSOCKET_URL | 기본 mock 모드는 실제 스트림을 생성하지 않음. 실체결 수신 검증 미완료 |
+| 시세·차트·환율·실시간 | MARKET_DATA_PATH(로컬) 또는 MARKET_DATA_URL(배포), MARKET_DATA_STREAM_URL(선택) — local-market-data-generator 출력 | 백엔드는 외부 시세 API를 직접 호출하지 않음. 생성기 미실행 시 시세 없음(STOCK_PRICE_NOT_AVAILABLE) |
 | DART 재무·종목명 검색 | DART_API_KEY | 실제 제공자 응답 검증 미완료 |
 | Naver 뉴스 | NAVER_CLIENT_ID, NAVER_CLIENT_SECRET, 필요 시 NAVER_NEWS_API_URL | 현재 호출 HTTP 502. 키·상품 권한·엔드포인트 확인 필요 |
 | Gemini 상담·브리핑 생성 | GEMINI_API_KEY 및 사용 가능한 모델 URL | 실제 생성 답변 검증 미완료 |

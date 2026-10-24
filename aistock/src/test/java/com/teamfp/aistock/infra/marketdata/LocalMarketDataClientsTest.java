@@ -21,7 +21,7 @@ import com.teamfp.aistock.infra.marketdata.dto.RankingItemDto;
 import com.teamfp.aistock.infra.marketdata.dto.ThemeConstituentDto;
 
 /**
- * real 모드에서만 동작하던 시세 부가 데이터 클라이언트들이 local-market-data-generator의 market_data.json(종목 부가 데이터 +
+ * 시세 부가 데이터 클라이언트들이 local-market-data-generator의 market_data.json(종목 부가 데이터 +
  * "_market")만으로 응답하는지 확인한다(fix/local-market-data-stable). 생성기 출력과 같은 구조의 파일을 임시 디렉토리에 두고
  * 실제 LocalMarketDataReader를 거친다.
  */

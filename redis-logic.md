@@ -67,7 +67,6 @@
 
 > `auth:admin_code_fail:*`(RedisAuthCodeService `incrementAdminCodeFail`/`isAdminCodeLocked`/`resetAdminCodeFail`): 첫 실패 때 TTL 10분, 3번째 실패 때 TTL을 다시 10분으로 늘려 그때부터 10분 잠근다. 맞히면 삭제한다. 최초 관리자 생성은 로그인 전 요청인데 서버가 프록시 뒤에서 실제 IP를 알 수 없어, IP 대신 `initial` 하나로 합쳐서 센다.
 | `stock:price:{stockCode}` | 5초 | 실시간 주가 캐시 |
-| `stock:hoga:{stockCode}` | 2초 | 호가창 데이터 캐시 |
 | `pending:orders:{stockCode}` | 없음 | 지정가 미체결 주문 목록 |
 | `gemini:rate:{userId}:minute` | 1분 | Gemini API 호출 횟수 (분당 3회 제한) |
 | `gemini:rate:{userId}:daily` | 1일 | Gemini API 호출 횟수 (일일 10회 제한) |
@@ -255,7 +254,7 @@ public class RedisAuthCodeService {
 
 ---
 
-## 4. RedisStockCacheService — 실시간 주가/호가 캐시
+## 4. RedisStockCacheService — 실시간 주가 캐시
 
 Spring Boot 4/Jackson 3 기준 `tools.jackson.core.JacksonException`(unchecked)을 그대로 노출하면, CLAUDE.md의 "예외는 던지고 GlobalExceptionHandler가 처리" 원칙(`CustomException` + `ErrorCode` 체계)과 어긋난다.
 
@@ -272,10 +271,8 @@ public class RedisStockCacheService {
     private final ObjectMapper objectMapper;
 
     private static final String STOCK_PRICE_KEY = "stock:price:";
-    private static final String STOCK_HOGA_KEY  = "stock:hoga:";
 
     private static final long PRICE_TTL_SECONDS = 5;  // 주가 5초
-    private static final long HOGA_TTL_SECONDS  = 2;  // 호가 2초 (더 빠른 변동)
 
     // 실시간 주가 저장 (외부 시세 데이터 제공사 WebSocket tick 수신 시 호출)
     public void saveStockPrice(String stockCode, StockPriceDto dto) {
@@ -301,29 +298,6 @@ public class RedisStockCacheService {
         }
     }
 
-    // 호가창 데이터 저장
-    public void saveHogaData(String stockCode, HogaDto dto) {
-        try {
-            redisTemplate.opsForValue().set(
-                STOCK_HOGA_KEY + stockCode,
-                objectMapper.writeValueAsString(dto),
-                Duration.ofSeconds(HOGA_TTL_SECONDS)
-            );
-        } catch (JacksonException e) {
-            throw new CustomException(ErrorCode.REDIS_SERIALIZATION_ERROR, e);
-        }
-    }
-
-    // 호가창 데이터 조회
-    public HogaDto getHogaData(String stockCode) {
-        String json = redisTemplate.opsForValue().get(STOCK_HOGA_KEY + stockCode);
-        if (json == null) return null;
-        try {
-            return objectMapper.readValue(json, HogaDto.class);
-        } catch (JacksonException e) {
-            throw new CustomException(ErrorCode.REDIS_SERIALIZATION_ERROR, e);
-        }
-    }
 }
 ```
 

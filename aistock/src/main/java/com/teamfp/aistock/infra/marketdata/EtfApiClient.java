@@ -11,8 +11,7 @@ import com.teamfp.aistock.infra.marketdata.dto.EtfConstituentDto;
 import lombok.RequiredArgsConstructor;
 
 /**
- * ETF 현재가와 구성 종목(AI 재무설계사 상담 도구). local-market-data-generator가 market_data.json에 담는 값을 읽는다
- * (fix/local-market-data-stable — 이전 real 모드에서는 외부 시세 데이터 t1901/t1904를 호출했다).
+ * ETF 현재가와 구성 종목(AI 재무설계사 상담 도구). local-market-data-generator가 market_data.json에 담는 값을 읽는다.
  */
 @Component
 @RequiredArgsConstructor

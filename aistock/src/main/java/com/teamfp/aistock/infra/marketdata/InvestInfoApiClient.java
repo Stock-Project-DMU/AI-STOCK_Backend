@@ -23,8 +23,7 @@ import lombok.RequiredArgsConstructor;
 /**
  * 투자정보 — 애널리스트 투자의견, 주주총회 일정, 재무순위, 해외지수·환율, 증시 주변 자금(종목 리서치 애널리스트 탭·홈 환율·
  * AI 재무설계사 상담 도구). local-market-data-generator가 종목 객체의 {@code opinions}·{@code shareholderMeetings}와
- * {@code _market.financialRanking}·{@code _market.overseasIndexes}·{@code _market.marketLiquidity}에 담는 모의 값을 읽는다
- * (fix/local-market-data-stable — 이전 real 모드에서는 외부 시세 데이터 t3401/t3202/t3341/t3521/t8428을 호출했다).
+ * {@code _market.financialRanking}·{@code _market.overseasIndexes}·{@code _market.marketLiquidity}에 담는 모의 값을 읽는다.
  * 투자의견만 예외로, 생성기의 opinion_collector.py가 LS증권 t3401에서 받아 둔 스냅샷이 있으면 실제 값이다
  * ({@link #getInvestmentOpinionCollectedAt(String)}, fix/stock-detail-review). 나머지는 모두 실제 데이터가 아니다.
  */

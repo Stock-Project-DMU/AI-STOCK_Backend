@@ -312,10 +312,9 @@ AWS Parameter Store에서 민감한 설정값(JWT_SECRET, DB 자격증명, `ADMI
 
 ## 6. feature/ls-websocket (실시간 시세)
 
-> **fix/local-market-data-stable(2026-10-06)에서 외부 시세 데이터 제공사 실시간 WebSocket(real 모드)을 제거했다** —
-> `MarketDataWebSocketClient`/`MarketDataWebSocketHandler`/`MarketDataReconnectService`/`MarketDataStartupService`/
-> `MarketDataAuthenticationException`/`MarketDataTokenResponse`는 삭제됐다. 실시간 tick·호가는 `MockMarketDataGenerator`
-> (domain/stock/service)가 local-market-data-generator의 market_data.json을 5초마다 읽어 아래 리스너로 전달한다.
+> 백엔드는 외부 시세 데이터 제공사에 직접 연결하지 않는다. 실시간 tick·호가는 `MockMarketDataGenerator`(domain/stock/service)가
+> local-market-data-generator의 market_data.json을 1초(`market-data.poll-interval-millis`)마다 읽거나
+> `MarketDataStreamSubscriber`가 생성기 `GET /stream`(SSE)으로 받아 아래 리스너로 전달한다.
 
 | 클래스 | 주요 메서드 |
 |---|---|
@@ -333,7 +332,7 @@ redis-logic.md(수정본) 기준 확정된 이름 그대로 사용:
 |---|---|
 | `RedisTokenService` | `saveRefreshToken`, `getRefreshToken`, `isRefreshTokenValid`, `deleteRefreshToken`, `blacklistAccessToken`, `isBlacklisted` |
 | `RedisAuthCodeService` | `saveEmailCode`, `verifyAndDeleteEmailCode`, `markEmailVerified`(v8 추가), `consumeEmailVerified`(v8 추가), `incrementLoginFail`, `isLoginLocked`, `resetLoginFail` |
-| `RedisStockCacheService` | `saveStockPrice`, `getStockPrice`, `saveHogaData`, `getHogaData`, `getStockPrices(Collection<String> stockCodes)`(feature/mypage-profit 코드리뷰 반영 — Redis MGET으로 여러 종목 시세를 한 번에 배치 조회. 종목마다 `getStockPrice()`를 순차 호출하면 보유종목이 N개일 때 N번 왕복이 생기는 문제를 막기 위함. 캐시 미스 종목은 반환 `Map`에서 키 자체가 빠짐) |
+| `RedisStockCacheService` | `saveStockPrice`, `getStockPrice`, `getStockPrices(Collection<String> stockCodes)`(feature/mypage-profit 코드리뷰 반영 — Redis MGET으로 여러 종목 시세를 한 번에 배치 조회. 종목마다 `getStockPrice()`를 순차 호출하면 보유종목이 N개일 때 N번 왕복이 생기는 문제를 막기 위함. 캐시 미스 종목은 반환 `Map`에서 키 자체가 빠짐) |
 | `RedisPendingOrderService` | `initPendingOrders`, `addPendingOrder`, `getPendingOrders`, `removePendingOrder`(fix/realtime-trade-fix부터 실제 제거 여부를 `boolean`으로 반환), `countPendingOrdersByStockCode`(종목코드→대기 건수, SCAN 사용 — `StockSubscriptionManager.restoreOrderSubscriptions()` 전용) |
 | `RedisRateLimiterService` | `isAllowed`, `increment`, `getRemainingDaily` — 2026-09-21부터 `SimulationService`만 사용(분당3/일일10). `AiPlanningService`(AI 재무설계사)는 사용자 요청으로 이 서비스 의존성 자체를 제거함(생성자 파라미터에서도 빠짐) |
 | `RedisOnlineStatusService` (v8 추가) | `clearOnlineStatus()`(서버 재시작 시 `@PostConstruct` 초기화, v9), `addOnline(Long userId)`, `removeOnline(Long userId)`, `countOnline()`, `isOnline(Long userId)` |
@@ -443,7 +442,7 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 | 종목명 조회 | `StockNameResolver`(domain/stock/service) — `resolveStockName(String stockCode)`. `TickData.stockName`이 항상 null로 오기 때문에, `WatchlistRepository`/`HoldingRepository`/`OrderRepository`/`RecentViewedRepository`의 `findFirstByStockCode(String stockCode)`를 순서대로 조회해 처음 찾은 이름을 반환한다(admin 도메인과 동일하게 여러 도메인의 Repository를 직접 주입받아 조합하는 예외적 컴포넌트, CLAUDE.md 4번 참고). 4개 테이블 어디에도 없으면 null을 반환하고, `StockBroadcastService`는 이 경우 `stockCode`를 이름 대신 사용한다 — 근본 해결은 하단 `> 종목명 폴백 한계` 참고 |
 | Response DTO | `StockPriceResponse`(stockCode, stockName, currentPrice, changeAmount, changeRate, direction, volume), `HogaResponse`(stockCode, askPrices, askVolumes, bidPrices, bidVolumes) — `direction`은 `PriceDirection`(0번 전역 Enum 참고), `changeAmount`는 `StockBroadcastService.toStockPriceDto()`가 계산한 부호 있는 등락 금액을 그대로 응답에 노출한 것(v14) |
 | STOMP 토픽 (v14 확정) | 가격 `/topic/stock/{stockCode}`(`StockPriceResponse`), 호가 `/topic/stock/{stockCode}/hoga`(`HogaResponse`) — REST 엔드포인트 구분(`GET /api/stocks/{stockCode}` vs `/hoga`)과 동일하게 분리, 프론트가 가격만 필요하면 호가 토픽은 구독하지 않아도 됨 |
-| 구독 관리 (v14 확정, feature/mock-broadcast에서 조회 메서드 추가) | `StockSubscriptionManager`(domain/stock/service) — `increaseWatchlistSubscription(String stockCode)`, `decreaseWatchlistSubscription(String stockCode)`, `increaseViewingSubscription(String stockCode)`, `decreaseViewingSubscription(String stockCode)`, `increaseOrderSubscription(String stockCode)`/`decreaseOrderSubscription(String stockCode)`(fix/realtime-trade-fix, 2026-09-30 — 지정가 주문 한 건당 +1/-1. 대기 리스트에 올릴 때 올리고, `removePendingOrder()`가 true를 반환할 때만 내려 카운트가 pending:orders 건수와 같게 유지됨. 상세페이지를 떠나도 미체결 주문 종목의 tick이 끊기지 않게 하기 위함), `restoreOrderSubscriptions()`(@PostConstruct — 서버 기동 시 `RedisPendingOrderService.countPendingOrdersByStockCode()` 건수만큼 주문 구독 복원. 이를 위해 `RedisPendingOrderService`도 생성자 주입받음), `getActiveSubscribedStockCodes()`(참조 카운트 > 0인 종목코드 집합 반환 — `MockMarketDataGenerator`가 폴링 대상을 정하는 데 사용). `MarketDataWebSocketClient`는 `market-data.mode=real`일 때만 빈으로 존재하므로 `Optional<MarketDataWebSocketClient>`로 생성자 주입받는다 — mock 모드(`Optional.empty()`)에서는 구독 카운터만 갱신하고 실제 `subscribe()`/`unsubscribe()` 호출은 debug 로그만 남기고 건너뛴다 |
+| 구독 관리 (v14 확정, feature/mock-broadcast에서 조회 메서드 추가) | `StockSubscriptionManager`(domain/stock/service) — `increaseWatchlistSubscription(String stockCode)`, `decreaseWatchlistSubscription(String stockCode)`, `increaseViewingSubscription(String stockCode)`, `decreaseViewingSubscription(String stockCode)`, `increaseOrderSubscription(String stockCode)`/`decreaseOrderSubscription(String stockCode)`(fix/realtime-trade-fix, 2026-09-30 — 지정가 주문 한 건당 +1/-1. 대기 리스트에 올릴 때 올리고, `removePendingOrder()`가 true를 반환할 때만 내려 카운트가 pending:orders 건수와 같게 유지됨. 상세페이지를 떠나도 미체결 주문 종목의 tick이 끊기지 않게 하기 위함), `restoreOrderSubscriptions()`(@PostConstruct — 서버 기동 시 `RedisPendingOrderService.countPendingOrdersByStockCode()` 건수만큼 주문 구독 복원. 이를 위해 `RedisPendingOrderService`도 생성자 주입받음), `getActiveSubscribedStockCodes()`(참조 카운트 > 0인 종목코드 집합 반환 — `MockMarketDataGenerator`가 폴링 대상을 정하는 데 사용). 외부 시세 실시간 구독은 없다 — 카운터만 관리하고, `MockMarketDataGenerator`가 이 카운트로 `market_data.json`에서 실시간으로 보낼 종목을 정한다 |
 | STOMP 세션 리스너 (v14 확정) | `StockViewSubscriptionListener`(global/stomp) — `handleSessionSubscribe(SessionSubscribeEvent event)`, `handleSessionUnsubscribe(SessionUnsubscribeEvent event)`, `handleSessionDisconnect(SessionDisconnectEvent event)` |
 | Mock 브로드캐스트 소스 (feature/mock-broadcast 추가) | `MockMarketDataGenerator`(domain/stock/service — `StockSubscriptionManager` 의존 때문에 infra가 아닌 domain에 위치, 아래 상세 설명 참고) — `pollAndBroadcast()`(`@Scheduled(fixedDelay = 20_000)`, 유일한 public 메서드) |
 
@@ -784,8 +783,8 @@ confirmedCurrentPrices`(`executeTool()`이 `aiToolTaskExecutor`로 동시 실행
 형식으로 코드가 직접 이어붙인다(모델이 옮겨 적은 본문 숫자와 무관하게 항상 정확). 이 두 도구는
 30분 도구 캐시 자체도 우회한다(시세는 그때그때 달라지는 값이라).
 
-**시세 클라이언트 (`infra/marketdata`, fix/local-market-data-stable에서 전면 교체)** — 외부 시세 데이터 제공사 API 직접
-호출(real 모드)을 없애고 모든 클라이언트가 `LocalMarketDataReader` 하나만 생성자로 받아 local-market-data-generator의
+**시세 클라이언트 (`infra/marketdata`, fix/local-market-data-stable에서 전면 교체)** — 외부 시세 데이터 제공사 API를 직접
+호출하지 않고 모든 클라이언트가 `LocalMarketDataReader` 하나만 생성자로 받아 local-market-data-generator의
 `market_data.json`(종목 객체 + `"_market"` 키)·`price_history.json`을 읽는다. 공개 메서드 시그니처는 이전과 같아
 `AiPlanningService`·`MarketQueryService`·`SimulationService` 등 호출부는 바뀌지 않았다. 데이터가 없으면 예외 없이 빈 값이다.
 `MarketDataApiClientSupport`·`MarketDataAccessTokenProvider`·`MarketDataQuoteCache`·`MarketDataRequestPacer`·`MarketDataMode`·
@@ -952,7 +951,7 @@ confirmedCurrentPrices`(`executeTool()`이 `aiToolTaskExecutor`로 동시 실행
 > - 성장률은 Gemini가 아니라 서버가 계산한다: 종목별 최근 3년(36개월) 월봉(`MarketQueryService.getChartHistory`,
 >   dwmcode=3, 37건) 복리 기준(기하평균) 월 수익률 × 0.7(음수면 그대로), 종목당 월 5% 상한, 예수금 0%, 비중 가중평균. 최대 30년(360개월).
 >   (2026-10-03 최종 테스트 반영: 산술평균 → 기하평균, 상한 추가 — 이전에는 SK하이닉스가 월 7.22%로 나오는 등 지나치게 낙관적이었음)
-> - 리밸런싱: 시가총액 순위 전체(`MarketQueryService.getRankings("market-cap", true)` — mock/real 모두 등록 종목 105개,
+> - 리밸런싱: 시가총액 순위 전체(`MarketQueryService.getRankings("market-cap", true)` — 등록 종목 105개,
 >   real은 2026-10-02부터 t8407 현재가 × 상장주식수 스냅샷으로 정렬. 이전에는 real만 제공사 순위 10건) + 현재 보유종목을 후보로 Gemini(ANSWER)가 종목·비중·예수금 비중을 고르고,
 >   `RebalancePlanValidator`가 검증(목록 밖 제거, 1~10종목, 종목당 5~40%, 합 100% 정규화). 위반 시 사유를 붙여 1회 재요청.
 >   시세 이력(월 수익률)이 12개월 미만인 추천 종목은 빼고 그 비중을 예수금으로 옮긴다.
@@ -1766,7 +1765,7 @@ local-market-data-generator의 `dividend_collector.py`가 만든 `dividends.json
 
 - `PlanningPreferences` / Repository / Service / Controller, `PlanningPreferencesRequest(savedBriefingDates, linkedBriefingDates, linkedGoalPlanIds, linkedSimulationIds)`: GET/PUT `/api/ai/planning/preferences`. `linkedSimulationIds`(feature/goal-simulation-v2, 2026-10-03 추가)는 목표 도달 시뮬레이션에서 저장한 `simulations` ID — `goal_plans`와 ID가 겹칠 수 있어 `linkedGoalPlanIds`와 분리했고, 두 목록을 합쳐 목표 최대 2개(전체 5개). 예전 저장값에 없으면 빈 목록. `PlanningConnectionOptionsResponse(goals, simulations, briefings)` — `SimulationOption(simulationId, goalText, targetAmount, periodMonths, rebalancedReachDate, createdAt)` 추가. `PlanningPreferencesService`는 `SimulationRepository`를 주입받아 저장한 시뮬레이션을 목록·소유권 검증·AI 상담 맥락(`describeConnections` — 목표·도달 시점·리밸런싱 구성)에 쓴다. 본인 브리핑 저장과 AI 자료 연동 설정. `getPreferences`, `savePreferences`, `describeConnections`, `updateSelections`. 사용자 소유권 검증, 목록 개수 제한, 낙관적 잠금 적용.
 
-- `MarketQueryController`, `MarketQueryService`: GET `/api/market/rankings?sort=volume|value|rise|fall|market-cap` (`rise`/`fall`은 코스피+코스닥 전체 시장 기준 상승률/하락률 상위 10, `change`는 `rise`의 호환 별칭. `all=true`(기본 false)면 mock/real 모두 상위 10건 제한 없이 등록 종목(stocks.json) 전체 105개를 반환 — 홈 주요 종목 무한 스크롤·시뮬레이션 리밸런싱 후보용. real 모드는 2026-10-02부터 등록 종목의 t8407 현재가로 정렬, 이전에는 real만 10건), GET `/api/market/stocks/{stockCode}/history?months=12`(`dwmcode`=1|2|3과 `count`(1~60, 기본 60)를 주면 months 대신 해당 봉 종류로 count건 조회 — 종목 상세 차트용, 없으면 기존 months 동작), GET `/api/market/stocks/{stockCode}/detail`, GET `/api/market/news?query=`. 기존 외부 시세 데이터/네이버 클라이언트 재사용. `getRankings(sort, isAll)`, `getHistory`, `getChartHistory(stockCode, dwmcode, count)`, `getDetail`, `getNews`.
+- `MarketQueryController`, `MarketQueryService`: GET `/api/market/rankings?sort=volume|value|rise|fall|market-cap` (`rise`/`fall`은 코스피+코스닥 전체 시장 기준 상승률/하락률 상위 10, `change`는 `rise`의 호환 별칭. `all=true`(기본 false)면 상위 10건 제한 없이 등록 종목(stocks.json) 전체 105개를 반환 — 홈 주요 종목 무한 스크롤·시뮬레이션 리밸런싱 후보용.), GET `/api/market/stocks/{stockCode}/history?months=12`(`dwmcode`=1|2|3과 `count`(1~60, 기본 60)를 주면 months 대신 해당 봉 종류로 count건 조회 — 종목 상세 차트용, 없으면 기존 months 동작), GET `/api/market/stocks/{stockCode}/detail`, GET `/api/market/news?query=`. 기존 외부 시세 데이터/네이버 클라이언트 재사용. `getRankings(sort, isAll)`, `getHistory`, `getChartHistory(stockCode, dwmcode, count)`, `getDetail`, `getNews`.
 - `AiNewsService.getBriefingHistory`, `getBriefing`, `NewsBriefingRepository.findTop100ByUserUserIdOrderByBriefingDateDesc`: GET `/api/ai/news/briefings`, GET `/api/ai/news/briefings/{date}`. 날짜별 본인 소유 브리핑만 조회.
 
 - `GoalPlan`, `GoalPlanRepository`, `GoalPlanService`, `GoalPlanController`, `GoalPlanRequest(goal, monthlyPayment, years, annualReturn, aggressive)`, `GoalPlanResponse(planId, settings, futureValue, aggressiveFutureValue, saved, createdAt)`.

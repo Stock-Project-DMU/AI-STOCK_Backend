@@ -35,8 +35,7 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * 시세 데이터의 유일한 원천 — local-market-data-generator가 갱신하는 {@code market_data.json}(또는 같은 내용을
- * 내려주는 HTTP 엔드포인트)과 과거 시세 스냅샷 {@code price_history.json}을 읽는다(fix/local-market-data-stable에서
- * 외부 시세 데이터 제공사 API 직접 호출(real 모드)을 없애면서 모든 시세 클라이언트가 이 컴포넌트만 쓰게 됐다).
+ * 내려주는 HTTP 엔드포인트)과 과거 시세 스냅샷 {@code price_history.json}을 읽는다. 모든 시세 클라이언트가 이 컴포넌트만 쓴다.
  *
  * <p>{@code market_data.json} 구조 — 종목코드를 키로 종목 객체를 담고, 시장 전체 데이터는 {@code "_market"} 키에 담는다.
  * {@code "_"}로 시작하는 키는 종목이 아니므로 종목 목록({@link #getAllCurrentPrices()})에서 뺀다.</p>

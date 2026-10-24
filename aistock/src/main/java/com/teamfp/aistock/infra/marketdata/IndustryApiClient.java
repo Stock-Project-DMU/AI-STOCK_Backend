@@ -17,7 +17,7 @@ import lombok.RequiredArgsConstructor;
 /**
  * 업종 지수(코스피/코스닥) — 현재가, 기간별 추이, 동시호가 예상지수. 지수 현재가는 market_data.json 종목들의 평균 등락률로,
  * 추이·예상지수는 local-market-data-generator가 {@code _market.industryTrend}·{@code _market.expectedIndex}에 담는 값으로
- * 응답한다(fix/local-market-data-stable — 이전 real 모드에서는 외부 시세 데이터 t1511/t1514/t1485를 호출했다).
+ * 응답한다.
  *
  * <p><b>실제 지수 값이 아니다</b> — 실제 지수는 상장 전종목 시가총액 가중평균이라 105개 종목으로는 재현할 수 없어, 대략적인
  * 최근 수준({@link #MOCK_BASE_INDEX_VALUE})을 기준으로 같은 시장 종목의 평균 등락률만큼 움직인 근사치다. 생성기의 추이도

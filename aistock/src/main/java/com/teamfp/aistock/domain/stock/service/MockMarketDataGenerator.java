@@ -22,7 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * 실시간 시세 송신기 — local-market-data-generator(별도 Python 프로젝트)가 갱신하는
  * {@code market_data.json}을 폴링해 구독 중인 종목의 tick·호가를 STOMP로 보내는 유일한 실시간 시세 소스다
- * (feature/mock-broadcast, fix/local-market-data-stable에서 외부 시세 데이터 WebSocket(real 모드)을 없앤 뒤 상시 동작).
+ * (feature/mock-broadcast, fix/local-market-data-stable 이후 상시 동작).
  *
  * <p>클래스명은 {@code infra/marketdata}의 다른 클라이언트 클래스(외부 시세 데이터 제공사 API 연동
  * 전용)들과 비슷하지만, 이 클래스 자체는 외부 시세 데이터 API를 전혀 호출하지 않고 {@link StockSubscriptionManager}

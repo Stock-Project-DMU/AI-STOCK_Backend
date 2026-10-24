@@ -32,7 +32,7 @@ admin:
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
 
-# 시세 데이터(fix/local-market-data-stable — 외부 시세 데이터 제공사 API 직접 호출(real 모드)을 없앴다).
+# 시세 데이터 — 백엔드는 외부 시세 데이터 제공사 API를 직접 호출하지 않는다.
 # 모든 시세는 local-market-data-generator(별도 Python 프로젝트)가 갱신하는 market_data.json에서 읽는다(LocalMarketDataReader).
 market-data:
   # market_data.json·price_history.json이 있는 디렉토리. 프로필별 기본값은 application-dev.yml 참고.
