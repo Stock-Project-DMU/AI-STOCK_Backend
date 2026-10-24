@@ -327,6 +327,17 @@ public class OrderService {
     }
 
     /**
+     * createLimitOrder() 커밋 뒤(즉시 체결 확인까지 끝난 뒤) 주문 상태를 다시 읽는다 — 바로 체결된
+     * 지정가 주문이 PENDING으로 응답되지 않게 OrderController가 호출한다(NAMING.md 8-34).
+     */
+    @Transactional(readOnly = true)
+    public CreateOrderResponse getCreatedOrderResult(Long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new CustomException(ErrorCode.ORDER_NOT_FOUND));
+        return CreateOrderResponse.from(order);
+    }
+
+    /**
      * 미체결(PENDING) 지정가 주문을 취소한다. 매수 주문이었다면 freezeForOrder로 묶어둔
      * frozenBalance를 balance로 되돌리고, DB 상태를 CANCELLED로 바꾼 뒤 Redis
      * pending:orders 목록에서도 제거한다.

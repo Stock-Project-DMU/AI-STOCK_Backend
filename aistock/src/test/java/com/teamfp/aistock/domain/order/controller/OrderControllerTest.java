@@ -80,12 +80,30 @@ class OrderControllerTest {
         CreateOrderRequest request = new CreateOrderRequest(ACCOUNT_ID, STOCK_CODE, OrderType.BUY, 1, PriceType.LIMIT, 70_000L);
         CreateOrderResponse response = new CreateOrderResponse(1L, STOCK_CODE, null, 1, OrderStatus.PENDING);
         when(orderService.createLimitOrder(USER_ID, request)).thenReturn(response);
+        when(orderService.getCreatedOrderResult(1L)).thenReturn(response);
 
         var result = orderController.createOrder(request);
 
         assertThat(result.getBody().getData().status()).isEqualTo(OrderStatus.PENDING);
+        assertThat(result.getBody().getMessage()).isEqualTo("지정가 주문이 등록되었습니다.");
         verify(orderService).createLimitOrder(USER_ID, request);
         verify(orderService, never()).createMarketOrder(USER_ID, request);
+    }
+
+    @Test
+    @DisplayName("지정가 주문이 접수 직후 바로 체결됐으면 다시 읽은 EXECUTED 상태와 체결 메시지로 응답한다")
+    void createOrder_limit_executedImmediately() {
+        CreateOrderRequest request = new CreateOrderRequest(ACCOUNT_ID, STOCK_CODE, OrderType.BUY, 1, PriceType.LIMIT, 70_000L);
+        when(orderService.createLimitOrder(USER_ID, request))
+                .thenReturn(new CreateOrderResponse(1L, STOCK_CODE, null, 1, OrderStatus.PENDING));
+        when(orderService.getCreatedOrderResult(1L))
+                .thenReturn(new CreateOrderResponse(1L, STOCK_CODE, 69_500L, 1, OrderStatus.EXECUTED));
+
+        var result = orderController.createOrder(request);
+
+        assertThat(result.getBody().getData().status()).isEqualTo(OrderStatus.EXECUTED);
+        assertThat(result.getBody().getData().execPrice()).isEqualTo(69_500L);
+        assertThat(result.getBody().getMessage()).isEqualTo("주문이 체결되었습니다.");
     }
 
     @Test

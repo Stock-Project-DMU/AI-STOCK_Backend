@@ -18,6 +18,7 @@ import com.teamfp.aistock.domain.order.dto.response.CreateOrderResponse;
 import com.teamfp.aistock.domain.order.dto.response.HoldingResponse;
 import com.teamfp.aistock.domain.order.dto.response.OrderHistoryPageResponse;
 import com.teamfp.aistock.domain.order.dto.response.OrderHistoryResponse;
+import com.teamfp.aistock.domain.order.entity.OrderStatus;
 import com.teamfp.aistock.domain.order.entity.PriceType;
 import com.teamfp.aistock.domain.order.service.OrderService;
 import com.teamfp.aistock.global.response.ApiResponse;
@@ -49,10 +50,14 @@ public class OrderController {
                     .body(ApiResponse.success("주문이 체결되었습니다.", response));
         }
 
-        CreateOrderResponse response = orderService.createLimitOrder(userId, request);
+        // createLimitOrder()가 돌려준 상태는 커밋 전 PENDING이다 — 커밋 직후 즉시 체결 확인까지 끝난
+        // 상태를 다시 읽어, 바로 체결된 주문을 '접수'로 안내하지 않게 한다(NAMING.md 8-34).
+        CreateOrderResponse created = orderService.createLimitOrder(userId, request);
+        CreateOrderResponse response = orderService.getCreatedOrderResult(created.orderId());
+        String message = response.status() == OrderStatus.EXECUTED ? "주문이 체결되었습니다." : "지정가 주문이 등록되었습니다.";
         return ResponseEntity
                 .status(HttpStatus.CREATED)
-                .body(ApiResponse.success("지정가 주문이 등록되었습니다.", response));
+                .body(ApiResponse.success(message, response));
     }
 
     @DeleteMapping("/{orderId}")

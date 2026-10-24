@@ -1825,3 +1825,11 @@ local-market-data-generator의 `dividend_collector.py`가 만든 `dividends.json
 | Service | `OrderService.getMyOrderHistoryPage(Long userId, Long accountId, int page, Integer size)`, 상수 `ORDER_HISTORY_DEFAULT_SIZE`(20), `ORDER_HISTORY_MAX_SIZE`(100) — 범위 밖은 `INVALID_INPUT` |
 | Repository | `OrderRepository.findSliceByAccountId(Long accountId, Pageable pageable)` — 주문 시각 → 주문번호 내림차순, `idx_account_order` 사용, count 쿼리 없음(Slice) |
 
+
+### 8-34. 즉시 체결 지정가 주문 응답·문의 글자 수 (2026-10-24 — JINWOO_TEST)
+
+| 항목 | 이름 |
+|---|---|
+| Service | `OrderService.getCreatedOrderResult(Long orderId)`(`@Transactional(readOnly = true)`) — `createLimitOrder()` 커밋 직후 즉시 체결 확인(`tryImmediateExecution`)까지 끝난 주문 상태를 다시 읽어 `CreateOrderResponse`로 돌려준다. 바로 체결된 지정가 주문이 '접수'(PENDING)로 응답되던 문제 |
+| Controller | `OrderController.createOrder()` — 지정가 응답 메시지를 상태에 맞춰 "주문이 체결되었습니다." / "지정가 주문이 등록되었습니다."로 나눈다 |
+| 상수 | `CreateInquiryRequest`: `TITLE_MAX_LENGTH`(100), `CONTENT_MAX_LENGTH`(500) / `AdminInquiryAnswerRequest.ANSWER_MAX_LENGTH`(500) — 프론트 입력 제한(제목 100·내용 500·답변 500)과 맞춤 |
