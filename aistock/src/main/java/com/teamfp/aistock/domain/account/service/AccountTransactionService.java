@@ -17,7 +17,7 @@ import com.teamfp.aistock.domain.account.repository.AccountTransactionRepository
 import lombok.RequiredArgsConstructor;
 
 /**
- * 잔고 변동 원장 기록·조회(ADMIN_API_BACKEND_HANDOFF.md 4.3). 다른 도메인 서비스(AccountService,
+ * 잔고 변동 원장 기록·조회(관리자 API — 충전·잔액 변동 원장). 다른 도메인 서비스(AccountService,
  * OrderService, OrderExecutionService, AdminChargeRequestService, AdminAccountTransactionService)가
  * 잔고를 바꾸는 Account 엔티티 메서드(applyBuyOrder/applySellOrder/freezeForOrder/
  * unfreezeForOrder/settleFrozenOrder/chargeBalance/applyAdminCharge/applyAdminDeduction)를 호출한
@@ -80,5 +80,12 @@ public class AccountTransactionService {
     public Page<AccountTransactionResponse> getTransactions(Long accountId, Pageable pageable) {
         return accountTransactionRepository.findAllByAccount_AccountId(accountId, pageable)
                 .map(AccountTransactionResponse::from);
+    }
+
+    /** 사용자 본인 계좌 내역 — 관리자 지급·차감 사유는 고정 문구로 보여준다(AccountTransactionResponse.forUser()). */
+    @Transactional(readOnly = true)
+    public Page<AccountTransactionResponse> getMyTransactions(Long accountId, Pageable pageable) {
+        return accountTransactionRepository.findAllByAccount_AccountId(accountId, pageable)
+                .map(AccountTransactionResponse::forUser);
     }
 }

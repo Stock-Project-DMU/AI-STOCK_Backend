@@ -49,6 +49,37 @@ class UserWithdrawalServiceTest {
         verifyNoInteractions(userService);
     }
 
+    // 이메일 없는 소셜 계정(카카오 이메일 제공 미동의 등) — "탈퇴하겠습니다"를 정확히 입력해야 한다(2026-10-13).
+    private void socialAccountWithoutEmail() {
+        when(userRepository.findByUserIdAndIsActiveTrue(1L)).thenReturn(Optional.of(
+                User.builder().loginId(null).email(null).role(Role.USER).isActive(true).build()));
+    }
+
+    @Test void socialAccountWithoutEmailRejectsMissingOrWrongConfirmText() {
+        socialAccountWithoutEmail();
+        for (String confirmText : new String[]{null, "", "탈퇴", "탈퇴 하겠습니다"}) {
+            assertThatThrownBy(() -> service.withdraw(1L, new UserWithdrawalRequest(null, null, null, confirmText)))
+                    .isInstanceOf(CustomException.class);
+        }
+        verifyNoInteractions(userService, accountRepository);
+    }
+
+    @Test void socialAccountWithoutEmailAcceptsConfirmText() {
+        socialAccountWithoutEmail();
+        var cleanupBoundary = new IllegalStateException("cleanup boundary");
+        when(accountRepository.findAllByUserIdForUpdate(1L)).thenThrow(cleanupBoundary);
+        assertThatThrownBy(() -> service.withdraw(1L, new UserWithdrawalRequest(null, null, null, " 탈퇴하겠습니다 ")))
+                .isSameAs(cleanupBoundary);
+        verifyNoInteractions(userService);
+    }
+
+    @Test void socialAccountWithEmailCannotUseConfirmTextInsteadOfEmail() {
+        account(null);
+        assertThatThrownBy(() -> service.withdraw(1L, new UserWithdrawalRequest(null, null, null, "탈퇴하겠습니다")))
+                .isInstanceOf(CustomException.class);
+        verifyNoInteractions(userService, accountRepository);
+    }
+
     @Test void regularAccountCannotUseEmailInsteadOfPassword() {
         account("member");
         assertThatThrownBy(() -> service.withdraw(1L, new UserWithdrawalRequest(null, "member@example.com")))

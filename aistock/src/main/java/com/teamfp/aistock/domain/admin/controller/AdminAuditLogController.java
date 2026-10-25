@@ -20,7 +20,7 @@ import com.teamfp.aistock.global.response.ApiResponse;
 import lombok.RequiredArgsConstructor;
 
 /**
- * 관리자 — 작업 감사 로그 조회 전용 API(ADMIN_API_BACKEND_HANDOFF.md 5.2). 조회만 있고 수정·삭제
+ * 관리자 — 작업 감사 로그 조회 전용 API(관리자 API — 관리자 작업 감사 로그). 조회만 있고 수정·삭제
  * API는 의도적으로 없다 — "감사 로그는 관리자도 수정·삭제할 수 없게 한다"는 요구사항.
  */
 @RestController

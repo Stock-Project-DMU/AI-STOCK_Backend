@@ -157,7 +157,7 @@ public class User {
     public void updateBirthdate(LocalDate birthdate) { this.birthdate = birthdate; }
 
     /**
-     * 비밀번호 변경(ADMIN_API_BACKEND_HANDOFF.md 5.3). 이미 인코딩된 값을 그대로 저장한다 —
+     * 비밀번호 변경(관리자 API — 비밀번호 확인·변경). 이미 인코딩된 값을 그대로 저장한다 —
      * 인코딩(BCrypt)은 UserService가 PasswordEncoder로 미리 처리한 뒤 넘긴다(Entity는 인코더에
      * 의존하지 않는다).
      */

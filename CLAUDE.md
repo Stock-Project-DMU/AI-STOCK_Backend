@@ -218,7 +218,7 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
 - **주의**: users의 soft delete는 FK `ON DELETE CASCADE`를 발동시키지 않는다. 탈퇴 처리 시
   자식 테이블(social_accounts, investment_profile, accounts, watchlist,
   ai_planning_sessions, simulations, recent_viewed, notifications, inquiries)은
-  탈퇴 서비스 로직에서 명시적으로 삭제해야 한다. (자세한 순서는 schema.sql의
+  탈퇴 서비스 로직에서 명시적으로 삭제해야 한다. (자세한 순서는 db/schema.sql의
   users 테이블 상단 주석 참고)
 
 ---
@@ -267,9 +267,12 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
   재시작으로 보고 다시 받는다. 올해 휴장일이 `krx_holidays.json`에 없으면 기동 때 경고 로그를 남긴다. 지정가 체결 판단(`checkAndExecute`)은
   `tickTaskExecutor`로 넘겨 스트림 수신 스레드가 DB 대기에 막히지 않게 한다(시세 캐시·화면 전송은 즉시). DART 날짜 계산은 한국 시간
   기준이고, 4월 1일~5월 15일에는 분기 실적 탭이 작년 사업보고서를 먼저 쓴다. 배포 URL 모드의 과거 시세 다운로드는 현재가 조회와 다른 잠금을 쓰고, 실패하면 30초 뒤 다시 받는다.
-- **STOMP 토픽**: `/topic/stock/{stockCode}` (브로드캐스팅), `/user/{userId}/queue` (유니캐스팅)
+- **STOMP 토픽**: `/topic/stock/{stockCode}` (브로드캐스팅), `/user/{userId}/queue` (유니캐스팅),
+  `/topic/market/indexes`(지수 1초)·`/topic/market/rankings/{sort}`(sort = volume·value·rise·fall·market-cap, 등록 종목 전체 순위 2초) —
+  메인 화면 실시간 갱신(`MarketOverviewBroadcastService`, 2026-10-13). REST(`/api/market/indexes`, `/api/market/rankings?all=true`)와 같은
+  내용을 정규장(마감 후 60초 포함)에만, 값이 바뀌었을 때만 보낸다. 비회원도 구독할 수 있다.
 - **비회원 실시간 시세**: `StompAuthInterceptor`는 토큰 없는 CONNECT를 익명 세션으로 허용하되,
-  익명 세션에는 `/topic/stock/{stockCode}`·`/topic/stock/{stockCode}/hoga` 구독만 허용하고 SEND는
+  익명 세션에는 `/topic/stock/{stockCode}`·`/topic/stock/{stockCode}/hoga`와 메인 화면 지수·순위 토픽 구독만 허용하고 SEND는
   막는다. 토큰이 있는데 무효면 여전히 거부한다(비회원 호가 제공, #06, 2026-09-25).
 - **tick 처리**: `@Async` + 전용 스레드풀 (`AsyncConfig`)
 - **지정가 체결**: tick 수신 시 `pending:orders` 확인 → 조건 충족 시 낙관적 락으로 체결.
@@ -411,7 +414,7 @@ type: 작업 내용
 
 ## 12. DB / Redis 설계 참고 문서
 
-- DB 테이블 구조·컬럼·제약조건·인덱스는 `schema.sql`(이 문서와 같은 경로)을
+- DB 테이블 구조·컬럼·제약조건·인덱스는 `db/schema.sql`(기존 DB 변경은 `db/migrations/`의 번호 순서 파일, 실행 방법은 `db/README.md`)을
   기준으로 한다. Entity를 작성하기 전 반드시 이 파일을 먼저 확인한다.
 - Redis 키 설계·TTL 정책·서비스 클래스 구조는 `redis-logic.md`(이 문서와 같은
   경로)를 기준으로 한다. `global/redis`, `global/config`의 Redis 관련 클래스를
@@ -420,6 +423,6 @@ type: 작업 내용
   먼저 팀에 확인한 뒤 해당 문서에 반영한다.
 - 실제 구현이 진행된 이후에는 `domain/*/entity`, `global/redis`,
   `global/config/RedisConfig` 등 실제 소스 코드가 최신 상태의 기준이 된다.
-  `schema.sql`/`redis-logic.md`는 그 이후로는 설계 근거 문서로 취급하되,
+  `db/schema.sql`/`redis-logic.md`는 그 이후로는 설계 근거 문서로 취급하되,
   실제 스키마·Redis 로직이 변경되면 두 문서도 함께 갱신하여 코드와 문서가
   어긋나지 않도록 한다 (NAMING.md와 동일한 원칙).

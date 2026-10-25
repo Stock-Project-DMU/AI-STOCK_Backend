@@ -4,7 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 /**
- * 관리자 주문 강제취소 요청 DTO(ADMIN_API_BACKEND_HANDOFF.md 3.3).
+ * 관리자 주문 강제취소 요청 DTO(관리자 API — 전체 거래 관리).
  */
 public record AdminOrderCancelRequest(
         @NotBlank(message = "취소 사유는 필수 입력 값입니다.")

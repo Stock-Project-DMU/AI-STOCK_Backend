@@ -82,7 +82,7 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
     @Query("select a from Account a join fetch a.user where a.accountId = :accountId")
     Optional<Account> findAccountWithUserByIdForUpdate(@Param("accountId") Long accountId);
 
-    // 관리자 계좌 목록·검색(feature/admin-api-p0, ADMIN_API_BACKEND_HANDOFF.md 3.4). query는
+    // 관리자 계좌 목록·검색(feature/admin-api-p0, 관리자 API — 계좌별 정지·해제). query는
     // 계좌 ID/계좌 소유자 아이디/이름/계좌번호 검색이고, status는 선택 필터다. 파라미터가 null이면
     // 해당 조건을 걸지 않는다(컨트롤러가 빈 문자열을 null로 정규화). fetch join을 쓰는 페이징
     // 쿼리라 count 쿼리는 fetch join 없이 별도로 지정한다 — findAllOrdersWithUser와 동일한 이유.

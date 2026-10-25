@@ -80,7 +80,7 @@ public class AdminAccountService {
         return toDetail(findAccount(accountId));
     }
 
-    // 계좌 목록·검색(ADMIN_API_BACKEND_HANDOFF.md 3.4). 원래는 AdminAccountDetailResponse를 목록·상세가 같이
+    // 계좌 목록·검색(관리자 API — 계좌별 정지·해제). 원래는 AdminAccountDetailResponse를 목록·상세가 같이
     // 썼는데, 상세에 보유 종목·수익률을 넣으면서(feat/admin-improvements) 목록은 계좌마다 추가 조회가 없는
     // AdminAccountListResponse로 분리했다.
     @Transactional(readOnly = true)
@@ -167,7 +167,7 @@ public class AdminAccountService {
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
     }
 
-    // 잔고 변동 원장 조회(4.3).
+    // 잔고 변동 원장 조회(관리자 API — 충전·잔액 변동 원장).
     @Transactional(readOnly = true)
     public Page<AccountTransactionResponse> getTransactions(Long accountId, Pageable pageable) {
         findAccount(accountId); // 존재하지 않는 계좌면 ACCOUNT_NOT_FOUND로 막는다.

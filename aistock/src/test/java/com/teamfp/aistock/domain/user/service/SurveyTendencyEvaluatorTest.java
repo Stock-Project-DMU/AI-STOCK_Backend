@@ -7,9 +7,18 @@ import static org.assertj.core.api.Assertions.*;
 class SurveyTendencyEvaluatorTest {
 
     // 투자성향 가중합산: score = Q2+Q3+2*(6-Q4)+Q5+3*Q6+2*Q7 (범위 10~44점, 폭 7점씩 5구간).
-    // Q4(투자경험)만 "6-Q4"로 방향이 뒤집힌다 — 프론트 선택지가 1번(최고위험)부터
-    // 5번(무경험)까지 내림차순이라, 번호가 작을수록 공격적인 답이기 때문이다
-    // (우혁 2026-09-29 재반려 사유 3-2 대응, SurveyTendencyEvaluator 참고).
+    // Q4(투자경험)만 "6-Q4"로 방향이 뒤집힌다 — 프론트 체크박스가 1번(선물·옵션, 최고위험)부터
+    // 5번(주식형 펀드)까지 위험한 순서라, 번호가 작을수록 공격적인 답이기 때문이다
+    // (우혁 2026-09-29 재반려 사유 3-2 대응, SurveyTendencyEvaluator 참고). 6번(없음)은 0점(2026-10-13).
+
+    @Test void noExperienceAnswerScoresBelowStockFundAndStaysInLowestBucket() {
+        // 나머지는 최저(1)로 두고 Q4만 6(없음) → score = 1+1+2*(6-6=0)+1+3+2 = 8 → 1구간(안정형, 0구간으로 내려가지 않음)
+        assertThat(SurveyTendencyEvaluator.evaluateInvestmentTendency(List.of(1, 1, 1, 6, 1, 1, 1, 1))).isEqualTo(1);
+        // 같은 답에서 Q4만 5(주식형 펀드)와 6(없음)을 비교 — 없음이 2점 낮다:
+        // Q4=5 → 2+2+2+2+6+4 = 18(2구간), Q4=6 → 2+2+0+2+6+4 = 16(1구간)
+        assertThat(SurveyTendencyEvaluator.evaluateInvestmentTendency(List.of(2, 2, 2, 5, 2, 2, 2, 2))).isEqualTo(2);
+        assertThat(SurveyTendencyEvaluator.evaluateInvestmentTendency(List.of(2, 2, 2, 6, 2, 2, 2, 2))).isEqualTo(1);
+    }
 
     @Test void lowestPossibleScoreRequiresLeastAggressiveQ4AnswerAndMapsToStableTendency() {
         // 진짜 최솟값은 Q4가 5(가장 소극적, 6-5=1로 최소 기여)일 때 나온다.
@@ -46,7 +55,7 @@ class SurveyTendencyEvaluatorTest {
     }
 
     // 자금성향은 1번 문항 답을 그대로 반환한다(프론트 3개 선택지 순서 = 등급 순서로 1:1 매핑,
-    // FRONTEND_API_IMPLEMENTATION.md 참고).
+    // 프론트 surveyQuestions.ts 기준).
     @Test void returnsFirstAnswerAsFundTendencyDirectly() {
         for (int purpose = 1; purpose <= 3; purpose++) {
             assertThat(SurveyTendencyEvaluator.evaluateFundTendency(List.of(purpose, 1, 1, 1, 1, 1, 1, 1))).isEqualTo(purpose);

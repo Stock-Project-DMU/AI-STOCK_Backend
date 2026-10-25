@@ -237,7 +237,7 @@ public class StockBroadcastService implements MarketDataListener {
     }
 
     // TickData.stockName은 항상 null(NAMING.md 6번)이라 StockNameResolver로 우리 DB에서
-    // 찾는다 — 어디에도 없으면(KNOWN_ISSUES.md 1번) stockCode를 이름 대신 사용한다.
+    // 찾는다 — 어디에도 없으면(KNOWN_ISSUES.md "해소된 이슈" — 종목명 표시) stockCode를 이름 대신 사용한다.
     private String resolveStockName(String stockCode, String tickStockName) {
         if (tickStockName != null) {
             return tickStockName;

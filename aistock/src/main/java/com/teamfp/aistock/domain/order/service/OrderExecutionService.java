@@ -49,7 +49,7 @@ public class OrderExecutionService {
     private final HoldingSettlementService holdingSettlementService;
     // 지정가 주문 체결 시 알림 발송 — 도메인 간 직접 참조 대신 서비스 계층을 통해 호출한다.
     private final NotificationService notificationService;
-    // 잔고 변동 원장 기록(ADMIN_API_BACKEND_HANDOFF.md 4.3).
+    // 잔고 변동 원장 기록(관리자 API — 충전·잔액 변동 원장).
     private final AccountTransactionService accountTransactionService;
     // 매도 거래 수수료 차감(시장가 매도 OrderService와 공용).
     private final TradeFeeService tradeFeeService;
@@ -236,7 +236,7 @@ public class OrderExecutionService {
         // 그대로 정산(해제 + 차액 환급)만 하면 된다.
         account.settleFrozenOrder(frozenAmount, actualAmount);
 
-        // 원장 기록(4.3) — "매수 지출" 자체는 이미 등록 시점(OrderService.createLimitOrder())에
+        // 원장 기록(관리자 API — 충전·잔액 변동 원장) — "매수 지출" 자체는 이미 등록 시점(OrderService.createLimitOrder())에
         // ORDER_BUY로 기록했으므로, 여기서는 체결가가 지정가보다 낮아 생긴 차액 환급분만
         // ORDER_REFUND로 남긴다. 지정가와 체결가가 같아 환급이 없으면(refundAmount == 0) 실제
         // 잔고 변동이 없는 것이므로 빈 원장 행을 남기지 않는다.

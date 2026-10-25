@@ -25,6 +25,8 @@ public class UserWithdrawalService {
     static final String ADMIN_DISPOSE_REASON = "관리자 계정 폐기";
     // 관리자 계정 폐기의 인증 코드 틀린 횟수 기준 — 계정별
     static final String ADMIN_DISPOSE_LOCK_PREFIX = "user:";
+    // 이메일이 없는 소셜 계정의 탈퇴 확인 문구(2026-10-13) — 확인할 비밀번호·이메일이 없어 이 문구를 정확히 입력해야 탈퇴된다.
+    static final String WITHDRAWAL_CONFIRM_TEXT = "탈퇴하겠습니다";
 
     private final UserService userService;
     private final UserRepository userRepository;
@@ -41,8 +43,12 @@ public class UserWithdrawalService {
     public void withdraw(Long userId, UserWithdrawalRequest request) {
         User user = userRepository.findByUserIdAndIsActiveTrue(userId)
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
-        if (user.getLoginId() == null) {
-            if (user.getEmail() == null || request.email() == null || request.email().isBlank()
+        if (user.getLoginId() == null && user.getEmail() == null) {
+            if (request.confirmText() == null || !WITHDRAWAL_CONFIRM_TEXT.equals(request.confirmText().trim())) {
+                throw new CustomException(ErrorCode.INVALID_INPUT, "탈퇴하려면 \"" + WITHDRAWAL_CONFIRM_TEXT + "\"를 정확히 입력해 주세요.");
+            }
+        } else if (user.getLoginId() == null) {
+            if (request.email() == null || request.email().isBlank()
                     || !user.getEmail().trim().equalsIgnoreCase(request.email().trim())) {
                 throw new CustomException(ErrorCode.INVALID_INPUT, "계정에 등록된 본인 이메일을 입력해 주세요.");
             }
@@ -72,7 +78,8 @@ public class UserWithdrawalService {
                 .setParameter("userId", userId).executeUpdate();
         entityManager.createNativeQuery("delete from news_chat_messages where session_id in (select session_id from news_chat_sessions where user_id = :userId)")
                 .setParameter("userId", userId).executeUpdate();
-        for (String table : java.util.List.of("account_transactions", "charge_requests", "holdings", "orders")) {
+        // dividend_entitlements는 account_id에 FK가 없어 계좌를 지워도 남으므로 함께 지운다(2026-10-13).
+        for (String table : java.util.List.of("account_transactions", "charge_requests", "holdings", "orders", "dividend_entitlements")) {
             entityManager.createNativeQuery("delete from " + table + " where account_id in (select account_id from accounts where user_id = :userId)")
                     .setParameter("userId", userId).executeUpdate();
         }

@@ -155,6 +155,11 @@ public class DartApiClient {
     private volatile Map<String, String> stockCodeByName;
     private volatile Map<String, String> corpCodeByStockCode;
 
+    // 고유번호 목록 다운로드가 실패하면(잘못된 키·일시 장애로 zip 대신 오류 응답이 온 경우 포함) 캐시에 남기지 않고, 이 시각 전까지는
+    // 다시 받지 않는다 — 요청마다 DART를 부르지 않으면서, 복구되면 서버 재시작 없이 다시 채운다(2026-10-13).
+    private static final long CORP_CODE_RETRY_DELAY_MILLIS = 60_000L;
+    private volatile long corpCodeRetryAfterMillis;
+
     // 2026-08-13 추가 — corpCodeByName/stockCodeByName과 동일한 데이터를 정규화된 키(대소문자
     // 무시 + "주식회사"/"(주)" 등 법인 접미사 제거)로도 인덱싱해둔 보조 캐시. "LG"/"lg"/
     // "LG주식회사"처럼 정확히 같은 문자열이 아니어도 찾을 수 있게 하기 위함(라이브 테스트로
@@ -1011,10 +1016,17 @@ public class DartApiClient {
         return resolveWithFallbacks(trimmed, normalizedCorpCodeCache());
     }
 
-    /** DART의 상장 종목코드로 회사 코드를 찾는다. 우선주가 목록에 없으면 같은 발행사의 보통주 코드를 사용한다. */
+    /**
+     * DART의 상장 종목코드로 회사 코드를 찾는다. 우선주가 목록에 없으면 같은 발행사의 보통주 코드를 사용한다.
+     * 고유번호 목록 자체를 받지 못했으면(DART 장애) "공시 회사 없음"(빈 값)과 구분하려고 EXTERNAL_API_ERROR를 던진다 —
+     * 종목 리서치는 이를 받아 "DART 일시 장애"로 안내한다(2026-10-13).
+     */
     public Optional<String> resolveCorpCodeByStockCode(String stockCode) {
         if (stockCode == null || !stockCode.matches("[0-9]{6}")) return Optional.empty();
         Map<String, String> codes = corpCodeByStockCodeCache();
+        if (corpCodeByStockCode == null) {
+            throw new CustomException(ErrorCode.EXTERNAL_API_ERROR);
+        }
         String exact = codes.get(stockCode);
         if (exact != null) return Optional.of(exact);
         char last = stockCode.charAt(5);
@@ -1167,11 +1179,12 @@ public class DartApiClient {
     }
 
     private synchronized void ensureCorpCodeMapsLoaded() {
-        if (corpCodeByName != null) {
+        if (corpCodeByName != null || System.currentTimeMillis() < corpCodeRetryAfterMillis) {
             return;
         }
         CorpCodeMaps loaded = loadCorpCodeMaps();
         if (loaded == null) {
+            corpCodeRetryAfterMillis = System.currentTimeMillis() + CORP_CODE_RETRY_DELAY_MILLIS;
             return;
         }
         stockCodeByName = loaded.stockCodeByName();
@@ -1197,9 +1210,8 @@ public class DartApiClient {
     // 있어 corp_code 캐시에는 포함하되, 상장사와 이름이 겹치면 상장사를 우선한다 — DART 전체
     // 등록 회사는 비상장 포함 수만 건이라 이름이 겹치는 군소 비상장사가 존재할 수 있는 반면,
     // 모의투자 서비스 특성상 사용자가 말하는 회사명은 거의 항상 상장사를 가리키기 때문이다.
-    // 다운로드/압축해제 자체가 실패하면(일시적 장애일 수 있음) null을 반환해 호출자가 이번만
-    // 빈 값을 쓰고 캐시에는 남기지 않도록 한다 — 성공적으로 파싱했는데 항목이 0개인 경우
-    // (Map.of())와 구분한다. resolveCorpCodeByName()/resolveStockCodeByName()의 "예외를
+    // 다운로드/압축해제 자체가 실패하거나 상장사가 하나도 없으면(zip 대신 오류 응답 — 잘못된 키 등) null을 반환해
+    // 호출자가 이번만 빈 값을 쓰고 캐시에는 남기지 않도록 한다(CORP_CODE_RETRY_DELAY_MILLIS 뒤 다시 받음). resolveCorpCodeByName()/resolveStockCodeByName()의 "예외를
     // 던지지 않는다"는 계약을 지키려면 ExternalApiInvoker.call()이 던지는 CustomException
     // (네트워크 실패 등)도 여기서 흡수해야 한다 — 그냥 던지게 두면 호출자가 try/catch 없이
     // 부른 경우 그대로 터진다.
@@ -1238,6 +1250,12 @@ public class DartApiClient {
             }
         } catch (IOException e) {
             log.error("DART 고유번호 목록 압축 해제 실패", e);
+            return null;
+        }
+        // 정상 목록에는 상장사가 수천 개 있다 — 하나도 없으면 zip이 아니라 오류 응답(잘못된 키 등)을 받은 것이니 실패로 본다.
+        // 예전에는 이 빈 목록을 그대로 캐시해, 서버를 재시작할 때까지 모든 종목이 "공시 회사 없음"으로 나왔다.
+        if (corpCodesByStockCode.isEmpty()) {
+            log.warn("DART 고유번호 목록이 비어 있음(잘못된 키 또는 DART 오류 응답) - {}초 뒤 다시 받음", CORP_CODE_RETRY_DELAY_MILLIS / 1000);
             return null;
         }
         return new CorpCodeMaps(corpCodes, stockCodes, corpCodesByStockCode);

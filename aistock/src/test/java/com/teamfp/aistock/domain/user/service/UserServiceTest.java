@@ -232,6 +232,35 @@ class UserServiceTest {
         }
 
         @Test
+        @DisplayName("4번 문항 '없음'(6)만 고르면 받아서 저장한다")
+        void savesNoExperienceAnswer() {
+            when(investmentProfileRepository.findByUserId(USER_ID)).thenReturn(Optional.empty());
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+
+            InvestmentProfileResponse response = userService.saveSurvey(USER_ID,
+                    new SurveyRequest(List.of(1, 2, 2, 6, 2, 2, 2, 2), List.of(6)));
+
+            assertThat(response.investmentTendency()).isEqualTo(1);
+            org.mockito.ArgumentCaptor<InvestmentProfile> captor = org.mockito.ArgumentCaptor.forClass(InvestmentProfile.class);
+            verify(investmentProfileRepository).save(captor.capture());
+            assertThat(captor.getValue().getSurveyAnswers()).contains("\"experienceAnswers\":[6]");
+        }
+
+        @Test
+        @DisplayName("4번 문항 '없음'(6)을 다른 경험과 같이 고르거나, 아무것도 고르지 않으면 거부한다")
+        void rejectsNoExperienceWithOthersOrEmpty() {
+            for (SurveyRequest request : List.of(
+                    new SurveyRequest(List.of(1, 2, 2, 1, 2, 2, 2, 2), List.of(1, 6)),
+                    new SurveyRequest(List.of(1, 2, 2, 6, 2, 2, 2, 2), List.of()),
+                    new SurveyRequest(List.of(1, 2, 2, 1, 2, 2, 2, 2), List.of(1, 7)))) {
+                assertThatThrownBy(() -> userService.saveSurvey(USER_ID, request))
+                        .isInstanceOf(CustomException.class)
+                        .extracting(error -> ((CustomException) error).getErrorCode())
+                        .isEqualTo(ErrorCode.INVALID_INPUT);
+            }
+        }
+
+        @Test
         @DisplayName("4번 문항 대표 답과 중복 선택 목록이 다르면 거부한다")
         void rejectsInconsistentExperienceAnswers() {
             assertThatThrownBy(() -> userService.saveSurvey(USER_ID,

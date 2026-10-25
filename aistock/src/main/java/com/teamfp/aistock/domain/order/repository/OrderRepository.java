@@ -6,6 +6,7 @@ import java.util.Optional;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -25,6 +26,11 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     @Query("select o from Order o where o.account.accountId = :accountId order by o.orderedAt desc")
     List<Order> findAllByAccountIdOrderByOrderedAtDesc(@Param("accountId") Long accountId);
+
+    // 주문내역 나눠 받기(2026-10-13) — 같은 시각 주문도 묶음 사이에서 순서가 바뀌거나 빠지지 않게 주문번호로 한 번 더 정렬한다.
+    // idx_account_order(account_id, ordered_at)를 탄다. Slice라 전체 개수(count) 쿼리를 따로 날리지 않는다.
+    @Query("select o from Order o where o.account.accountId = :accountId order by o.orderedAt desc, o.orderId desc")
+    Slice<Order> findSliceByAccountId(@Param("accountId") Long accountId, Pageable pageable);
 
     // 관리자 사용자 상세 — 유저가 가진 계좌 여러 개(최대 3개)를 계좌별로 N번 조회하지 않고
     // 한 번에 조회하기 위한 배치 조회. IN 절 하나로 전체 계좌의 주문을 합쳐서 정렬까지
@@ -73,7 +79,7 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
             countQuery = "select count(o) from Order o")
     Page<Order> findAllOrdersWithUser(Pageable pageable);
 
-    // 관리자 거래 검색·필터(feature/admin-api-p0, ADMIN_API_BACKEND_HANDOFF.md 3.3). query는
+    // 관리자 거래 검색·필터(feature/admin-api-p0, 관리자 API — 전체 거래 관리). query는
     // 주문번호/회원 아이디/회원 이름(feat/admin-improvements 추가)/계좌번호/종목코드/종목명 검색이고, status/orderType/priceType/
     // stockCode(정확일치)/from~to(orderedAt 구간)는 선택 필터다. 파라미터가 null이면 해당 조건을
     // 걸지 않는다(컨트롤러가 빈 문자열을 null로 정규화). fetch join을 쓰는 페이징 쿼리라 count
@@ -172,7 +178,7 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     @Query("select o from Order o where o.account.accountId = :accountId and o.status = 'PENDING'")
     List<Order> findAllPendingByAccountIdForUpdate(@Param("accountId") Long accountId);
 
-    // 관리자 기간별 통계 — 주문 건수 추이(feature/admin-api-p0, ADMIN_API_BACKEND_HANDOFF.md 6.1).
+    // 관리자 기간별 통계 — 주문 건수 추이(feature/admin-api-p0, 관리자 API — 기간별 통계).
     // UserRepository.aggregateUserSignups()와 동일한 이유로 네이티브 쿼리를 쓴다. ordered_at
     // 기준으로 집계한다 — 체결 여부와 무관하게 "주문이 실제로 발생한 시점" 추이를 보여준다.
     @Query(value = "select date_format(ordered_at, :pattern) as period, count(*) as value "
@@ -181,7 +187,7 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     List<StatisticsPointProjection> aggregateOrderCounts(
             @Param("pattern") String pattern, @Param("from") LocalDateTime from, @Param("to") LocalDateTime to);
 
-    // 관리자 기간별 통계 — 체결 거래대금 추이(ADMIN_API_BACKEND_HANDOFF.md 6.1). executed_at
+    // 관리자 기간별 통계 — 체결 거래대금 추이(관리자 API — 기간별 통계). executed_at
     // 기준으로 집계하므로 체결된(EXECUTED) 주문만 대상이 된다(executed_at은 체결 시점에만 채워짐).
     @Query(value = "select date_format(executed_at, :pattern) as period, "
             + "coalesce(sum(exec_price * quantity), 0) as value "

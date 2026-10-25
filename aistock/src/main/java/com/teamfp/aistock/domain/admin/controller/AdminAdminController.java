@@ -32,12 +32,12 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 /**
- * 관리자 — 관리자 계정 목록·상세 조회 및 상태 변경 API(ADMIN_API_BACKEND_HANDOFF.md 5.1).
+ * 관리자 — 관리자 계정 목록·상세 조회 및 상태 변경 API(관리자 API — 관리자 계정 관리).
  * 관리자도 users 테이블의 User(role=ADMIN)일 뿐이라 AdminUserService의 검색·상태변경 로직을
  * role=ADMIN 조건으로 그대로 재사용한다 — 자기 자신 정지 금지, 마지막 활성 관리자 정지 금지
  * 가드(AdminUserService.validateSuspendable())도 동일하게 적용된다.
  *
- * POST /api/admin/admins(신규 관리자 생성)는 handoff 문서 9번 "구현 전 결정이 필요한 정책" 6번
+ * POST /api/admin/admins(신규 관리자 생성)는 당시 미확정 정책인 관리자 생성 방식
  * (관리자를 기존 회원 승격 방식으로 만들지, 별도 생성 방식으로 만들지)이 아직 정해지지 않았지만,
  * 우선 "별도 생성 방식"으로 구현해뒀다 — 승격 방식으로 정책이 정해지면
  * AdminUserService.createAdmin() 자체를 제거해야 한다.

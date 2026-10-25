@@ -73,7 +73,7 @@ public class AdminAccountController {
         return ApiResponse.success("계좌 상태가 변경되었습니다.", adminAccountService.updateAccountStatus(adminUserId, accountId, request));
     }
 
-    // 잔고 변동 원장 조회(4.3).
+    // 잔고 변동 원장 조회(관리자 API — 충전·잔액 변동 원장).
     @GetMapping("/{accountId}/transactions")
     public ApiResponse<Page<AccountTransactionResponse>> getTransactions(
             @PathVariable Long accountId,
@@ -82,7 +82,7 @@ public class AdminAccountController {
         return ApiResponse.success(adminAccountService.getTransactions(accountId, pageable));
     }
 
-    // 관리자 수동 잔고 조정(4.3).
+    // 관리자 수동 잔고 조정(관리자 API — 충전·잔액 변동 원장).
     @PostMapping("/{accountId}/adjustments")
     public ApiResponse<AdminAccountDetailResponse> adjustBalance(
             @PathVariable Long accountId,

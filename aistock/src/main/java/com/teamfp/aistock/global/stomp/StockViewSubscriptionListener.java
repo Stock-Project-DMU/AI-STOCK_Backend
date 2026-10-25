@@ -21,7 +21,7 @@ import lombok.extern.slf4j.Slf4j;
  *
  * 클라이언트가 UNSUBSCRIBE 프레임 없이 비정상 종료되는 경우를 대비해 SessionDisconnectEvent로
  * 보완 처리한다 — CLAUDE.md 8번의 온라인 사용자 추적 정책과 동일한 논리다. 이 클래스가 이
- * 저장소 최초의 STOMP 세션 이벤트 리스너다(KNOWN_ISSUES.md 2번 참고).
+ * 저장소 최초의 STOMP 세션 이벤트 리스너다(KNOWN_ISSUES.md "해소된 이슈" 참고).
  */
 @Slf4j
 @Component

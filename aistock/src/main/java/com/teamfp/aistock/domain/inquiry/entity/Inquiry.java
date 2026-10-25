@@ -21,7 +21,6 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
-import jakarta.persistence.Lob;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import lombok.AccessLevel;
@@ -51,16 +50,17 @@ public class Inquiry {
     @Column(name = "title", length = 200, nullable = false)
     private String title;
 
-    @Lob
-    @Column(name = "content", nullable = false)
+    // schema.sql: content/answer TEXT. @Lob만 쓰면 이 프로젝트의 Hibernate/MySQL8 조합에서 TINYTEXT(255바이트, 한글 약 85자)로
+    // 만들어지고 validate에서도 TEXT와 맞지 않아 — AiPlanningMessage.content와 같이 columnDefinition으로 TEXT를 명시한다
+    // (기존 DB는 db/migrations/016_column_types.sql로 TEXT로 바꾼다, 2026-10-13).
+    @Column(name = "content", nullable = false, columnDefinition = "TEXT")
     private String content;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 10)
     private InquiryStatus status;
 
-    @Lob
-    @Column(name = "answer")
+    @Column(name = "answer", columnDefinition = "TEXT")
     private String answer;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = true)
