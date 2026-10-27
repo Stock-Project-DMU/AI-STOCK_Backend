@@ -28,7 +28,7 @@ import com.teamfp.aistock.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 
 /**
- * 관리자 — 충전 요청 목록·상세 조회 및 승인·거절(ADMIN_API_BACKEND_HANDOFF.md 4.2). admin
+ * 관리자 — 충전 요청 목록·상세 조회 및 승인·거절(관리자 API — 추가 충전 요청·승인). admin
  * 도메인은 자체 Entity/Repository를 두지 않고 account 도메인의 ChargeRequestRepository를 그대로
  * 주입받아 조합한다(CLAUDE.md 4번).
  */
@@ -70,7 +70,7 @@ public class AdminChargeRequestService {
      * 한다" 요구사항). 승인 시 Account.applyAdminCharge()로 잔고를 올린다 — chargeBalance()와
      * 달리 자동충전 횟수(chargeCount)는 건드리지 않는다(Account.applyAdminCharge() Javadoc 참고).
      *
-     * 승인·거절 금액의 일·월 누적 한도 검증은 handoff 문서가 "서버에서 검증한다"고 요구하지만
+     * 승인·거절 금액의 일·월 누적 한도 검증은 당시 관리자 API 요청서가 "서버에서 검증한다"고 요구하지만
      * 구체적인 허용 범위가 정책 미확정이라 이번 범위에서는 넣지 않았다 — 한도가 정해지면 이
      * 메서드에 검증을 추가해야 한다.
      */

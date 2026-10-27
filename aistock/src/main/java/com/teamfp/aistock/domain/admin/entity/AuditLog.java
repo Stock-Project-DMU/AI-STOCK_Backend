@@ -19,7 +19,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
- * 관리자 작업 감사 로그(ADMIN_API_BACKEND_HANDOFF.md 5.2, feature/admin-api-p0 — 새 테이블 3개
+ * 관리자 작업 감사 로그(관리자 API — 관리자 작업 감사 로그, feature/admin-api-p0 — 새 테이블 3개
  * 중 마지막, 2026-09-07 사용자 승인으로 신규 생성). 문서 요구사항대로 관리자도 수정·삭제할 수
  * 없다 — 이 Entity에는 상태를 바꾸는 메서드가 없다(append-only, AccountTransaction과 동일한
  * 설계 원칙).

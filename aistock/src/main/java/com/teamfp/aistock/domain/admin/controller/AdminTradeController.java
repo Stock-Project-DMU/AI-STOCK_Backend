@@ -74,7 +74,7 @@ public class AdminTradeController {
         return ApiResponse.success(adminTradeService.getTradeDetail(orderId));
     }
 
-    // 주문 강제취소(3.3, "구현 전 결정이 필요한 정책" 2번 — 정책 확정 전 우선 구현).
+    // 주문 강제취소(관리자 API — 전체 거래 관리, 당시 미확정 정책이던 관리자 강제 취소를 우선 구현).
     @PatchMapping("/{orderId}/cancel")
     public ApiResponse<AdminTradeDetailResponse> cancelTrade(
             @PathVariable Long orderId,
@@ -84,7 +84,7 @@ public class AdminTradeController {
         return ApiResponse.success("주문이 취소되었습니다.", adminTradeService.cancelTrade(adminUserId, orderId, request));
     }
 
-    // 화면과 동일한 검색·필터 조건을 그대로 받는다(6.2 요구사항). handoff 문서는
+    // 화면과 동일한 검색·필터 조건을 그대로 받는다(관리자 API — CSV 내보내기 요구사항). 당시 관리자 API 요청서는
     // /api/admin/orders/export를 제안했지만 AdminTradeService.exportTradesCsv() Javadoc과 동일한
     // 이유로 /api/admin/trades/export로 둔다.
     @GetMapping("/export")

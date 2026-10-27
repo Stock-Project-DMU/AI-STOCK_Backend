@@ -427,6 +427,36 @@ class OrderServiceTest {
         }
 
         @Test
+        @DisplayName("getMyOrderHistoryPage()는 소유권 확인 뒤 요청한 묶음과 다음 묶음 여부를 돌려준다(size 없으면 20건)")
+        void getMyOrderHistoryPage_success() {
+            Order order = Order.builder().account(account).stockCode(STOCK_CODE).stockName("삼성전자").orderType(OrderType.BUY)
+                    .priceType(PriceType.MARKET).orderPrice(70_000L).quantity(1).build();
+            when(orderRepository.findSliceByAccountId(ACCOUNT_ID, org.springframework.data.domain.PageRequest.of(1, 20)))
+                    .thenReturn(new org.springframework.data.domain.SliceImpl<>(List.of(order),
+                            org.springframework.data.domain.PageRequest.of(1, 20), true));
+
+            var response = orderService.getMyOrderHistoryPage(USER_ID, ACCOUNT_ID, 1, null);
+
+            verify(accountService).getOwnedAccount(USER_ID, ACCOUNT_ID);
+            assertThat(response.orders()).hasSize(1);
+            assertThat(response.page()).isEqualTo(1);
+            assertThat(response.size()).isEqualTo(20);
+            assertThat(response.hasNext()).isTrue();
+        }
+
+        @Test
+        @DisplayName("getMyOrderHistoryPage()는 음수 페이지, 0건, 100건 초과 요청을 INVALID_INPUT으로 막는다")
+        void getMyOrderHistoryPage_rejectsInvalidRange() {
+            for (int[] pageAndSize : new int[][]{{-1, 20}, {0, 0}, {0, 101}}) {
+                assertThatThrownBy(() -> orderService.getMyOrderHistoryPage(USER_ID, ACCOUNT_ID, pageAndSize[0], pageAndSize[1]))
+                        .isInstanceOf(CustomException.class)
+                        .extracting(e -> ((CustomException) e).getErrorCode())
+                        .isEqualTo(ErrorCode.INVALID_INPUT);
+            }
+            verify(orderRepository, never()).findSliceByAccountId(anyLong(), any());
+        }
+
+        @Test
         @DisplayName("getMyOrderHistory()는 내 계좌가 아니면 ACCOUNT_NOT_FOUND 예외를 던진다")
         void getMyOrderHistory_fail_accountNotFound() {
             when(accountService.getOwnedAccount(anyLong(), anyLong())).thenThrow(new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));

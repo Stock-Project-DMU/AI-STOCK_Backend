@@ -30,7 +30,7 @@ import com.teamfp.aistock.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 
 /**
- * 사용자 — 추가 충전 요청 생성·조회(ADMIN_API_BACKEND_HANDOFF.md 4.2). 계좌 소유권 검증은
+ * 사용자 — 추가 충전 요청 생성·조회(관리자 API — 추가 충전 요청·승인). 계좌 소유권 검증은
  * AccountService.getOwnedAccount()로 일원화한다(OrderService와 동일한 패턴).
  */
 @Service

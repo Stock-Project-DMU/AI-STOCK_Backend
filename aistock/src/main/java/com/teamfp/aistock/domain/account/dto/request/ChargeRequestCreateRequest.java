@@ -6,7 +6,7 @@ import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
 /**
- * 추가 충전 요청 생성 DTO(ADMIN_API_BACKEND_HANDOFF.md 4.2). 직접 충전 3회를 다 쓴 뒤 관리자에게 요청하는
+ * 추가 충전 요청 생성 DTO(관리자 API — 추가 충전 요청·승인). 직접 충전 3회를 다 쓴 뒤 관리자에게 요청하는
  * 금액은 1회 최대 1조원이다(계좌 예치금 한도와 같은 값).
  */
 public record ChargeRequestCreateRequest(

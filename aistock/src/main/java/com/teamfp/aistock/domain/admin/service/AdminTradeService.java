@@ -53,7 +53,7 @@ public class AdminTradeService {
     // 거래 상세의 잔고 변화(이 주문으로 생긴 잔고 내역)를 채우는 데 쓴다(feat/admin-improvements).
     private final AccountTransactionRepository accountTransactionRepository;
 
-    // 거래 검색·필터(ADMIN_API_BACKEND_HANDOFF.md 3.3). 전부 비어 있으면 searchOrdersWithUser()가
+    // 거래 검색·필터(관리자 API — 전체 거래 관리). 전부 비어 있으면 searchOrdersWithUser()가
     // null 파라미터를 "조건 없음"으로 처리해 기존 findAllOrdersWithUser(pageable)와 동일하게
     // 전체 목록을 반환한다.
     @Transactional(readOnly = true)
@@ -64,7 +64,7 @@ public class AdminTradeService {
     }
 
 
-    // 주문 강제취소(ADMIN_API_BACKEND_HANDOFF.md 3.3). 실제 취소는 OrderService.
+    // 주문 강제취소(관리자 API — 전체 거래 관리). 실제 취소는 OrderService.
     // adminCancelOrder()에 위임하고, 이 메서드는 취소 후 최신 상태를 account.user까지 fetch
     // join된 형태로 다시 조회해 응답한다(getTradeDetail()과 동일한 조회 메서드 재사용).
     @Transactional
@@ -78,9 +78,9 @@ public class AdminTradeService {
             "주문가", "체결가", "수량", "상태", "주문일시", "체결일시");
 
     /**
-     * 거래 목록 CSV 내보내기(ADMIN_API_BACKEND_HANDOFF.md 6.2). AdminUserService.exportUsersCsv()와
+     * 거래 목록 CSV 내보내기(관리자 API — CSV 내보내기). AdminUserService.exportUsersCsv()와
      * 동일한 이유로 전역 max-page-size 설정을 피해 이 메서드 안에서 직접 큰 PageRequest를 만든다.
-     * URL은 handoff 문서가 /api/admin/orders/export를 제안했지만, 기존 목록·검색 API가 이미
+     * URL은 당시 관리자 API 요청서가 /api/admin/orders/export를 제안했지만, 기존 목록·검색 API가 이미
      * /api/admin/trades로 구현돼 있어(NAMING.md 8-15) 같은 리소스 경로 아래 /export로 둔다.
      */
     @Transactional(readOnly = true)

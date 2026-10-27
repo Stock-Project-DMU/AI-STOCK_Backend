@@ -6,7 +6,7 @@ import com.teamfp.aistock.domain.account.entity.ChargeRequest;
 import com.teamfp.aistock.domain.account.entity.ChargeRequestStatus;
 
 /**
- * 관리자용 충전 요청 조회 응답 DTO(ADMIN_API_BACKEND_HANDOFF.md 4.2). 사용자용
+ * 관리자용 충전 요청 조회 응답 DTO(관리자 API — 추가 충전 요청·승인). 사용자용
  * ChargeRequestResponse와 달리 요청자 식별 정보(loginId/userName)와 처리 관리자 이름까지 담는다.
  */
 public record AdminChargeRequestResponse(

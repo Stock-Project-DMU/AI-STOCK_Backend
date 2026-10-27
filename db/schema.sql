@@ -1,5 +1,13 @@
 -- =====================================================
--- AI STOCK MySQL Schema (최종본 v19)
+-- AI STOCK MySQL Schema (최종본 v21)
+-- v21: 엔티티와 컬럼 타입 맞춤(fix/overall-improvements, 2026-10-13, migrations/016_column_types.sql) — 이 파일로 새 DB를 만들면
+--      운영과 같은 ddl-auto=validate에서 서버가 뜨지 않던 5개 컬럼.
+--   1. accounts.charge_count, investment_profile.investment_tendency / fund_tendency: TINYINT → INT (엔티티 int와 동일).
+--   2. inquiries.content / answer: TEXT 유지, 엔티티를 @Lob → columnDefinition="TEXT"로 바꿔 맞춤(기존 dev DB는 @Lob 때문에
+--      TINYTEXT(255바이트)로 만들어져 긴 문의가 저장되지 않았다 — 016이 TEXT로 바꾼다).
+-- v20: 마이그레이션 정리(fix/overall-improvements, 2026-10-13) — 이 파일과 마이그레이션을 db/ 폴더로 옮겼다(db/README.md).
+--   1. users.suspension_reason / suspended_until 반영 — 005_suspension.sql로만 추가되고 이 파일에는 빠져 있던 컬럼
+--      (관리자 정지 사유·정지 기한, User 엔티티와 동일).
 -- v19: 배당금 기능(feature/dividend, 2026-10-05, dividend_migration.sql — admin_improvements_migration.sql 다음에 적용).
 --   1. dividend_schedules 신규 (19번째 테이블) — 종목별 배당 회차. local-market-data-generator의
 --      dividends.json을 (stock_code, fiscal_year, period) 기준으로 UPSERT한다.
@@ -43,7 +51,7 @@
 -- 2026-09-21에 실제 테이블 정의를 보고 소급 작성함. 정확한 작업일자·근거 문서는
 -- 각 테이블 주석 참고):
 --   1. charge_requests, account_transactions, audit_logs 테이블 신규 추가 (16, 17, 18번째 테이블)
---      (관리자 API·충전 승인·계좌 원장·감사 로그 관련. ADMIN_API_BACKEND_HANDOFF.md 기반)
+--      (관리자 API·충전 승인·계좌 원장·감사 로그 관련)
 -- =====================================================
 -- 변경사항 v11 → v12:
 --   1. news_briefing_settings, news_briefings 테이블 신규 추가 (14, 15번째 테이블)
@@ -199,6 +207,8 @@ CREATE TABLE users (
                                 NOT NULL DEFAULT 'USER',
     status      ENUM('ACTIVE','SUSPENDED')
                                 NOT NULL DEFAULT 'ACTIVE',  -- v7 추가: 관리자에 의한 로그인 차단
+    suspension_reason VARCHAR(500) NULL,             -- v20 반영(005_suspension.sql): 관리자 정지 사유
+    suspended_until DATETIME(6)   NULL,              -- v20 반영(005_suspension.sql): 정지 기한(지나면 자동 해제, NULL=무기한)
     is_active   TINYINT(1)      NOT NULL DEFAULT 1,  -- 1=활성, 0=탈퇴 (본인 탈퇴 여부)
     deleted_at  DATETIME        NULL,                -- 탈퇴 시각 (활성 회원은 NULL)
     last_login_at DATETIME(6)   NULL,                -- v18 추가: 마지막 로그인 시각 (관리자 회원 상세 표시용)
@@ -273,9 +283,9 @@ CREATE TABLE social_accounts (
 CREATE TABLE investment_profile (
     profile_id            BIGINT      NOT NULL AUTO_INCREMENT,
     user_id               BIGINT      NOT NULL,
-    investment_tendency   TINYINT     NOT NULL
+    investment_tendency   INT         NOT NULL
                           COMMENT '1:안정형 2:안정추구형 3:위험중립형 4:적극투자형 5:공격투자형',
-    fund_tendency         TINYINT     NOT NULL
+    fund_tendency         INT         NOT NULL
                           COMMENT '1:수익추구형 2:자유소비형 3:목표달성형',
     investment_level      ENUM('BEGINNER','INTERMEDIATE','EXPERT')
                                       NOT NULL DEFAULT 'BEGINNER',
@@ -354,7 +364,7 @@ CREATE TABLE accounts (
     base_balance BIGINT          NOT NULL DEFAULT 10000000, -- 지급/충전 누계 기준 (수익률 기준)
     balance         BIGINT          NOT NULL DEFAULT 10000000, -- 즉시 사용 가능한 현금 잔고
     frozen_balance  BIGINT          NOT NULL DEFAULT 0,        -- 지정가 주문 예약 잠금 금액
-    charge_count    TINYINT         NOT NULL DEFAULT 0,        -- v10 추가: 사용자 직접 충전 횟수 (3회까지 금액 자유로 즉시 충전, 이후 관리자 승인)
+    charge_count    INT             NOT NULL DEFAULT 0,        -- v10 추가: 사용자 직접 충전 횟수 (3회까지 금액 자유로 즉시 충전, 이후 관리자 승인)
     interest_rate   DECIMAL(5,2)    NOT NULL DEFAULT 0.50,     -- v17 추가: 예치금 연이율(%), 매월 1일 balance 기준 이자 지급
     total_interest  BIGINT          NOT NULL DEFAULT 0,        -- v17 추가: 지급받은 예치금 이자 누계(원)
     version         BIGINT          NOT NULL DEFAULT 0,        -- 낙관적 락용 버전 번호
@@ -794,13 +804,13 @@ CREATE TABLE news_chat_messages (
 /*
   [용도]
   accounts.charge_count(자동 충전, 3회 한도)를 넘긴 사용자가 관리자 승인을 받아
-  추가로 충전하는 절차(ADMIN_API_BACKEND_HANDOFF.md 4.2, 2026-09-07 사용자 승인으로
+  추가로 충전하는 절차(관리자 API — 추가 충전 요청·승인, 2026-09-07 사용자 승인으로
   신규 생성). ChargeRequest.approve()가 호출되면 accounts.applyAdminCharge()로
   balance/base_balance가 올라가되 charge_count는 올리지 않는다(자동 충전 한도와
   별개 트랙이라는 의미).
 
   [계좌당 동시 PENDING 1건 제한 — 정책 확정 전 우선 구현]
-  handoff 문서가 "일·월 누적 한도 등 세부 정책 필요"로 남긴 항목이라, 우선 "계좌당
+  당시 관리자 API 요청서가 "일·월 누적 한도 등 세부 정책 필요"로 남긴 항목이라, 우선 "계좌당
   미처리(PENDING) 요청은 동시에 1건만 허용"으로 좁혀 구현했다(NAMING.md 8-25 참고).
   최종 정책이 확정되면 검증 로직만 서비스 계층에서 조정하면 되고 스키마 변경은
   필요 없다.
@@ -834,7 +844,7 @@ CREATE TABLE charge_requests (
 /*
   [용도]
   계좌 잔고가 바뀌는 모든 지점(최초 지급/자동 충전/관리자 충전·차감/주문 매수·매도/
-  지정가 환불)을 append-only로 남기는 장부(ADMIN_API_BACKEND_HANDOFF.md 4.3,
+  지정가 환불)을 append-only로 남기는 장부(관리자 API — 충전·잔액 변동 원장,
   2026-09-07 사용자 승인으로 신규 생성). 수정·삭제 API가 없다 — 잘못 기록된 값이
   있어도 반대 방향 보정 행을 새로 추가하는 방식으로 처리한다(회계 원장과 동일한 원칙).
 
@@ -878,8 +888,8 @@ CREATE TABLE account_transactions (
 /*
   [용도]
   관리자가 수행한 주요 작업(사용자·계좌 상태 변경, 계좌 잔고 조정, 주문 강제취소,
-  충전요청 승인/거절, 관리자 신규 생성)을 append-only로 남긴다(ADMIN_API_BACKEND_HANDOFF.md
-  5.2, 2026-09-07 사용자 승인으로 신규 생성). handoff 문서 요구사항대로 관리자도
+  충전요청 승인/거절, 관리자 신규 생성)을 append-only로 남긴다(관리자 API — 관리자 작업
+  감사 로그, 2026-09-07 사용자 승인으로 신규 생성). 당시 요구사항대로 관리자도
   수정·삭제할 수 없다 — UPDATE/DELETE API 자체를 만들지 않는다.
 
   [admin_user_id / admin_login_id — FK 아님 + 스냅샷]

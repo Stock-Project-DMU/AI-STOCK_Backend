@@ -28,7 +28,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * MockMarketDataGenerator 검증 테스트(feature/mock-broadcast, KNOWN_ISSUES.md 2번 해소).
+ * MockMarketDataGenerator 검증 테스트(feature/mock-broadcast, KNOWN_ISSUES.md "해소된 이슈").
  * market_data.json의 updatedAt 변경 여부에 따라 구독 중인 종목만 MarketDataListener에
  * 전달되는지, 변경이 없으면 중복 브로드캐스트가 생략되는지 확인한다.
  */

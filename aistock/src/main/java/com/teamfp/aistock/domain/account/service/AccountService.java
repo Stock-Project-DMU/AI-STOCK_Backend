@@ -43,7 +43,7 @@ public class AccountService {
     private static final long ACCOUNT_NUMBER_PAD_OFFSET = 1_000_000_000L;
     // 유저 1명이 만들 수 있는 최대 계좌 수. 원래 성향별로 나눠 투자하도록 3개였으나, 목표 도달
     // 시뮬레이션이 "내 보유종목 + 예수금"을 계좌 하나로 특정해야 해서 1개로 줄였다(2026-10-01,
-    // accounts.uq_account_user — account_single_migration.sql 참고).
+    // accounts.uq_account_user — db/migrations/011_account_single.sql 참고).
     private static final int MAX_ACCOUNT_COUNT = 1;
     // 관리자 계정 계좌의 예치금 한도(Account.ADMIN_MAX_DEPOSIT_AMOUNT) 초과 메시지 — ErrorCode.DEPOSIT_LIMIT_EXCEEDED의
     // 기본 문구는 일반 사용자 한도(1조원) 기준이라 관리자에게는 이 문구로 바꿔 내려준다. 얼마까지 더 넣을 수 있는지
@@ -60,7 +60,7 @@ public class AccountService {
     // HoldingValuationService를 통해서만 접근한다(코드리뷰 반영 — 이전에는 Repository를
     // 직접 참조해 도메인 경계를 넘었었다).
     private final HoldingValuationService holdingValuationService;
-    // 잔고 변동 원장 기록(ADMIN_API_BACKEND_HANDOFF.md 4.3) — 계좌 개설(INITIAL_GRANT)/자동
+    // 잔고 변동 원장 기록(관리자 API — 충전·잔액 변동 원장) — 계좌 개설(INITIAL_GRANT)/자동
     // 충전(AUTO_CHARGE) 시점에 record()를 호출한다.
     private final AccountTransactionService accountTransactionService;
 
@@ -156,7 +156,7 @@ public class AccountService {
      *
      * 관리자 잔고 차감 조정(AdminAccountService)과 같은 Account.applyAdminDeduction()으로 balance와 baseBalance를
      * 함께 낮춘다. 원장은 관리자가 사용자 계좌에서 빼는 ADMIN_DEDUCTION과 계좌 내역에서 구분되도록
-     * AUTO_DEDUCTION(사유 "직접 차감")으로 남긴다(admin_improvements_migration.sql). 동시 요청은
+     * AUTO_DEDUCTION(사유 "직접 차감")으로 남긴다(db/migrations/014_admin_improvements.sql). 동시 요청은
      * chargeBalance()와 같은 이유로 비관적 락으로 순서대로 처리한다.
      */
     @Transactional

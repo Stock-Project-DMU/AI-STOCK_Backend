@@ -14,7 +14,7 @@ import com.teamfp.aistock.domain.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 
 /**
- * 관리자 — 기간별 통계(ADMIN_API_BACKEND_HANDOFF.md 6.1). admin 도메인은 자체
+ * 관리자 — 기간별 통계(관리자 API — 기간별 통계). admin 도메인은 자체
  * Entity/Repository를 두지 않고 user/order 도메인의 Repository 네이티브 집계 쿼리를 그대로
  * 재사용한다(CLAUDE.md 4번).
  */

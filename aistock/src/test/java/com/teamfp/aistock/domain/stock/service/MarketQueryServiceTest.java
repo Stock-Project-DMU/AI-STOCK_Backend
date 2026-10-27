@@ -269,6 +269,21 @@ class MarketQueryServiceTest {
     }
 
     @Test
+    @DisplayName("DART 고유번호 목록을 못 받으면(잘못된 키·장애) '공시 회사 없음'·'ETF 등'이 아니라 DART 일시 장애로 안내한다(2026-10-13)")
+    void getResearch_corpCodeListUnavailable_saysDartUnavailable() {
+        CurrentPriceDetailDto price = org.mockito.Mockito.mock(CurrentPriceDetailDto.class);
+        when(marketDataApiClient.getCurrentPrice("005930")).thenReturn(Optional.of(price));
+        when(dartApiClient.resolveCorpCodeByStockCode("005930")).thenThrow(new CustomException(ErrorCode.EXTERNAL_API_ERROR));
+        when(dividendScheduleService.getSchedules("005930", null)).thenReturn(List.of());
+
+        for (String section : List.of("overview", "finance", "earnings", "dividend")) {
+            StockResearchResponse response = marketQueryService.getResearch("005930", section);
+            assertThat(response.notice()).as(section).contains("DART 응답이 일시적으로 원활하지 않아")
+                    .doesNotContain("찾지 못했습니다", "ETF");
+        }
+    }
+
+    @Test
     @DisplayName("시세가 없어도 개요는 DART 기업 정보·재무 지표를 보여 주고 시세 지표만 비운다(2026-10-12 코드리뷰)")
     void getResearch_overview_withoutPrice_showsDartOnly() {
         DartCompanyResponse company = new DartCompanyResponse("00126380", "삼성전자(주)", null, "삼성전자", null, "Y", null, "12",
