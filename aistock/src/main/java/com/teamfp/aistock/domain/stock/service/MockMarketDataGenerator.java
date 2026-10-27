@@ -9,7 +9,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.teamfp.aistock.infra.marketdata.LocalMarketDataReader;
 import com.teamfp.aistock.infra.marketdata.MarketDataListener;
 import com.teamfp.aistock.infra.marketdata.dto.CurrentPriceDetailDto;
@@ -81,42 +80,9 @@ public class MockMarketDataGenerator {
         }
     }
 
-    /**
-     * 생성기 실시간 스트림(실시세 전환 7단계, {@code MarketDataStreamSubscriber})의 한 묶음을 보낸다 — 파일 저장·폴링을 기다리지 않아
-     * 화면 반영이 빠르다. 묶음의 각 종목에는 이번에 바뀐 쪽(tick·hoga)이 표시돼 있다. tick은 {@link #pollAndBroadcast()}와 같은
-     * {@code lastBroadcastedAt}으로 거르므로 스트림과 폴링이 같은 체결을 두 번 보내지 않는다(스트림이 끊기면 폴링이 이어받는다).
-     */
-    public void broadcastStreamUpdates(JsonNode events) {
-        if (events == null || !events.isArray() || !marketSessionService.isBroadcastWindow()) {
-            return;
-        }
-        Set<String> subscribedStockCodes = stockSubscriptionManager.getActiveSubscribedStockCodes();
-        if (subscribedStockCodes.isEmpty()) {
-            return;
-        }
-        for (JsonNode event : events) {
-            String stockCode = event.path("stockCode").asText("");
-            if (!subscribedStockCodes.contains(stockCode)) {
-                continue;
-            }
-            if (event.path("tick").asBoolean(false)) {
-                localMarketDataReader.convert(event, CurrentPriceDetailDto.class)
-                        // 현재가 0 이하(첫 시세 전·불완전한 수신)는 보내지 않는다 — 0원 tick이 매수 지정가를 모두 체결시키는 것을 막는다.
-                        .filter(price -> price.getCurrentPrice() > 0 && price.getUpdatedAt() != null
-                                && hasChanged(stockCode, price.getUpdatedAt()))
-                        .ifPresent(this::broadcastTick);
-            }
-            if (event.path("hoga").asBoolean(false)) {
-                localMarketDataReader.convert(event, HogaData.class)
-                        .filter(hoga -> hoga.getAskPrices() != null)
-                        .ifPresent(this::broadcastHoga);
-            }
-        }
-    }
-
-    // 직전에 보낸 체결보다 "새로운" 것만 보낸다 — 스트림이 최신 값을 먼저 보낸 뒤 1초 늦은 파일을 읽은 폴링이 지나간 체결을 다시 보내
-    // 화면 가격이 잠깐 뒤로 가는 일을 막는다(생성기의 updatedAt은 계속 증가한다). 단, 30초 넘게 뒤로 가면 생성기가 재시작했거나 시계가
-    // 바뀐 것이라 다시 받는다 — 그렇지 않으면 백엔드를 재시작할 때까지 그 종목 시세가 멈춘다(2026-10-12 코드리뷰).
+    // 직전에 보낸 체결보다 "새로운" 것만 보낸다 — 생성기의 updatedAt은 계속 증가하므로 지나간 체결을 다시 보내 화면 가격이 잠깐
+    // 뒤로 가는 일을 막는다. 단, 30초 넘게 뒤로 가면 생성기가 재시작했거나 시계가 바뀐 것이라 다시 받는다 — 그렇지 않으면 백엔드를
+    // 재시작할 때까지 그 종목 시세가 멈춘다(2026-10-12 코드리뷰).
     static final long CLOCK_RESET_TOLERANCE_SECONDS = 30;
 
     private boolean hasChanged(String stockCode, LocalDateTime updatedAt) {

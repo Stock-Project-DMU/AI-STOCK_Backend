@@ -60,8 +60,6 @@ jwt:
 # 배포 서버는 generator와 파일 시스템을 공유하지 못하므로 MARKET_DATA_URL에 generator의 GET /market-data 주소를 넣는다.
 market-data:
   url: ${MARKET_DATA_URL}
-  # 실시간 스트림은 같은 생성기의 /stream으로 받는다(주소는 url에서 자동으로 만든다).
-  stream-enabled: ${MARKET_DATA_STREAM_ENABLED:true}
 
 admin:
   signup-code: ${ADMIN_SIGNUP_CODE}

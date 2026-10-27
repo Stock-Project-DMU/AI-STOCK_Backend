@@ -59,7 +59,7 @@ local-market-data-generator가 LS증권에서 받아 만드는 `market_data.json
 |---|---|---|
 | 로컬 개발(기본) | 설정 없음 | `../../local-market-data-generator/output`의 파일을 읽는다 |
 | 폴더 배치가 기본과 다름 | `MARKET_DATA_PATH=<generator의 output 폴더 절대경로>` | 지정 경로를 읽는다 |
-| 배포 서버(파일 공유 불가) | `MARKET_DATA_URL=http://<generator 호스트>:8081/market-data` | generator HTTP 서버에서 같은 JSON을 가져온다(prod 프로필 필수값). 과거 시세는 같은 서버의 `/price-history`에서 10분마다 받고, 실시간 체결·호가는 같은 서버의 `/stream`으로 받는다 |
+| 배포 서버(파일 공유 불가) | `MARKET_DATA_URL=http://<generator 호스트>:8081/market-data` | generator HTTP 서버에서 같은 JSON을 가져온다(prod 프로필 필수값). 과거 시세는 같은 서버의 `/price-history`에서 10분마다 받는다 |
 
 - generator는 git에 포함되지 않은 별도 프로젝트다. `AI-STOCK_Backend`와 같은 상위 폴더에 두고, generator `.env`의
   `OUTPUT_DIR`도 같은 `output` 폴더를 가리키게 한다(generator의 `OUTPUT_DIR` 기본값은 `local-market-data/`다).
@@ -252,19 +252,14 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
 - **실시간 시세**: `MockMarketDataGenerator`가 1초마다(`market-data.poll-interval-millis`) `market_data.json`을 읽어, 구독 중인
   종목 중 갱신된 종목의 tick·호가를(정규장과 마감 후 60초 동안만 — `MarketSessionService.isBroadcastWindow()`) `MarketDataListener`(`StockBroadcastService`)로 넘긴다 → Redis 캐싱 + STOMP 브로드캐스팅(fix/local-market-data-stable에서
   외부 시세 데이터 WebSocket을 제거한 뒤 유일한 실시간 소스)
-- **실시간 스트림(실시세 전환 7단계)**: `MarketDataStreamSubscriber`가 생성기 `GET /stream`(SSE — 바뀐 종목의 체결·호가를 0.1초
-  단위로 묶어 보냄)을 `MarketDataStreamClient`로 열어 두고, 받은 묶음을 `LocalMarketDataReader.applyStreamQuotes()`(REST 현재가·주문
-  체결가에 최신 체결 반영) → `MockMarketDataGenerator.broadcastStreamUpdates()`(화면 전송) 순서로 넘긴다. 체결은 폴링과 같은
-  `lastBroadcastedAt`으로 "더 새로운 것만" 보내 중복·역행이 없고, 스트림이 끊기면 1초 폴링만으로 계속 동작하며 1~5초 간격으로
-  다시 연결한다. 주소는 `market-data.stream-url` → 없으면 `market-data.url`의 `/market-data`를 `/stream`으로 → 없으면
-  `http://localhost:8081/stream`. `market-data.stream-enabled`는 기본 false(테스트가 실행 중인 생성기 시세를 받지 않게)이고
-  application-dev.yml·application-prod.yml에서 true로 켠다. 끄면 폴링만 쓴다.
+- **실시간 스트림(SSE) 제거(2026-10-27)**: 생성기 `GET /stream`을 받던 `MarketDataStreamSubscriber`·`MarketDataStreamClient`와
+  `market-data.stream-enabled`·`stream-url` 설정을 없앴다. 실시간 시세는 위 1초 폴링 하나만 쓴다.
 - **실시간 처리 보완(2026-10-12 코드리뷰)**: `StockBroadcastService`의 종목별 200ms 제한에 걸린 tick·호가는 버리지 않고 최신 1건을
-  창이 끝나면 보낸다(trailing — 마지막 체결이 화면·지정가 체결에서 빠지지 않게). 현재가 0 이하 tick은 보내지 않는다. 1초 폴링과
-  스트림 감시는 전용 스케줄러 `marketDataScheduler`(스레드 1개)에서 돌아 시황 브리핑 같은 다른 `@Scheduled`(기본 `taskScheduler`, 스레드 4개)에
+  창이 끝나면 보낸다(trailing — 마지막 체결이 화면·지정가 체결에서 빠지지 않게). 현재가 0 이하 tick은 보내지 않는다. 1초 폴링은
+  전용 스케줄러 `marketDataScheduler`(스레드 1개)에서 돌아 시황 브리핑 같은 다른 `@Scheduled`(기본 `taskScheduler`, 스레드 4개)에
   막히지 않는다. 늦게 보내는 값이 그사이 나간 더 새 값보다 오래됐으면 버리고(가격 역행 방지), 생성기 updatedAt이 30초 넘게 뒤로 가면
   재시작으로 보고 다시 받는다. 올해 휴장일이 `krx_holidays.json`에 없으면 기동 때 경고 로그를 남긴다. 지정가 체결 판단(`checkAndExecute`)은
-  `tickTaskExecutor`로 넘겨 스트림 수신 스레드가 DB 대기에 막히지 않게 한다(시세 캐시·화면 전송은 즉시). DART 날짜 계산은 한국 시간
+  `tickTaskExecutor`로 넘겨 폴링 스레드가 DB 대기에 막히지 않게 한다(시세 캐시·화면 전송은 즉시). DART 날짜 계산은 한국 시간
   기준이고, 4월 1일~5월 15일에는 분기 실적 탭이 작년 사업보고서를 먼저 쓴다. 배포 URL 모드의 과거 시세 다운로드는 현재가 조회와 다른 잠금을 쓰고, 실패하면 30초 뒤 다시 받는다.
 - **STOMP 토픽**: `/topic/stock/{stockCode}` (브로드캐스팅), `/user/{userId}/queue` (유니캐스팅)
 - **비회원 실시간 시세**: `StompAuthInterceptor`는 토큰 없는 CONNECT를 익명 세션으로 허용하되,

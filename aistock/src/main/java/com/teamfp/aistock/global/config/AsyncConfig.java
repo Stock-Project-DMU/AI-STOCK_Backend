@@ -86,8 +86,8 @@ public class AsyncConfig {
     }
 
     /**
-     * 실시간 시세 전용 스케줄러(스레드 1개) — 1초 폴링({@code MockMarketDataGenerator.pollAndBroadcast})과 스트림 감시
-     * ({@code MarketDataStreamSubscriber.checkIdle})가 오래 걸리는 다른 예약 작업(Gemini 호출 등)에 막히지 않게 분리한다.
+     * 실시간 시세 전용 스케줄러(스레드 1개) — 1초 폴링({@code MockMarketDataGenerator.pollAndBroadcast})이
+     * 오래 걸리는 다른 예약 작업(Gemini 호출 등)에 막히지 않게 분리한다.
      * 스레드를 1개만 더 써서 자원 증가는 최소다.
      */
     @Bean

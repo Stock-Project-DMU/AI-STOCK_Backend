@@ -313,8 +313,8 @@ AWS Parameter Store에서 민감한 설정값(JWT_SECRET, DB 자격증명, `ADMI
 ## 6. feature/ls-websocket (실시간 시세)
 
 > 백엔드는 외부 시세 데이터 제공사에 직접 연결하지 않는다. 실시간 tick·호가는 `MockMarketDataGenerator`(domain/stock/service)가
-> local-market-data-generator의 market_data.json을 1초(`market-data.poll-interval-millis`)마다 읽거나
-> `MarketDataStreamSubscriber`가 생성기 `GET /stream`(SSE)으로 받아 아래 리스너로 전달한다.
+> local-market-data-generator의 market_data.json을 1초(`market-data.poll-interval-millis`)마다 읽어
+> 아래 리스너로 전달한다(생성기 SSE 스트림 수신은 2026-10-27 제거).
 
 | 클래스 | 주요 메서드 |
 |---|---|
@@ -1737,6 +1737,7 @@ local-market-data-generator의 `dividend_collector.py`가 만든 `dividends.json
 | 호가 10단계·총잔량 (2026-10-12) | 생성기가 LS 실시간 호가(H1_/HA_)·t1101의 10단계를 그대로 담는다(이전 5단계). `HogaData`·`HogaDto`·`HogaResponse`에 `totalAskVolume`, `totalBidVolume`(Long — 매도·매수 총잔량, 없으면 null) 추가. market_data.json 키도 같은 이름 |
 | 주·월봉 거래량 단위 (2026-10-12) | LS t1305 주·월봉 거래량은 천 주 단위라 `LocalMarketDataReader.getPriceHistory()`가 주·월봉(dwmcode 2·3)을 읽을 때 1,000을 곱해 일봉·실시세와 같은 주 단위로 내려준다(상수 `WEEK_MONTH_VOLUME_UNIT`). `MarketDataApiClient`의 private `toThousandShares()`는 삭제 |
 | 실시간 스트림 수신 (실시세 전환 7단계) | `MarketDataStreamClient`(infra/marketdata) — 생성기 `GET /stream`(SSE, 바뀐 종목의 체결·호가를 0.1초 단위로 묶은 JSON 배열)을 연다. `consume(Consumer<JsonNode> onEvents)`(연결이 끊길 때까지 블록), `closeIfIdle(long idleMillis)`(heartbeat도 끊긴 연결 정리), `resolveStreamUrl()`(설정 `market-data.stream-url` → 없으면 `market-data.url`의 `/market-data`를 `/stream`으로 → 없으면 `http://localhost:8081/stream`). `MarketDataStreamSubscriber`(domain/stock/service) — 앱 기동 후 전용 스레드로 `consume()`을 돌리고 끊기면 1~5초 뒤 다시 연결, `start()`(`ApplicationReadyEvent`), `stop()`(`@PreDestroy`), `checkIdle()`(`@Scheduled` 10초). 설정 `market-data.stream-enabled`(기본 true). `MockMarketDataGenerator.broadcastStreamUpdates(JsonNode events)` — 스트림 묶음 중 구독 종목의 tick(`updatedAt`이 바뀐 경우만 — 폴링과 같은 `lastBroadcastedAt`을 써서 중복 전송 없음)·호가를 보낸다. 스트림이 끊겨도 `pollAndBroadcast()`가 그대로 동작한다 |
+| 실시간 스트림 제거 (2026-10-27) | 생성기 SSE(`GET /stream`) 수신을 없앴다 — 클래스 `MarketDataStreamClient`·`MarketDataStreamSubscriber`, 메서드 `MockMarketDataGenerator.broadcastStreamUpdates(JsonNode)`·`LocalMarketDataReader.applyStreamQuotes(JsonNode)`, `LocalMarketDataReader`의 private 필드 `liveQuotes`·`liveQuotesVersion`·`mergedLiveQuotesVersion`·`cachedFilePrices`·상수 `CLOCK_RESET_TOLERANCE_SECONDS`와 private `mergeLiveQuotes(...)`, 설정 `market-data.stream-enabled`·`market-data.stream-url`, 테스트 `MarketDataStreamClientTest` 삭제. `CurrentPriceDetailDto`는 `@Builder`로 되돌림(toBuilder 미사용). `MockMarketDataGenerator.CLOCK_RESET_TOLERANCE_SECONDS`(폴링의 updatedAt 순서 판단)는 그대로 둔다 |
 
 ## 9. 공통 변수명 컨벤션 (모든 도메인 공통 적용)
 

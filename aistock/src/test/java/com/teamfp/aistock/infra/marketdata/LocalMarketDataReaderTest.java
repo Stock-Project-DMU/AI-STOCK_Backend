@@ -39,44 +39,6 @@ class LocalMarketDataReaderTest {
     }
 
     @Test
-    @DisplayName("실시간 스트림 체결이 파일보다 새로우면 가격·등락·거래량만 덮어 쓰고, 파일이 더 새로워지면 파일 값을 쓴다")
-    void applyStreamQuotes_overlaysNewerQuote() throws Exception {
-        Files.writeString(tempDir.resolve("market_data.json"), """
-                {"005930": {"stockCode":"005930","stockName":"삼성전자","currentPrice":252500,"changeAmount":-9500,
-                   "changeRate":-3.62,"volume":9000000,"per":50.8,"updatedAt":"2026-10-12T13:20:00.000"}}""");
-        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-
-        // 더 이른 체결·tick=false 묶음은 무시
-        reader.applyStreamQuotes(mapper.readTree("""
-                [{"stockCode":"005930","currentPrice":250000,"volume":1,"updatedAt":"2026-10-12T13:19:59.000","tick":true},
-                 {"stockCode":"005930","currentPrice":1,"volume":1,"updatedAt":"2026-10-12T13:30:00.000","tick":false}]"""));
-        assertThat(reader.getCurrentPrice("005930")).get().satisfies(price -> assertThat(price.getCurrentPrice()).isEqualTo(252500L));
-
-        reader.applyStreamQuotes(mapper.readTree("""
-                [{"stockCode":"005930","currentPrice":253000,"changeAmount":-9000,"changeRate":-3.44,"volume":9100000,
-                  "updatedAt":"2026-10-12T13:20:00.300","tick":true}]"""));
-        assertThat(reader.getCurrentPrice("005930")).get().satisfies(price -> {
-            assertThat(price.getCurrentPrice()).isEqualTo(253000L);
-            assertThat(price.getVolume()).isEqualTo(9_100_000L);
-            assertThat(price.getPer()).isEqualTo(50.8);              // 파일에만 있는 지표는 그대로
-            assertThat(price.getStockName()).isEqualTo("삼성전자");
-        });
-
-        // updatedAt이 30초 넘게 뒤로 간 체결(생성기 재시작·시계 변경)은 다시 받는다 — 화면 전송과 같은 기준. 예전 시계의 실시간 값(253,000)이
-        // 계속 우선하지 않고, 지금은 파일(13:20)이 더 새로우므로 파일 값(252,500)이 보인다.
-        reader.applyStreamQuotes(mapper.readTree("""
-                [{"stockCode":"005930","currentPrice":251000,"changeAmount":-11000,"changeRate":-4.2,"volume":9200000,
-                  "updatedAt":"2026-10-12T13:15:00.000","tick":true}]"""));
-        assertThat(reader.getCurrentPrice("005930")).get().satisfies(price -> assertThat(price.getCurrentPrice()).isEqualTo(252500L));
-
-        // 스트림이 끊긴 뒤 파일이 더 새로워지면 파일 값으로 돌아간다
-        Files.writeString(tempDir.resolve("market_data.json"), """
-                {"005930": {"stockCode":"005930","stockName":"삼성전자","currentPrice":254000,"changeAmount":-8000,
-                   "changeRate":-3.05,"volume":9200000,"per":50.8,"pbr":5.76,"updatedAt":"2026-10-12T13:20:05.000"}}""");
-        assertThat(reader.getCurrentPrice("005930")).get().satisfies(price -> assertThat(price.getCurrentPrice()).isEqualTo(254000L));
-    }
-
-    @Test
     @DisplayName("호가 10단계와 매도·매수 총잔량을 읽는다(2026-10-12)")
     void getHoga_readsTenLevelsAndTotals() throws IOException {
         Files.writeString(tempDir.resolve("market_data.json"), """

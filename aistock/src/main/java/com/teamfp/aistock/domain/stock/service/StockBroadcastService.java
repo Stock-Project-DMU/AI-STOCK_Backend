@@ -53,7 +53,7 @@ public class StockBroadcastService implements MarketDataListener {
     // 시세 송신기(MockMarketDataGenerator)가 이 리스너를 먼저 생성할 때 주문 서비스까지 즉시 만들면
     // OrderExecutionService → StockSubscriptionManager로 이어지는 빈 생성 순서가 꼬일 수 있어 지연 주입한다(2026-10-01 순환 의존 대응).
     private final OrderExecutionService orderExecutionService;
-    // 지정가 체결 판단(DB 잠금)은 체결 전용 스레드풀로 넘긴다 — 실시간 스트림 수신 스레드가 DB 대기에 막혀 전 종목 시세가 함께 밀리지
+    // 지정가 체결 판단(DB 잠금)은 체결 전용 스레드풀로 넘긴다 — 실시간 시세 폴링 스레드가 DB 대기에 막혀 전 종목 시세가 함께 밀리지
     // 않게 한다(2026-10-12 코드리뷰). 시세 캐시·화면 전송은 바로 한다.
     private final Executor tickTaskExecutor;
 
@@ -71,7 +71,7 @@ public class StockBroadcastService implements MarketDataListener {
     private final ConcurrentHashMap<String, Long> lastHogaProcessedAt = new ConcurrentHashMap<>();
 
     // 200ms 제한에 걸린 tick·호가는 버리지 않고 종목별 최신 1건만 남겨 창이 끝나면 보낸다(trailing, 2026-10-12 코드리뷰).
-    // 실시간 스트림이 0.1초 단위로 오면서 제한에 걸린 마지막 체결이 다음 거래 전까지 화면·지정가 체결에 반영되지 않던 문제를 막는다.
+    // 제한에 걸린 마지막 체결이 다음 거래 전까지 화면·지정가 체결에 반영되지 않던 문제를 막는다.
     private final ConcurrentHashMap<String, Pending<TickData>> pendingTicks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Pending<HogaData>> pendingHogas = new ConcurrentHashMap<>();
     // 종목별로 마지막에 보낸 값의 수신 시각 — 늦게 보내는 값이 그사이 이미 나간 더 새 값보다 오래됐으면 버린다(가격이 뒤로 가지 않게).

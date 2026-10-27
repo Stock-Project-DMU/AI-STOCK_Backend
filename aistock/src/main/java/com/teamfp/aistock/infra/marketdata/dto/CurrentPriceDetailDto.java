@@ -19,8 +19,7 @@ import lombok.NoArgsConstructor;
  * (MarketDataApiClient 클래스 주석 참고) 전용 타입을 둔다.
  */
 @Getter
-// toBuilder — LocalMarketDataReader가 파일 값에 실시간 스트림의 최신 체결(가격·등락·거래량·오늘 시고저)만 덮어 쓸 때 쓴다(실시세 전환 7단계).
-@Builder(toBuilder = true)
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class CurrentPriceDetailDto {

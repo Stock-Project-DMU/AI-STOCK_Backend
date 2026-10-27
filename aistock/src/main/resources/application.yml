@@ -42,12 +42,6 @@ market-data:
   url: ${MARKET_DATA_URL:}
   # 생성기 데이터를 확인해 실시간 시세를 보내는 주기(ms). 생성기가 바뀐 내용을 1초마다 저장한다.
   poll-interval-millis: ${MARKET_DATA_POLL_INTERVAL_MILLIS:1000}
-  # 생성기 실시간 스트림(GET /stream, SSE)을 받아 바로 보낸다(실시세 전환 7단계) — 파일 저장·폴링(각 1초)을 기다리지 않는다.
-  # 끊기거나 꺼 두면 위 1초 폴링만으로 동작한다. 주소가 비어 있으면 url의 /market-data를 /stream으로 바꿔 쓰고,
-  # url도 없으면(로컬) http://localhost:8081/stream.
-  # 기본은 꺼짐 — 프로필 없이 도는 테스트가 실행 중인 생성기의 실제 시세를 받지 않게 한다. dev·prod 프로필에서 켠다(2026-10-12 코드리뷰).
-  stream-enabled: ${MARKET_DATA_STREAM_ENABLED:false}
-  stream-url: ${MARKET_DATA_STREAM_URL:}
 
 # 정규장(평일 09:00~15:30, krx_holidays.json 휴장일 제외)에만 주문·실시간 시세를 허용한다(MarketSessionService).
 # false면 항상 정규장으로 본다 — 주말·야간에 주문 흐름을 검증하는 통합 테스트용이며 운영에서는 끄지 않는다.
