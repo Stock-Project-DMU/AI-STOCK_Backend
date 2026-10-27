@@ -22,7 +22,7 @@ import lombok.extern.slf4j.Slf4j;
  * 단일 서버 운영을 전제로 서버 메모리(ConcurrentHashMap)로 카운트를 관리한다. 다중 서버로
  * 확장되면 Redis 키로 승격이 필요하다.
  *
- * 외부 시세 데이터 실시간 구독은 없다(fix/local-market-data-stable에서 real 모드 제거) — 이 카운트는
+ * 외부 시세 데이터 실시간 구독은 없다 — 이 카운트는
  * MockMarketDataGenerator가 market_data.json에서 어느 종목을 실시간으로 보낼지 정하는 데 쓰인다.
  *
  * 미체결 주문(order) 출처는 "상세페이지를 떠나도 체결 tick이 끊기지 않게" 하기 위한 것이다 —

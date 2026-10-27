@@ -19,7 +19,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import com.teamfp.aistock.domain.order.service.OrderExecutionService;
-import com.teamfp.aistock.domain.stock.dto.HogaDto;
 import com.teamfp.aistock.domain.stock.dto.StockPriceDto;
 import com.teamfp.aistock.domain.stock.dto.response.HogaResponse;
 import com.teamfp.aistock.domain.stock.dto.response.StockPriceResponse;
@@ -33,6 +32,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -184,8 +184,8 @@ class StockBroadcastServiceTest {
     }
 
     @Test
-    @DisplayName("호가 수신 시 Redis 캐싱과 /hoga 토픽 STOMP 브로드캐스팅이 함께 호출된다")
-    void onHogaReceived_CachesAndBroadcastsToHogaTopic() {
+    @DisplayName("호가 수신 시 Redis에 저장하지 않고 /hoga 토픽으로 STOMP 브로드캐스팅한다")
+    void onHogaReceived_BroadcastsToHogaTopicWithoutCaching() {
         HogaData hogaData = HogaData.builder()
                 .stockCode("005930")
                 .askPrices(List.of(75100L))
@@ -196,7 +196,7 @@ class StockBroadcastServiceTest {
 
         stockBroadcastService.onHogaReceived(hogaData);
 
-        verify(redisStockCacheService).saveHogaData(eq("005930"), any(HogaDto.class));
+        verifyNoInteractions(redisStockCacheService);
         verify(messagingTemplate).convertAndSend(eq("/topic/stock/005930/hoga"), any(HogaResponse.class));
     }
 

@@ -17,8 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * 백엔드에 함께 배포되는 등록 종목 목록(classpath {@code stocks.json}, 2026-10-02 기준 105개)을 읽는다.
  *
- * <p>처음에는 real 모드 등록 종목 순위용으로 추가했고(2026-10-02), fix/local-market-data-stable에서 real 모드를 없앤 뒤에는
- * 시세 데이터와 무관하게 "등록 종목코드 → 종목명·시장·상장주식수" 카탈로그로 쓴다(예: feature/dividend의 배당 일정 종목명).
+ * <p>시세 데이터와 무관하게 "등록 종목코드 → 종목명·시장·상장주식수" 카탈로그로 쓴다(예: feature/dividend의 배당 일정 종목명).
  * 외부 시세 데이터 API는 호출하지 않는다.</p>
  *
  * <p>local-market-data-generator(별도 프로젝트, git 미포함)의 stocks.json과 종목 구성이 같아야 한다 —

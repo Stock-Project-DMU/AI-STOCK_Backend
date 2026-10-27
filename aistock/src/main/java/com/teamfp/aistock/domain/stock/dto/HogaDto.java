@@ -9,9 +9,9 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
- * Redis {@code stock:hoga:{stockCode}} 캐시(TTL 2초)에 JSON으로 저장되는 실시간 호가창 정보.
+ * STOMP {@code /topic/stock/{stockCode}/hoga}로 보내는 실시간 호가창 정보.
  *
- * 매도/매수 각 5단계의 가격·잔량을 담는다. 인덱스 0이 가장 우선순위가 높은 호가
+ * 매도/매수 각 최대 10단계의 가격·잔량을 담는다. 인덱스 0이 가장 우선순위가 높은 호가
  * (매도는 가장 낮은 가격, 매수는 가장 높은 가격)이며, askPrices[i]와 askVolumes[i],
  * bidPrices[i]와 bidVolumes[i]는 서로 같은 인덱스끼리 짝을 이룬다.
  * 호가는 주가보다 변동이 잦아 TTL을 2초로 더 짧게 잡는다(RedisStockCacheService 참고).

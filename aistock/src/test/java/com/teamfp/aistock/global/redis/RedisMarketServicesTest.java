@@ -17,7 +17,6 @@ import org.springframework.data.redis.core.ValueOperations;
 
 import com.teamfp.aistock.domain.order.dto.PendingOrderDto;
 import com.teamfp.aistock.domain.order.repository.OrderRepository;
-import com.teamfp.aistock.domain.stock.dto.HogaDto;
 import com.teamfp.aistock.domain.stock.dto.StockPriceDto;
 
 import tools.jackson.databind.ObjectMapper;
@@ -143,31 +142,6 @@ class RedisMarketServicesTest {
 
         assertThat(result.getStockCode()).isEqualTo("005930");
         assertThat(result.getCurrentPrice()).isEqualTo(75000);
-    }
-
-    @Test
-    @DisplayName("호가 캐시 저장/조회 - Jackson 3(tools.jackson) 직렬화 정상 동작")
-    void saveAndGetHogaData_Success() {
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        HogaDto dto = HogaDto.builder()
-                .stockCode("005930")
-                .askPrices(List.of(75100L, 75200L))
-                .askVolumes(List.of(100L, 200L))
-                .bidPrices(List.of(75000L, 74900L))
-                .bidVolumes(List.of(150L, 250L))
-                .updatedAt(LocalDateTime.now())
-                .build();
-
-        redisStockCacheService.saveHogaData("005930", dto);
-
-        ArgumentCaptor<String> jsonCaptor = ArgumentCaptor.forClass(String.class);
-        verify(valueOperations).set(eq("stock:hoga:005930"), jsonCaptor.capture(), eq(Duration.ofSeconds(2)));
-
-        when(valueOperations.get("stock:hoga:005930")).thenReturn(jsonCaptor.getValue());
-        HogaDto result = redisStockCacheService.getHogaData("005930");
-
-        assertThat(result.getAskPrices()).containsExactly(75100L, 75200L);
-        assertThat(result.getBidPrices()).containsExactly(75000L, 74900L);
     }
 
     @Test

@@ -11,7 +11,6 @@ import org.springframework.stereotype.Service;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
-import com.teamfp.aistock.domain.stock.dto.HogaDto;
 import com.teamfp.aistock.domain.stock.dto.StockPriceDto;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
@@ -35,12 +34,8 @@ public class RedisStockCacheService {
     private final ObjectMapper objectMapper; // DTO <-> JSON 문자열 변환용 (RedisTemplate이 String만 다루므로 필요)
 
     private static final String STOCK_PRICE_KEY = "stock:price:";
-    private static final String STOCK_HOGA_KEY = "stock:hoga:";
 
-    // 주가는 5초, 호가는 2초로 TTL을 다르게 둔다.
-    // 호가는 매수/매도 잔량이 주가보다 훨씬 자주 바뀌기 때문에 더 짧게 잡았다.
     private static final long PRICE_TTL_SECONDS = 5;  // 현재가 캐시 TTL (초)
-    private static final long HOGA_TTL_SECONDS = 2;   // 호가창 캐시 TTL (초, 변동이 더 잦아서 더 짧게)
 
     /**
      * 실시간 현재가를 캐시에 저장한다.
@@ -122,42 +117,5 @@ public class RedisStockCacheService {
             }
         }
         return result;
-    }
-
-    /**
-     * 실시간 호가창(매수/매도 5단계) 데이터를 캐시에 저장한다.
-     *
-     * @param stockCode 종목코드
-     * @param dto       저장할 호가 정보
-     */
-    public void saveHogaData(String stockCode, HogaDto dto) {
-        try {
-            redisTemplate.opsForValue().set(
-                STOCK_HOGA_KEY + stockCode,
-                objectMapper.writeValueAsString(dto),
-                Duration.ofSeconds(HOGA_TTL_SECONDS)
-            );
-        } catch (JacksonException e) {
-            throw new CustomException(ErrorCode.REDIS_SERIALIZATION_ERROR, e);
-        }
-    }
-
-    /**
-     * 캐시된 호가창 데이터를 조회한다.
-     * TTL이 지나 캐시가 비어있으면 null을 반환한다.
-     *
-     * @param stockCode 종목코드
-     * @return 캐시된 호가 DTO, 캐시가 없으면 null
-     */
-    public HogaDto getHogaData(String stockCode) {
-        String json = redisTemplate.opsForValue().get(STOCK_HOGA_KEY + stockCode);
-        if (json == null) {
-            return null;
-        }
-        try {
-            return objectMapper.readValue(json, HogaDto.class);
-        } catch (JacksonException e) {
-            throw new CustomException(ErrorCode.REDIS_SERIALIZATION_ERROR, e);
-        }
     }
 }

@@ -8,8 +8,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -35,8 +33,7 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * 시세 데이터의 유일한 원천 — local-market-data-generator가 갱신하는 {@code market_data.json}(또는 같은 내용을
- * 내려주는 HTTP 엔드포인트)과 과거 시세 스냅샷 {@code price_history.json}을 읽는다(fix/local-market-data-stable에서
- * 외부 시세 데이터 제공사 API 직접 호출(real 모드)을 없애면서 모든 시세 클라이언트가 이 컴포넌트만 쓰게 됐다).
+ * 내려주는 HTTP 엔드포인트)과 과거 시세 스냅샷 {@code price_history.json}을 읽는다. 모든 시세 클라이언트가 이 컴포넌트만 쓴다.
  *
  * <p>{@code market_data.json} 구조 — 종목코드를 키로 종목 객체를 담고, 시장 전체 데이터는 {@code "_market"} 키에 담는다.
  * {@code "_"}로 시작하는 키는 종목이 아니므로 종목 목록({@link #getAllCurrentPrices()})에서 뺀다.</p>
@@ -134,80 +131,13 @@ public class LocalMarketDataReader {
                     convert(entry.getValue(), CurrentPriceDetailDto.class).ifPresent(price -> prices.put(entry.getKey(), price));
                 }
             });
-            cachedFilePrices = Map.copyOf(prices);
+            cachedPrices = Map.copyOf(prices);
             cachedPricesRoot = root;
-            mergedLiveQuotesVersion = -1L;
-        }
-        long liveVersion = liveQuotesVersion.get();
-        if (liveVersion != mergedLiveQuotesVersion) {
-            cachedPrices = mergeLiveQuotes(cachedFilePrices);
-            mergedLiveQuotesVersion = liveVersion;
         }
         return cachedPrices;
     }
 
     private JsonNode cachedPricesRoot;
-    private Map<String, CurrentPriceDetailDto> cachedFilePrices = Map.of();
-
-    // 실시간 스트림(MarketDataStreamClient, 실시세 전환 7단계)으로 받은 종목별 최신 체결. 파일(1초 저장·1초 캐시)보다 새로우면
-    // 현재가 조회에 덮어 써서 REST 현재가·주문 체결가도 화면 실시간 시세와 같은 값을 쓴다. 스트림이 끊기면 파일 값이 더 새로워져
-    // 자연히 파일 값으로 돌아간다(updatedAt 비교).
-    private final ConcurrentHashMap<String, CurrentPriceDetailDto> liveQuotes = new ConcurrentHashMap<>();
-    // updatedAt이 이만큼 넘게 뒤로 가면 생성기 재시작·시계 변경으로 보고 다시 받는다 — 화면 전송(MockMarketDataGenerator)과 같은 기준이라
-    // 화면 가격과 REST·주문 체결가가 어긋나지 않는다(2026-10-12 코드리뷰).
-    static final long CLOCK_RESET_TOLERANCE_SECONDS = 30;
-    private final AtomicLong liveQuotesVersion = new AtomicLong();
-    private long mergedLiveQuotesVersion = -1L;
-
-    /** 실시간 스트림 묶음(JSON 배열) 중 체결(tick=true)을 종목별 최신 값으로 기억한다. 더 이른 updatedAt은 버린다. */
-    public void applyStreamQuotes(JsonNode events) {
-        if (events == null || !events.isArray()) {
-            return;
-        }
-        boolean isChanged = false;
-        for (JsonNode event : events) {
-            if (!event.path("tick").asBoolean(false)) {
-                continue;
-            }
-            CurrentPriceDetailDto quote = convert(event, CurrentPriceDetailDto.class).orElse(null);
-            if (quote == null || quote.getStockCode() == null || quote.getUpdatedAt() == null || quote.getCurrentPrice() <= 0) {
-                continue;
-            }
-            CurrentPriceDetailDto previous = liveQuotes.get(quote.getStockCode());
-            if (previous == null || quote.getUpdatedAt().isAfter(previous.getUpdatedAt())
-                    || quote.getUpdatedAt().isBefore(previous.getUpdatedAt().minusSeconds(CLOCK_RESET_TOLERANCE_SECONDS))) {
-                liveQuotes.put(quote.getStockCode(), quote);
-                isChanged = true;
-            }
-        }
-        if (isChanged) {
-            liveQuotesVersion.incrementAndGet();
-        }
-    }
-
-    private Map<String, CurrentPriceDetailDto> mergeLiveQuotes(Map<String, CurrentPriceDetailDto> filePrices) {
-        if (liveQuotes.isEmpty()) {
-            return filePrices;
-        }
-        Map<String, CurrentPriceDetailDto> merged = new LinkedHashMap<>(filePrices);
-        liveQuotes.forEach((stockCode, live) -> {
-            CurrentPriceDetailDto base = merged.get(stockCode);
-            if (base != null && (base.getUpdatedAt() == null || live.getUpdatedAt().isAfter(base.getUpdatedAt()))) {
-                merged.put(stockCode, base.toBuilder()
-                        .currentPrice(live.getCurrentPrice())
-                        .changeAmount(live.getChangeAmount())
-                        .changeRate(live.getChangeRate())
-                        .volume(live.getVolume())
-                        .openPrice(live.getOpenPrice() != null ? live.getOpenPrice() : base.getOpenPrice())
-                        .highPrice(live.getHighPrice() != null ? live.getHighPrice() : base.getHighPrice())
-                        .lowPrice(live.getLowPrice() != null ? live.getLowPrice() : base.getLowPrice())
-                        .tradingDate(live.getTradingDate() != null ? live.getTradingDate() : base.getTradingDate())
-                        .updatedAt(live.getUpdatedAt())
-                        .build());
-            }
-        });
-        return Map.copyOf(merged);
-    }
 
     /** 종목코드의 호가(askPrices 등). 원본·종목·호가 필드가 없으면 빈 값. */
     public Optional<HogaData> getHoga(String stockCode) {

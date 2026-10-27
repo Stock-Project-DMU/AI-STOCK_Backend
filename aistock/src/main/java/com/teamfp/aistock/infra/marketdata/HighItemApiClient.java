@@ -18,9 +18,8 @@ import lombok.RequiredArgsConstructor;
 /**
  * 종목 순위 — 상승률·하락률·시가총액·거래량·거래대금(홈 주요 종목, 시뮬레이션 리밸런싱 후보, AI 상담)과 거래량 급증·시간외
  * 순위(AI 상담). 앞의 5종은 market_data.json 전체 종목을 직접 정렬하고, 뒤의 3종은 local-market-data-generator가
- * {@code _market.surgingVolume}·{@code afterHoursChange}·{@code afterHoursVolume}에 30초마다 담는 모의 순위를 읽는다
- * (fix/local-market-data-stable — 이전 real 모드에서는 외부 시세 데이터 t1441/t1444/t1452/t1463/t1466/t1481/t1482를
- * 호출했다). 순위는 시장 전체가 아니라 stocks.json에 등록된 종목(105개) 범위 안의 순위다.
+ * {@code _market.surgingVolume}·{@code afterHoursChange}·{@code afterHoursVolume}에 30초마다 담는 모의 순위를 읽는다.
+ * 순위는 시장 전체가 아니라 stocks.json에 등록된 종목(105개) 범위 안의 순위다.
  */
 @Component
 @RequiredArgsConstructor

@@ -20,8 +20,7 @@ public class StockService {
     private final LocalMarketDataReader localMarketDataReader;
 
     /**
-     * 현재가 조회 — local-market-data-generator가 갱신하는 market_data.json을 읽는다(fix/local-market-data-stable에서
-     * 외부 시세 데이터 WebSocket(real 모드)이 Redis에 채우던 캐시 경로를 없앴다). 종목이 없으면 종목 자체가 없는 게 아니라
+     * 현재가 조회 — local-market-data-generator가 갱신하는 market_data.json을 읽는다. 종목이 없으면 종목 자체가 없는 게 아니라
      * 시세를 일시적으로 못 가져오는 상황으로 보고 STOCK_PRICE_NOT_AVAILABLE을 던진다(OrderService.createMarketOrder()와
      * 동일한 판단, NAMING.md 8-4 참고).
      */

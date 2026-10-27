@@ -172,96 +172,24 @@ class MockMarketDataGeneratorTest {
         verify(listener, never()).onHogaReceived(any());
     }
 
-    // ---------- 실시간 스트림(실시세 전환 7단계) ----------
+    // ---------- updatedAt 순서 판단(hasChanged) ----------
 
-    private static final String STREAM_EVENTS = """
-            [{"stockCode":"005930","stockName":"삼성전자","currentPrice":253000,"changeAmount":-9000,"changeRate":-3.44,
-              "volume":9100000,"updatedAt":"2026-10-12T13:20:00.100","askPrices":[253500],"askVolumes":[10],
-              "bidPrices":[253000],"bidVolumes":[20],"tick":true,"hoga":true},
-             {"stockCode":"000660","stockName":"SK하이닉스","currentPrice":500000,"changeAmount":1000,"changeRate":0.2,
-              "volume":100,"updatedAt":"2026-10-12T13:20:00.100","askPrices":[500500],"tick":true,"hoga":true}]""";
-
-    // 스트림 묶음 변환은 실제 LocalMarketDataReader.convert()로 확인한다(파일·URL은 읽지 않는다).
-    private MockMarketDataGenerator streamGenerator() {
-        return new MockMarketDataGenerator(new LocalMarketDataReader(), marketSessionService, stockSubscriptionManager,
-                List.of(listener));
-    }
-
-    private static com.fasterxml.jackson.databind.JsonNode json(String text) throws Exception {
-        return new com.fasterxml.jackson.databind.ObjectMapper().readTree(text);
-    }
-
-    @Test
-    @DisplayName("스트림: 구독 종목의 tick·호가만 보내고, 같은 updatedAt의 tick은 다시 보내지 않는다(호가는 바뀔 때마다 보낸다)")
-    void broadcastStreamUpdates_SubscribedOnly_DeduplicatesTick() throws Exception {
-        when(stockSubscriptionManager.getActiveSubscribedStockCodes()).thenReturn(Set.of(STOCK_CODE));
-        MockMarketDataGenerator generator = streamGenerator();
-
-        generator.broadcastStreamUpdates(json(STREAM_EVENTS));
-        generator.broadcastStreamUpdates(json(STREAM_EVENTS));
-
-        ArgumentCaptor<TickData> tickCaptor = ArgumentCaptor.forClass(TickData.class);
-        verify(listener, times(1)).onTickReceived(tickCaptor.capture());
-        assertThat(tickCaptor.getValue().getStockCode()).isEqualTo(STOCK_CODE);
-        assertThat(tickCaptor.getValue().getCurrentPrice()).isEqualTo(253000L);
-        assertThat(tickCaptor.getValue().getChangeAmount()).isEqualTo(9000L); // TickData는 부호 없는 절대값
-        ArgumentCaptor<HogaData> hogaCaptor = ArgumentCaptor.forClass(HogaData.class);
-        verify(listener, times(2)).onHogaReceived(hogaCaptor.capture());
-        assertThat(hogaCaptor.getValue().getAskPrices()).containsExactly(253500L);
-    }
-
-    @Test
-    @DisplayName("스트림: updatedAt이 바뀐 체결은 매번 보내고, hoga=false인 묶음은 호가를 보내지 않는다")
-    void broadcastStreamUpdates_NewUpdatedAt_BroadcastsEachTick() throws Exception {
-        when(stockSubscriptionManager.getActiveSubscribedStockCodes()).thenReturn(Set.of(STOCK_CODE));
-        MockMarketDataGenerator generator = streamGenerator();
-        generator.broadcastStreamUpdates(json("""
-                [{"stockCode":"005930","currentPrice":253000,"changeAmount":0,"changeRate":0,"volume":1,
-                  "updatedAt":"2026-10-12T13:20:00.100","tick":true,"hoga":false}]"""));
-        generator.broadcastStreamUpdates(json("""
-                [{"stockCode":"005930","currentPrice":253500,"changeAmount":0,"changeRate":0,"volume":2,
-                  "updatedAt":"2026-10-12T13:20:00.200","tick":true,"hoga":false}]"""));
-
-        verify(listener, times(2)).onTickReceived(any());
-        verify(listener, never()).onHogaReceived(any());
-    }
-
-    @Test
-    @DisplayName("스트림: 폴링이 이미 보낸 체결(같은 updatedAt)은 스트림에서 다시 보내지 않는다")
-    void broadcastStreamUpdates_AlreadyPolled_SkipsSameTick() throws Exception {
-        LocalDateTime updatedAt = LocalDateTime.of(2026, 10, 12, 13, 20, 0, 100_000_000);
-        CurrentPriceDetailDto price = CurrentPriceDetailDto.builder()
-                .stockCode(STOCK_CODE).stockName("삼성전자").currentPrice(253000L).changeAmount(-9000L)
+    private static CurrentPriceDetailDto priceAt(long currentPrice, LocalDateTime updatedAt) {
+        return CurrentPriceDetailDto.builder()
+                .stockCode(STOCK_CODE).stockName("삼성전자").currentPrice(currentPrice).changeAmount(-9000L)
                 .changeRate(-3.44).volume(9100000L).updatedAt(updatedAt).build();
-        when(stockSubscriptionManager.getActiveSubscribedStockCodes()).thenReturn(Set.of(STOCK_CODE));
-        when(localMarketDataReader.getAllCurrentPrices()).thenReturn(Map.of(STOCK_CODE, price));
-        when(localMarketDataReader.getHoga(STOCK_CODE)).thenReturn(Optional.empty());
-        when(localMarketDataReader.convert(any(), org.mockito.ArgumentMatchers.eq(CurrentPriceDetailDto.class)))
-                .thenReturn(Optional.of(price));
-
-        mockMarketDataGenerator.pollAndBroadcast();
-        mockMarketDataGenerator.broadcastStreamUpdates(json("""
-                [{"stockCode":"005930","updatedAt":"2026-10-12T13:20:00.100","tick":true,"hoga":false}]"""));
-
-        verify(listener, times(1)).onTickReceived(any());
     }
 
     @Test
-    @DisplayName("스트림이 더 새로운 체결을 보낸 뒤 폴링이 읽은 지난 체결(더 이른 updatedAt)은 보내지 않는다 — 가격이 뒤로 가지 않게")
-    void pollAndBroadcast_OlderThanStreamed_Skips() throws Exception {
-        CurrentPriceDetailDto older = CurrentPriceDetailDto.builder()
-                .stockCode(STOCK_CODE).stockName("삼성전자").currentPrice(252500L).changeAmount(-9500L)
-                .changeRate(-3.6).volume(9000000L).updatedAt(LocalDateTime.of(2026, 10, 12, 13, 19, 59)).build();
-        CurrentPriceDetailDto newer = CurrentPriceDetailDto.builder()
-                .stockCode(STOCK_CODE).stockName("삼성전자").currentPrice(253000L).changeAmount(-9000L)
-                .changeRate(-3.44).volume(9100000L).updatedAt(LocalDateTime.of(2026, 10, 12, 13, 20, 0, 100_000_000)).build();
+    @DisplayName("이미 보낸 체결보다 이른 updatedAt은 보내지 않는다 — 가격이 뒤로 가지 않게")
+    void pollAndBroadcast_OlderUpdatedAt_Skips() {
         when(stockSubscriptionManager.getActiveSubscribedStockCodes()).thenReturn(Set.of(STOCK_CODE));
-        when(localMarketDataReader.convert(any(), org.mockito.ArgumentMatchers.eq(CurrentPriceDetailDto.class)))
-                .thenReturn(Optional.of(newer));
-        when(localMarketDataReader.getAllCurrentPrices()).thenReturn(Map.of(STOCK_CODE, older));
+        when(localMarketDataReader.getHoga(STOCK_CODE)).thenReturn(Optional.empty());
+        when(localMarketDataReader.getAllCurrentPrices()).thenReturn(
+                Map.of(STOCK_CODE, priceAt(253000L, LocalDateTime.of(2026, 10, 12, 13, 20, 0))),
+                Map.of(STOCK_CODE, priceAt(252500L, LocalDateTime.of(2026, 10, 12, 13, 19, 59))));
 
-        mockMarketDataGenerator.broadcastStreamUpdates(json("""
-                [{"stockCode":"005930","tick":true,"hoga":false}]"""));
+        mockMarketDataGenerator.pollAndBroadcast();
         mockMarketDataGenerator.pollAndBroadcast();
 
         ArgumentCaptor<TickData> tickCaptor = ArgumentCaptor.forClass(TickData.class);
@@ -270,49 +198,34 @@ class MockMarketDataGeneratorTest {
     }
 
     @Test
-    @DisplayName("스트림: 현재가 0 이하 tick은 보내지 않는다 — 0원 tick이 매수 지정가를 모두 체결시키지 않게(2026-10-12 코드리뷰)")
-    void broadcastStreamUpdates_ZeroPrice_Skipped() throws Exception {
+    @DisplayName("현재가 0 이하 tick은 보내지 않는다 — 0원 tick이 매수 지정가를 모두 체결시키지 않게(2026-10-12 코드리뷰)")
+    void pollAndBroadcast_ZeroPrice_Skipped() {
         when(stockSubscriptionManager.getActiveSubscribedStockCodes()).thenReturn(Set.of(STOCK_CODE));
-        MockMarketDataGenerator generator = streamGenerator();
+        when(localMarketDataReader.getAllCurrentPrices()).thenReturn(
+                Map.of(STOCK_CODE, priceAt(0L, LocalDateTime.of(2026, 10, 12, 13, 20, 0))));
 
-        generator.broadcastStreamUpdates(json("""
-                [{"stockCode":"005930","currentPrice":0,"volume":0,"updatedAt":"2026-10-12T13:20:00.100","tick":true,"hoga":false}]"""));
+        mockMarketDataGenerator.pollAndBroadcast();
 
         verify(listener, never()).onTickReceived(any());
     }
 
     @Test
     @DisplayName("updatedAt이 30초 넘게 뒤로 가면(생성기 재시작·시계 변경) 다시 받는다 — 시세가 멈추지 않게(2026-10-12 마지막 리뷰)")
-    void broadcastStreamUpdates_ClockReset_AcceptsAgain() throws Exception {
+    void pollAndBroadcast_ClockReset_AcceptsAgain() {
         when(stockSubscriptionManager.getActiveSubscribedStockCodes()).thenReturn(Set.of(STOCK_CODE));
-        MockMarketDataGenerator generator = streamGenerator();
+        when(localMarketDataReader.getHoga(STOCK_CODE)).thenReturn(Optional.empty());
+        when(localMarketDataReader.getAllCurrentPrices()).thenReturn(
+                Map.of(STOCK_CODE, priceAt(253000L, LocalDateTime.of(2026, 10, 12, 13, 20, 0))),
+                Map.of(STOCK_CODE, priceAt(252900L, LocalDateTime.of(2026, 10, 12, 13, 19, 59))),
+                Map.of(STOCK_CODE, priceAt(251000L, LocalDateTime.of(2026, 10, 12, 13, 10, 0))));
 
-        generator.broadcastStreamUpdates(json("""
-                [{"stockCode":"005930","currentPrice":253000,"volume":10,"updatedAt":"2026-10-12T13:20:00.000","tick":true,"hoga":false}]"""));
-        generator.broadcastStreamUpdates(json("""
-                [{"stockCode":"005930","currentPrice":252900,"volume":9,"updatedAt":"2026-10-12T13:19:59.000","tick":true,"hoga":false}]"""));
-        generator.broadcastStreamUpdates(json("""
-                [{"stockCode":"005930","currentPrice":251000,"volume":5,"updatedAt":"2026-10-12T13:10:00.000","tick":true,"hoga":false}]"""));
+        mockMarketDataGenerator.pollAndBroadcast();
+        mockMarketDataGenerator.pollAndBroadcast();
+        mockMarketDataGenerator.pollAndBroadcast();
 
         ArgumentCaptor<TickData> tickCaptor = ArgumentCaptor.forClass(TickData.class);
         verify(listener, times(2)).onTickReceived(tickCaptor.capture());
         // 1초 뒤로 간 값은 버리고(지난 체결), 10분 뒤로 간 값은 재시작으로 보고 받는다
         assertThat(tickCaptor.getAllValues()).extracting(TickData::getCurrentPrice).containsExactly(253000L, 251000L);
-    }
-
-    @Test
-    @DisplayName("스트림: 장외이거나 묶음이 배열이 아니면 아무것도 보내지 않는다")
-    void broadcastStreamUpdates_OutsideWindowOrInvalid_DoesNothing() throws Exception {
-        MockMarketDataGenerator generator = streamGenerator();
-        when(marketSessionService.isBroadcastWindow()).thenReturn(false);
-        generator.broadcastStreamUpdates(json(STREAM_EVENTS));
-
-        // 배열이 아니면 장 상태를 보기 전에 돌아온다
-        generator.broadcastStreamUpdates(json("{\"stockCode\":\"005930\"}"));
-        generator.broadcastStreamUpdates(null);
-
-        verify(stockSubscriptionManager, never()).getActiveSubscribedStockCodes();
-        verify(listener, never()).onTickReceived(any());
-        verify(listener, never()).onHogaReceived(any());
     }
 }
