@@ -122,7 +122,7 @@ class LiveGeminiManualCheck {
 
         RedisAiToolCacheService aiToolCacheService = new RedisAiToolCacheService(redisTemplate);
 
-        GeminiApiClient geminiApiClient = new GeminiApiClient(RestClient.builder());
+        GeminiApiClient geminiApiClient = new GeminiApiClient(RestClient.builder(), 6);
         ReflectionTestUtils.setField(geminiApiClient, "apiKey", System.getenv("GEMINI_API_KEY"));
         ReflectionTestUtils.setField(geminiApiClient, "judgeApiUrl",
                 "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent");

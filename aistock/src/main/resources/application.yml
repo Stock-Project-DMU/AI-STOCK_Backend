@@ -67,6 +67,10 @@ app:
     # 가리키는 대상을 바꿔 가격이 예고 없이 뛰는 것을 막는다.
     judge-api-url: ${GEMINI_JUDGE_API_URL:https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent}
     answer-api-url: ${GEMINI_ANSWER_API_URL:https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent}
+    # Gemini 동시 호출 허가 수(GeminiApiClient 세마포어). 재무설계·시뮬레이터·뉴스·브리핑이 함께 쓴다 — 10/30 부하 테스트
+    # 실측 평균 약 2초/건 기준 P=10(11/01 부하 테스트에서 분당 약 400건, Gemini 429 0건). 실제 할당량을 확인하면 이 값만 바꾸면 된다.
+    semaphore:
+      permits: ${GEMINI_SEMAPHORE_PERMITS:10}
   dart:
     api-key: ${DART_API_KEY:}
     api-url: ${DART_API_URL:https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json}

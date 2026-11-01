@@ -1091,4 +1091,24 @@ class AiPlanningServiceTest {
         }
     }
 
+    @Nested
+    @DisplayName("메시지 전송 - 45초 마감 시각을 Gemini 호출까지 전달")
+    class SendMessageDeadlinePropagation {
+
+        @Test
+        @DisplayName("Gemini 요청마다 converseWithinDeadline이 정한 마감 시각(지금+45초)이 담긴다")
+        void geminiRequestCarriesDeadline() {
+            stubHappyPathUpTo(new GeminiResponse("답변", 5));
+            java.time.Instant before = java.time.Instant.now();
+
+            aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("질문"));
+
+            org.mockito.ArgumentCaptor<GeminiRequest> captor = org.mockito.ArgumentCaptor.forClass(GeminiRequest.class);
+            verify(geminiApiClient).generate(captor.capture());
+            assertThat(captor.getValue().deadline())
+                    .isNotNull()
+                    .isBetween(before.plusSeconds(44), java.time.Instant.now().plusSeconds(46));
+        }
+    }
+
 }

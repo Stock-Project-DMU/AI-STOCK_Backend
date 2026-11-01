@@ -700,7 +700,7 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 |---|---|
 | Controller | `AiPlanningController` |
 | 엔드포인트 | `POST /api/ai/planning/sessions`, `GET /api/ai/planning/sessions`, `GET /api/ai/planning/sessions/{sessionId}/messages`, `POST /api/ai/planning/sessions/{sessionId}/messages` — 사용자 식별은 4개 전부 요청 바디가 아니라 `SecurityUtil.getCurrentUserId()`로 한다 |
-| Service | `AiPlanningService` — `createSession(Long userId)`, `getMySessions(Long userId)`, `getMessages(Long userId, Long sessionId)`, `sendMessage(Long userId, Long sessionId, AiChatRequest request)`. `loadHistory(Long userId, Long sessionId)`/`saveTurn(Long userId, Long sessionId, String userContent, GeminiResponse geminiResponse)`도 public인데, 실제 용도가 아니라 `@Lazy self` 프록시로 자기 자신을 주입받아 `@Transactional` 트랜잭션 경계를 강제로 나누기 위한 self-invocation 패턴(Spring AOP 프록시는 같은 빈 안에서의 직접 호출엔 안 걸리는 한계 우회) — 외부에서 호출할 일은 없다. fix/ai-ux-improvement: `converseWithinDeadline(Long userId, Long sessionId, String userContent, List<HistoryTurn> history)`(private)가 `converseWithTools()`를 `aiPlanningTaskExecutor`에서 돌리고 `responseTimeoutMillis`(45초)를 넘기면 `AI_RESPONSE_TIMEOUT`. fix/ai-daily-rate-limit: `sendMessage()` 진입 시 `RedisRateLimiterService.tryAcquirePlanning()`(하루 3회, 초과 시 `DAILY_LIMIT_EXCEEDED` + 상수 `DAILY_LIMIT_MESSAGE`), 예외로 끝나면 `releasePlanning()` |
+| Service | `AiPlanningService` — `createSession(Long userId)`, `getMySessions(Long userId)`, `getMessages(Long userId, Long sessionId)`, `sendMessage(Long userId, Long sessionId, AiChatRequest request)`. `loadHistory(Long userId, Long sessionId)`/`saveTurn(Long userId, Long sessionId, String userContent, GeminiResponse geminiResponse)`도 public인데, 실제 용도가 아니라 `@Lazy self` 프록시로 자기 자신을 주입받아 `@Transactional` 트랜잭션 경계를 강제로 나누기 위한 self-invocation 패턴(Spring AOP 프록시는 같은 빈 안에서의 직접 호출엔 안 걸리는 한계 우회) — 외부에서 호출할 일은 없다. fix/ai-ux-improvement: `converseWithinDeadline(Long userId, Long sessionId, String userContent, List<HistoryTurn> history)`(private)가 마감 시각 `deadline`을 정해 `converseWithTools(..., Instant deadline)`를 `aiPlanningTaskExecutor`에서 돌리고 `responseTimeoutMillis`(45초)를 넘기면 `AI_RESPONSE_TIMEOUT`. fix/ai-daily-rate-limit: `sendMessage()` 진입 시 `RedisRateLimiterService.tryAcquirePlanning()`(하루 3회, 초과 시 `DAILY_LIMIT_EXCEEDED` + 상수 `DAILY_LIMIT_MESSAGE`), 예외로 끝나면 `releasePlanning()` |
 | Request DTO | `AiChatRequest`(`@NotBlank @Size(max = 2000) content`) — 2000자 제한은 DB TEXT 컬럼 여유 확보 + Gemini 토큰 비용 통제 목적 |
 | Response DTO | `AiChatResponse`(messageId, role, content, createdAt), `AiPlanningSessionResponse`(sessionId, title, status, createdAt, updatedAt) — 둘 다 정적 팩토리 `from(Entity)` 보유 |
 
@@ -716,7 +716,16 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
   `RESOURCE_EXHAUSTED`면 `rateLimitRetryDelaysMillis`(1초→2초) 간격으로 최대 2번 재시도, 그래도 실패하면
   `CustomException(GEMINI_RATE_LIMIT_EXCEEDED, RATE_LIMIT_MESSAGE)`. 판정은 `isRateLimited(RestClientResponseException)`,
   대기는 `sleepBeforeRetry(long delayMillis)`. `RATE_LIMIT_MESSAGE` = "AI 요청이 일시적으로 많습니다. 잠시 후 다시 시도해 주세요."
-- `GeminiRequest`(systemInstruction, prompt, history, tools, functionExchangeRounds, model) — `systemInstruction`은
+- (fix/ai-ux-and-rate-limit) Gemini 동시 호출 제한 — 설정 `app.gemini.semaphore.permits`(application.yml, 환경변수
+  `GEMINI_SEMAPHORE_PERMITS`, 기본 10 — 실측 평균 약 2초/건 기준). 필드 `geminiPermits`(`Semaphore`, 공정 모드 — 재무설계·시뮬레이터·뉴스·브리핑 공용),
+  `permitWaitMillis`(허가 대기 상한 20초). 생성자는 `GeminiApiClient(RestClient.Builder restClientBuilder, int semaphorePermits)`.
+  `postWithRateLimitRetry(String apiUrl, Map<String, Object> requestBody, Instant deadline)`가 HTTP 요청 1번마다
+  `acquirePermit(Instant deadline)`으로 허가를 얻고 응답 후 바로 놓는다(429 재시도 대기 중에는 놓아 둠). `acquirePermit`은
+  min(20초, 마감까지 남은 시간)만 기다리고, 마감이 지났거나 대기 상한을 넘기면 `CustomException(GEMINI_RATE_LIMIT_EXCEEDED,
+  CONCURRENCY_LIMIT_MESSAGE)`. `CONCURRENCY_LIMIT_MESSAGE` = "AI 요청이 많아 잠시 후 다시 시도해 주세요."
+- `GeminiRequest`(systemInstruction, prompt, history, tools, functionExchangeRounds, model, deadline) — `deadline`(`Instant`,
+  fix/ai-ux-and-rate-limit 추가)은 호출 마감 시각으로, AI 재무설계만 `converseWithinDeadline()`이 정한 시각(지금+45초)을 넣고
+  나머지는 6개 인자 생성자로 만들어 null(마감 없음)이다. `systemInstruction`은
   `contents`/`prompt`와 완전히 분리된 별도 최상위 JSON 필드로 매 턴 한 번만 전송한다(2026-08-07 확정,
   과거엔 매 턴 `contents`에 통째로 재삽입해서 모델이 "방금 지침을 받은 것"처럼 여겨 인사를 계속
   반복하는 버그가 있었음). 내부 record: `GeminiModel`(enum `JUDGE`/`ANSWER`), `HistoryTurn`(role, content),

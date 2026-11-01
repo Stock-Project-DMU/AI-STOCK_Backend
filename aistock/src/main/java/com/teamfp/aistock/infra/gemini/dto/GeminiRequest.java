@@ -1,5 +1,6 @@
 package com.teamfp.aistock.infra.gemini.dto;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -25,10 +26,20 @@ import java.util.Map;
  * 실제 API로 검증한 결과 한 라운드에서 요청된 여러 functionCall은 재구성할 때도 "model 턴
  * 하나에 여러 functionCall 파트"로 그룹지어 보내야 한다 — 라운드를 쪼개 model 턴을 여러 개로
  * 나누면 실제 있었던 대화 구조와 달라진다. AiPlanningService.converseWithTools() 참고.
+ *
+ * deadline은 이 호출을 언제까지 끝내야 하는지(AI 재무설계의 45초 마감)다. GeminiApiClient가 동시 호출 허가를
+ * 기다릴 때 이 시각을 넘기지 않고, 이미 지났으면 Gemini를 부르지 않는다 — 504를 이미 받은 요청이 뒤에서 계속
+ * 호출하는 것을 막기 위함이다. 마감이 없는 호출(시뮬레이터·뉴스·브리핑)은 6개 인자 생성자로 만들어 null이다.
  */
 public record GeminiRequest(String systemInstruction, String prompt, List<HistoryTurn> history,
                              List<ToolDeclaration> tools, List<List<FunctionExchange>> functionExchangeRounds,
-                             GeminiModel model) {
+                             GeminiModel model, Instant deadline) {
+
+    public GeminiRequest(String systemInstruction, String prompt, List<HistoryTurn> history,
+                         List<ToolDeclaration> tools, List<List<FunctionExchange>> functionExchangeRounds,
+                         GeminiModel model) {
+        this(systemInstruction, prompt, history, tools, functionExchangeRounds, model, null);
+    }
 
     /**
      * 하이브리드 모델 구성(2026-08-06) — 단순 작업은 싼 모델, 종합 판단이 필요한 최종 답변만

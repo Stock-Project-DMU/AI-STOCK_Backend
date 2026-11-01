@@ -1,5 +1,6 @@
 package com.teamfp.aistock.domain.ai.service;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -1219,10 +1220,13 @@ public class AiPlanningService {
 
     private GeminiResponse converseWithinDeadline(
             Long userId, Long sessionId, String userContent, List<HistoryTurn> history) {
+        // 마감 시각을 Gemini 호출까지 넘겨, 이 시각이 지나면(=이미 504를 돌려준 뒤) 뒤에서 도는 작업이 Gemini를
+        // 더 부르지 않게 한다 — GeminiApiClient가 동시 호출 허가를 기다릴 때도 이 시각까지만 기다린다.
+        Instant deadline = Instant.now().plusMillis(responseTimeoutMillis);
         CompletableFuture<GeminiResponse> future;
         try {
             future = CompletableFuture.supplyAsync(
-                    () -> converseWithTools(userId, sessionId, userContent, history), aiPlanningTaskExecutor);
+                    () -> converseWithTools(userId, sessionId, userContent, history, deadline), aiPlanningTaskExecutor);
         } catch (java.util.concurrent.RejectedExecutionException e) {
             log.warn("재무설계 스레드풀 포화로 요청 거부 - userId: {}, sessionId: {}", userId, sessionId);
             throw new CustomException(ErrorCode.GEMINI_RATE_LIMIT_EXCEEDED, GeminiApiClient.RATE_LIMIT_MESSAGE);
@@ -1265,7 +1269,8 @@ public class AiPlanningService {
      * 응답을 강제한다. SYSTEM_PREAMBLE의 "답변 형식 원칙"이 모든 라운드에 동일하게 적용되므로
      * 별도의 "가공 전용 프롬프트"를 따로 두지 않는다.</p>
      */
-    private GeminiResponse converseWithTools(Long userId, Long sessionId, String userContent, List<HistoryTurn> history) {
+    private GeminiResponse converseWithTools(Long userId, Long sessionId, String userContent, List<HistoryTurn> history,
+                                             Instant deadline) {
         String prompt = buildJudgePrompt(userId, userContent);
         List<GeminiRequest.ToolDeclaration> tools = List.of(
                 NEWS_SEARCH_TOOL, FINANCIALS_TOOL, CAPITAL_CHANGE_TOOL, OWNERSHIP_TOOL, DISCLOSURE_TOOL,
@@ -1293,7 +1298,7 @@ public class AiPlanningService {
             // 쓴다. 판단 라운드에서 도구 없이 바로 텍스트로 답하는 경우(잡담·되묻기 등)는 그
             // 자체가 "단순 작업"이라 JUDGE 모델의 답을 최종 답변으로 그대로 쓴다.
             GeminiRequest.GeminiModel model = isFinalRound ? GeminiRequest.GeminiModel.ANSWER : GeminiRequest.GeminiModel.JUDGE;
-            GeminiRequest request = new GeminiRequest(SYSTEM_PREAMBLE, prompt, history, toolsForThisRound, exchangeRounds, model);
+            GeminiRequest request = new GeminiRequest(SYSTEM_PREAMBLE, prompt, history, toolsForThisRound, exchangeRounds, model, deadline);
             GeminiResponse response = geminiApiClient.generate(request);
 
             int fakeCallRetries = 0;

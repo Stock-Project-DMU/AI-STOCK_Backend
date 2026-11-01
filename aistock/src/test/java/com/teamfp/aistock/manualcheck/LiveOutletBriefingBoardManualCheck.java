@@ -56,7 +56,7 @@ class LiveOutletBriefingBoardManualCheck {
         ReflectionTestUtils.setField(naverNewsApiClient, "clientSecret", System.getenv("NAVER_CLIENT_SECRET"));
         ReflectionTestUtils.setField(naverNewsApiClient, "apiUrl", "https://naverapihub.apigw.ntruss.com/search/v1/news");
 
-        GeminiApiClient geminiApiClient = new GeminiApiClient(RestClient.builder());
+        GeminiApiClient geminiApiClient = new GeminiApiClient(RestClient.builder(), 6);
         ReflectionTestUtils.setField(geminiApiClient, "apiKey", System.getenv("GEMINI_API_KEY"));
         ReflectionTestUtils.setField(geminiApiClient, "judgeApiUrl",
                 "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent");
