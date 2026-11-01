@@ -1,48 +1,29 @@
-HELP.md
-.gradle
-build/
-!gradle/wrapper/gradle-wrapper.jar
-!**/src/main/**/build/
-!**/src/test/**/build/
-
-### STS ###
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
-.sts4-cache
-bin/
-!**/src/main/**/bin/
-!**/src/test/**/bin/
-
-### IntelliJ IDEA ###
-.idea
+### IDE ###
+.idea/
 *.iws
 *.iml
 *.ipr
-out/
-!**/src/main/**/out/
-!**/src/test/**/out/
-
-### NetBeans ###
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
-
-### VS Code ###
 .vscode/
 
-.idea/
-*.iml
+### Gradle / Build ###
+.gradle/
+build/
+out/
 
 ### Env / Secrets ###
 .env
 .env.*
 *.env
 
+### OS ###
+.DS_Store
+Thumbs.db
+
 ### Logs ###
 *.log
+
+### Review tool temp files ###
+.review_tmp/
+
+### 로컬 전용 docker-compose 오버라이드 (예: 포트 충돌 회피) ###
+docker-compose.override.yml

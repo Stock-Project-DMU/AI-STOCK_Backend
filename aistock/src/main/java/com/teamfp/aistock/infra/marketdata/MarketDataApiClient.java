@@ -48,6 +48,11 @@ public class MarketDataApiClient {
         return localMarketDataReader.getCurrentPrice(stockCode);
     }
 
+    /** 시세 원본에 없는 종목인지(LocalMarketDataReader.isUnlistedStock 참고). */
+    public boolean isUnlistedStock(String stockCode) {
+        return localMarketDataReader.isUnlistedStock(stockCode);
+    }
+
     /** 관리종목·투자경고/매매정지 여부. 해당 없으면 빈 목록. */
     public List<StockRiskFlagDto> getRiskFlags(String stockCode) {
         return localMarketDataReader.getStockList(stockCode, "riskFlags", StockRiskFlagDto.class);

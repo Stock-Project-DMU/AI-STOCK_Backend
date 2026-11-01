@@ -106,11 +106,12 @@ public class OrderService {
         }
         marketSessionService.requireOpen();
 
-        // 캐시(TTL 5초)에 최근 tick이 없으면 null — 종목 자체가 없는 게 아니라 시세를 일시적으로
-        // REST 조회도 실패하면 종목 없음과 구분되는 시세 조회 오류를 반환한다.
+        // 캐시(TTL 5초)에 최근 tick이 없으면 REST 조회로 넘어가고, 그것도 실패하면 시세 원본에 없는 종목은
+        // STOCK_NOT_FOUND(404), 원본을 못 읽은 일시 장애는 STOCK_PRICE_NOT_AVAILABLE(503)로 구분한다.
         StockPriceDto priceDto = stockQuoteService.getStockPrice(request.stockCode());
         if (priceDto == null) {
-            throw new CustomException(ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
+            throw new CustomException(stockQuoteService.isUnlistedStock(request.stockCode())
+                    ? ErrorCode.STOCK_NOT_FOUND : ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
         }
 
         long currentPrice = priceDto.getCurrentPrice();
@@ -248,7 +249,8 @@ public class OrderService {
             } else {
                 StockPriceDto priceDto = stockQuoteService.getStockPrice(request.stockCode());
                 if (priceDto == null) {
-                    throw new CustomException(ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
+                    throw new CustomException(stockQuoteService.isUnlistedStock(request.stockCode())
+                            ? ErrorCode.STOCK_NOT_FOUND : ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
                 }
                 stockName = priceDto.getStockName();
             }

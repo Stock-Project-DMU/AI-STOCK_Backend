@@ -26,4 +26,12 @@ public class StockQuoteService {
                         .changeRate(q.getChangeRate()).volume(q.getVolume()).updatedAt(q.getUpdatedAt()).build())
                 .orElse(null);
     }
+
+    /**
+     * getStockPrice()가 null일 때 원인 구분용 — 시세 원본에 없는 종목이면 true(STOCK_NOT_FOUND, 404), 원본을 못 읽었거나
+     * 종목은 있는데 시세가 유효하지 않으면 false(STOCK_PRICE_NOT_AVAILABLE, 503). StockService.getCurrentPrice()와 같은 기준이다.
+     */
+    public boolean isUnlistedStock(String stockCode) {
+        return marketDataApiClient.isUnlistedStock(stockCode);
+    }
 }

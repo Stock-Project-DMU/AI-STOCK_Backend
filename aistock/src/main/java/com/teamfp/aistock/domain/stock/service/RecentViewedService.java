@@ -68,7 +68,8 @@ public class RecentViewedService {
 
         StockPriceDto priceDto = stockQuoteService.getStockPrice(stockCode);
         if (priceDto == null) {
-            throw new CustomException(ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
+            throw new CustomException(stockQuoteService.isUnlistedStock(stockCode)
+                    ? ErrorCode.STOCK_NOT_FOUND : ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
         }
 
         User user = userRepository.findById(userId)
