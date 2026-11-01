@@ -14,6 +14,9 @@ import com.teamfp.aistock.domain.user.entity.Role;
 import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.repository.InvestmentProfileRepository;
 import com.teamfp.aistock.domain.user.repository.SocialAccountRepository;
+import com.teamfp.aistock.infra.oauth.dto.SocialUserDto;
+import com.teamfp.aistock.domain.user.entity.SocialProvider;
+import com.teamfp.aistock.domain.user.entity.SocialAccount;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
@@ -37,6 +40,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -366,6 +370,42 @@ class AuthServiceTest {
                     .isInstanceOf(CustomException.class)
                     .extracting("errorCode").isEqualTo(ErrorCode.EMAIL_SEND_COOLDOWN);
             verify(mailClient, never()).sendAuthCode(anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("이미 가입된 이메일이면 가입 방식과 상관없이 같은 안내로 DUPLICATE_EMAIL을 던지고 인증코드를 보내지 않는다(fix/site-polish)")
+        void sendEmailCode_rejectsRegisteredEmailWithSameMessage() {
+            User general = User.builder().loginId("tester01").email("a@naver.com").name("기존").role(Role.USER).isActive(true).build();
+            User social = User.builder().email("b@naver.com").name("기존").role(Role.USER).isActive(true).build();
+            given(userRepository.findByEmail("a@naver.com")).willReturn(Optional.of(general));
+            given(userRepository.findByEmail("b@naver.com")).willReturn(Optional.of(social));
+
+            for (String email : List.of("a@naver.com", "b@naver.com")) {
+                assertThatThrownBy(() -> authService.sendEmailCode(email))
+                        .isInstanceOf(CustomException.class)
+                        .hasMessage("이미 가입된 이메일입니다.")
+                        .extracting("errorCode").isEqualTo(ErrorCode.DUPLICATE_EMAIL);
+            }
+            verify(mailClient, never()).sendAuthCode(anyString(), anyString());
+        }
+    }
+
+    @Nested
+    @DisplayName("processSocialLogin() - 같은 이메일 처리(fix/site-polish)")
+    class SocialLoginSameEmail {
+
+        @Test
+        @DisplayName("같은 이메일로 일반 가입한 회원이 있으면 SNS를 연동하지 않고 DUPLICATE_EMAIL을 던진다")
+        void rejectsWhenGeneralUserHasSameEmail() {
+            User existing = User.builder().loginId("tester01").email("a@naver.com").name("기존").role(Role.USER).isActive(true).build();
+            given(socialAccountRepository.findByProviderAndProviderId(SocialProvider.GOOGLE, "g-1")).willReturn(Optional.empty());
+            given(userRepository.findByEmail("a@naver.com")).willReturn(Optional.of(existing));
+
+            assertThatThrownBy(() -> authService.processSocialLogin(SocialProvider.GOOGLE, new SocialUserDto("g-1", "a@naver.com", "기존")))
+                    .isInstanceOf(CustomException.class)
+                    .hasMessageContaining("이미 일반 회원으로 가입된 이메일입니다")
+                    .extracting("errorCode").isEqualTo(ErrorCode.DUPLICATE_EMAIL);
+            verify(socialAccountRepository, never()).save(any(SocialAccount.class));
         }
     }
 

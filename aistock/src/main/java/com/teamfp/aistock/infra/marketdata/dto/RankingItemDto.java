@@ -26,6 +26,9 @@ public class RankingItemDto {
     private Long changeAmount;
     private Double changeRate;
     private Long volume;
+    // 거래대금(원) 근사치 = 현재가 × 당일 누적 거래량 — 메인 화면 순위 표에 거래량과 함께 항상 보여주기 위한 숫자 값
+    // (fix/site-polish). 생성기가 순위 목록을 통째로 주는 시간외·거래급증 순위에서는 null이다.
+    private Long tradingValue;
     // 랭킹 종류마다 다른 부가 정보(거래대금상위의 거래대금, 상하한의 연속일수, 신고신저가의
     // 과거 대비 가격 등)를 사람이 읽을 수 있는 한 문장으로 미리 만들어 담는다 — DTO를 9종류로
     // 쪼개는 대신, describe 단계 로직을 클라이언트 쪽(랭킹 종류를 아는 쪽)에 두기 위함이다.

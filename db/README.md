@@ -36,6 +36,7 @@
 | 014 | `014_admin_improvements.sql` | `admin_improvements_migration.sql` | 2026-10-06 | 관리자 페이지 개선(1~8) |
 | 015 | `015_dividend.sql` | `dividend_migration.sql` | 2026-10-06 | 배당 일정·권리, 거래 유형 DIVIDEND |
 | 016 | `016_column_types.sql` | (신규) | 2026-10-13 | 엔티티와 컬럼 타입 맞춤(정수 3개 INT, 문의 본문·답변 TEXT) — 운영 validate 기동 조건 |
+| 017 | `017_site_polish.sql` | (신규) | 2026-10-29 | 계좌 정지 사유 컬럼, 브리핑 UNIQUE를 설정(언론사+시각)별 하루 1건으로, 설정별 채팅 삭제 표시 컬럼 — 개발 DB에도 직접 적용 |
 
 > 문서·주석에 남아 있는 이전 이름(`xxx_migration.sql`)은 위 표로 새 파일을 찾으면 된다. `schema.sql` 상단 버전 이력(v1~v19)도
 > 당시 파일 이름 그대로 남겨 두었다.

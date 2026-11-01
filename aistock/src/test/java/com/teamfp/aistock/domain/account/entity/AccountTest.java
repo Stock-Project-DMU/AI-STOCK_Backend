@@ -71,4 +71,19 @@ class AccountTest {
 
         assertThat(account.getBalance()).isEqualTo(1_000_000L);
     }
+
+    @Test
+    @DisplayName("정지 사유가 있으면 안내 문구에 붙이고, 해제하면 사유를 지운다(fix/site-polish)")
+    void suspensionNotice() {
+        Account account = newAccount();
+
+        account.suspend("이상 거래 확인");
+        assertThat(account.suspensionNotice()).isEqualTo("거래 정지된 계좌입니다 정지사유 : 이상 거래 확인");
+
+        account.activate();
+        assertThat(account.getSuspensionReason()).isNull();
+
+        account.suspend();
+        assertThat(account.suspensionNotice()).isEqualTo("거래 정지된 계좌입니다");
+    }
 }

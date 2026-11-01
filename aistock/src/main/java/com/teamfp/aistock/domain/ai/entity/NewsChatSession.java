@@ -60,6 +60,11 @@ public class NewsChatSession {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    // 사용자가 삭제한 채팅(fix/site-polish) — 행을 지우면 sync()가 그 설정의 브리핑을 보고 빈 채팅을 다시 만들므로
+    // 삭제 표시만 남기고 목록에서 뺀다. 같은 설정을 다시 지금 설정으로 고르면 restore()로 되살린다.
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
     @Builder
     private NewsChatSession(User user, String settingKey, String outletDomain, LocalTime deliveryTime) {
         this.user = user;
@@ -70,5 +75,13 @@ public class NewsChatSession {
 
     public void recordActivity() {
         this.updatedAt = LocalDateTime.now();
+    }
+
+    public void delete() {
+        this.deletedAt = LocalDateTime.now();
+    }
+
+    public void restore() {
+        this.deletedAt = null;
     }
 }

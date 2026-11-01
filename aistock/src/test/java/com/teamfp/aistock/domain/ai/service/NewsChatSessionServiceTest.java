@@ -72,10 +72,10 @@ class NewsChatSessionServiceTest {
         var selected = session(4, "hankyung.com", LocalTime.of(7, 0));
         when(sessions.findByUserAndSessionId(7L, 4L)).thenReturn(Optional.of(selected));
         when(messages.findRecentBySession(eq(4L), any())).thenReturn(List.of());
-        var wrongTime = NewsBriefing.builder().outletDomain("hankyung.com")
-                .briefingTime(LocalTime.of(8, 0)).briefingDate(LocalDate.of(2026, 9, 30))
-                .content("요약").sourceLinksJson("[]").build();
-        when(briefings.findByUserIdAndBriefingDate(7L, LocalDate.of(2026, 9, 30))).thenReturn(Optional.of(wrongTime));
+        // 그날 브리핑은 다른 설정(08:00) 것만 있다 — 이 세션(07:00) 설정으로는 찾지 못한다(fix/site-polish).
+        when(briefings.findByUserIdAndBriefingDateAndSetting(7L, LocalDate.of(2026, 9, 30), "hankyung.com", LocalTime.of(7, 0)))
+                .thenReturn(Optional.empty());
+        when(briefings.existsByUserIdAndBriefingDate(7L, LocalDate.of(2026, 9, 30))).thenReturn(true);
 
         assertThatThrownBy(() -> service.send(7L, 4L,
                 new NewsChatMessageRequest("질문", LocalDate.of(2026, 9, 30))))
@@ -88,5 +88,62 @@ class NewsChatSessionServiceTest {
         service.send(7L, 4L, new NewsChatMessageRequest("질문", null));
         verify(chat).chatForOutlet(eq("hankyung.com"), any(NewsChatRequest.class));
         verify(sessions).save(selected);
+    }
+
+    @Test
+    void deletingAnOldSettingChatKeepsTheCurrentSetting() {
+        var old = session(5, "hankyung.com", LocalTime.of(8, 0));
+        var setting = NewsBriefingSetting.builder().outletDomain("hankyung.com").briefingTime(LocalTime.of(7, 0)).build();
+        when(sessions.findByUserAndSessionId(7L, 5L)).thenReturn(Optional.of(old));
+        when(settings.findByUserId(7L)).thenReturn(Optional.of(setting));
+
+        service.delete(7L, 5L);
+
+        verify(messages).deleteAllBySession(5L);
+        verify(settings, never()).delete(any());
+        assertThat(old.getDeletedAt()).isNotNull();
+    }
+
+    @Test
+    void deletingTheCurrentSettingChatAlsoDeletesTheSetting() {
+        var current = session(6, "hankyung.com", LocalTime.of(7, 0));
+        var setting = NewsBriefingSetting.builder().outletDomain("hankyung.com").briefingTime(LocalTime.of(7, 0)).build();
+        when(sessions.findByUserAndSessionId(7L, 6L)).thenReturn(Optional.of(current));
+        when(settings.findByUserId(7L)).thenReturn(Optional.of(setting));
+
+        service.delete(7L, 6L);
+
+        verify(messages).deleteAllBySession(6L);
+        verify(settings).delete(setting);
+        assertThat(current.getDeletedAt()).isNotNull();
+    }
+
+    @Test
+    void syncDoesNotBringBackADeletedOldChatButRestoresTheCurrentOne() {
+        var current = session(1, "hankyung.com", LocalTime.of(7, 0));
+        current.delete();
+        var deletedOld = session(2, "hankyung.com", LocalTime.of(8, 0));
+        deletedOld.delete();
+        when(settings.findByUserId(7L)).thenReturn(Optional.of(
+                NewsBriefingSetting.builder().outletDomain("hankyung.com").briefingTime(LocalTime.of(7, 0)).build()));
+        when(briefings.findDistinctSettingsByUserId(7L)).thenReturn(List.<Object[]>of(
+                new Object[]{"hankyung.com", LocalTime.of(8, 0)}));
+        when(sessions.findByUserAndSettingKey(7L, "hankyung.com|07:00")).thenReturn(Optional.of(current));
+        when(sessions.findByUserAndSettingKey(7L, "hankyung.com|08:00")).thenReturn(Optional.of(deletedOld));
+        when(sessions.findAllByUser(7L)).thenReturn(List.of(current));
+
+        service.sync(7L);
+
+        assertThat(current.getDeletedAt()).isNull();
+        assertThat(deletedOld.getDeletedAt()).isNotNull();
+        verify(sessions, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void deletingAnotherUsersOrAlreadyDeletedChatIsNotFound() {
+        when(sessions.findByUserAndSessionId(7L, 9L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.delete(7L, 9L)).isInstanceOf(CustomException.class);
+        verify(messages, never()).deleteAllBySession(any());
     }
 }

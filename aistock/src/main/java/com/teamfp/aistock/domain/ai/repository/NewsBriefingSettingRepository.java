@@ -30,13 +30,16 @@ public interface NewsBriefingSettingRepository extends JpaRepository<NewsBriefin
     // 통째로 놓칠 위험이 여전했다. 지금은 "설정 시각이 지금 이 순간 이전(<=)이고 아직
     // 오늘자 브리핑 생성 시도를 아직 하지 않은" 사용자를 찾는다 — 이번 분에 못 챙겨도
     // 다음 분 폴링에서 다시 잡힌다. 생성 시도를 시작한 사용자는 lastAttemptDate로 제외한다.
+    // "오늘자 브리핑"은 지금 설정(언론사+시각)의 브리핑만 센다(fix/site-polish) — 낮에 설정을 바꾸면 changeSchedule()이
+    // lastAttemptDate를 비우고, 새 설정의 브리핑이 없으므로 다음 폴링에서 새 설정으로 다시 만든다(횟수 제한 없음).
     // 초 단위 정밀도는 매분 폴링이므로 보장하지 않는다. User를 함께 fetch join해
     // (스케줄 작업은 @PostConstruct와 마찬가지로 트랜잭션 밖에서 결과를 순회하는 경우가
     // 많아) LAZY 프록시로 인한 LazyInitializationException을 피한다.
     @Query("SELECT s FROM NewsBriefingSetting s JOIN FETCH s.user u "
             + "WHERE s.briefingTime <= :now "
             + "AND (s.lastAttemptDate IS NULL OR s.lastAttemptDate < :today) "
-            + "AND NOT EXISTS (SELECT 1 FROM NewsBriefing n WHERE n.user.userId = u.userId AND n.briefingDate = :today)")
+            + "AND NOT EXISTS (SELECT 1 FROM NewsBriefing n WHERE n.user.userId = u.userId AND n.briefingDate = :today "
+            + "AND n.outletDomain = s.outletDomain AND n.briefingTime = s.briefingTime)")
     List<NewsBriefingSetting> findDueSettings(@Param("now") LocalTime now,
                                                @Param("today") LocalDate today);
 

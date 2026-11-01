@@ -127,7 +127,7 @@ public class AccountService {
         Account account = accountRepository.findByAccountIdAndUserIdForUpdate(accountId, userId)
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
         if (account.getStatus() == AccountStatus.SUSPENDED) {
-            throw new CustomException(ErrorCode.ACCOUNT_SUSPENDED_CHARGE);
+            throw new CustomException(ErrorCode.ACCOUNT_SUSPENDED_CHARGE, account.suspensionNotice());
         }
         if (!account.isChargeUnlimited()) {
             if (request.amount() > ChargeBalanceRequest.MAX_CHARGE_AMOUNT) {

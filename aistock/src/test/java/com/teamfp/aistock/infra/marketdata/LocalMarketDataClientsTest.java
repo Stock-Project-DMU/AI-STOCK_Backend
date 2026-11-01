@@ -249,6 +249,16 @@ class LocalMarketDataClientsTest {
         }
 
         @Test
+        @DisplayName("순위 항목에는 거래량과 함께 거래대금(현재가 × 거래량) 숫자가 항상 들어간다(fix/site-polish)")
+        void rankingTradingValue() {
+            HighItemApiClient client = new HighItemApiClient(reader);
+            RankingItemDto samsung = client.getTopVolume(HighItemApiClient.ALL_REGISTERED_STOCKS).stream()
+                    .filter(item -> "005930".equals(item.getStockCode())).findFirst().orElseThrow();
+            assertThat(samsung.getVolume()).isEqualTo(1000L);
+            assertThat(samsung.getTradingValue()).isEqualTo(70_000_000L);
+        }
+
+        @Test
         @DisplayName("거래량 급증·시간외 순위는 생성기가 만든 순위를 그대로 쓴다")
         void generatedRankings() {
             HighItemApiClient client = new HighItemApiClient(reader);

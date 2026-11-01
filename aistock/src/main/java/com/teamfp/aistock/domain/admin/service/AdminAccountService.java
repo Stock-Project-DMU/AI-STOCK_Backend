@@ -144,7 +144,7 @@ public class AdminAccountService {
         Account account = findAccount(accountId);
         AccountStatus beforeStatus = account.getStatus();
         if (request.status() == AccountStatus.SUSPENDED) {
-            account.suspend();
+            account.suspend(request.reason());
             // 정지 시점에 남아있는 PENDING 지정가 주문을 그대로 두면 tick 체결이나 사용자의
             // 자력 취소로 정지 정책이 깨질 수 있어(OrderService.cancelAllPendingOrdersForSuspension
             // Javadoc 참고), 정지와 같은 트랜잭션에서 함께 취소한다.

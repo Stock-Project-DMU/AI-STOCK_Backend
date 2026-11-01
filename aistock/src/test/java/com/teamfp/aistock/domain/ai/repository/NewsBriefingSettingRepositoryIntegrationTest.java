@@ -87,7 +87,7 @@ class NewsBriefingSettingRepositoryIntegrationTest {
         newsBriefingSettingRepository.save(NewsBriefingSetting.builder()
                 .user(alreadyBriefed).outletDomain("hankyung.com").briefingTime(dueTime).build());
         newsBriefingRepository.save(NewsBriefing.builder()
-                .user(alreadyBriefed).outletDomain("hankyung.com").briefingDate(today)
+                .user(alreadyBriefed).outletDomain("hankyung.com").briefingTime(dueTime).briefingDate(today)
                 .content("오늘자 브리핑").sourceLinksJson("[]").build());
 
         User notYetBriefed = newUser(String.valueOf(System.nanoTime()));
@@ -97,5 +97,24 @@ class NewsBriefingSettingRepositoryIntegrationTest {
         List<NewsBriefingSetting> due = newsBriefingSettingRepository.findDueSettings(dueTime, today);
 
         assertThat(due).extracting(NewsBriefingSetting::getSettingId).containsExactly(stillDue.getSettingId());
+    }
+
+    @Test
+    @DisplayName("오늘 브리핑이 있어도 다른 설정(언론사·시각)의 것이면 지금 설정으로 다시 대상이 된다(fix/site-polish)")
+    void findDueSettings_includesUserWhoseTodayBriefingIsFromAnotherSetting() {
+        LocalTime oldTime = LocalTime.of(3, 11, 11);
+        LocalTime newTime = LocalTime.of(3, 12, 12);
+        LocalDate today = LocalDate.now();
+
+        User changed = newUser(String.valueOf(System.nanoTime()));
+        NewsBriefingSetting setting = newsBriefingSettingRepository.save(NewsBriefingSetting.builder()
+                .user(changed).outletDomain("mk.co.kr").briefingTime(newTime).build());
+        newsBriefingRepository.save(NewsBriefing.builder()
+                .user(changed).outletDomain("hankyung.com").briefingTime(oldTime).briefingDate(today)
+                .content("예전 설정 브리핑").sourceLinksJson("[]").build());
+
+        List<NewsBriefingSetting> due = newsBriefingSettingRepository.findDueSettings(newTime, today);
+
+        assertThat(due).extracting(NewsBriefingSetting::getSettingId).contains(setting.getSettingId());
     }
 }

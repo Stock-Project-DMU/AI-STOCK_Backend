@@ -61,7 +61,7 @@ public class ChargeRequestService {
     public ChargeRequestResponse createRequest(Long userId, Long accountId, ChargeRequestCreateRequest request) {
         Account account = accountService.getOwnedAccountForUpdate(userId, accountId);
         if (account.getStatus() == AccountStatus.SUSPENDED) {
-            throw new CustomException(ErrorCode.ACCOUNT_SUSPENDED_CHARGE);
+            throw new CustomException(ErrorCode.ACCOUNT_SUSPENDED_CHARGE, account.suspensionNotice());
         }
         // 직접 충전 횟수가 남아 있으면 관리자 요청 없이 POST .../charge로 바로 충전해야 한다.
         if (account.hasRemainingChargeCount()) {

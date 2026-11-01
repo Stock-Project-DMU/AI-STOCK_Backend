@@ -1,5 +1,10 @@
 -- =====================================================
--- AI STOCK MySQL Schema (최종본 v21)
+-- AI STOCK MySQL Schema (최종본 v22)
+-- v22: 사이트 다듬기(fix/site-polish, 2026-10-29, migrations/017_site_polish.sql).
+--   1. accounts.suspension_reason 추가 — 관리자 계좌 거래 정지 사유(주문·충전 차단 안내 문구에 함께 표시).
+--   2. news_briefings UNIQUE (user_id, briefing_date) → (user_id, briefing_date, outlet_domain, briefing_time)
+--      — 브리핑 설정(언론사+시각)마다 하루 1건. 낮에 설정을 바꾸면 새 설정 세션의 브리핑을 그날 다시 만든다.
+--   3. news_chat_sessions.deleted_at 추가 — 사용자가 삭제한 설정별 채팅(목록·sync에서 제외, 지금 설정으로 다시 고르면 되살림).
 -- v21: 엔티티와 컬럼 타입 맞춤(fix/overall-improvements, 2026-10-13, migrations/016_column_types.sql) — 이 파일로 새 DB를 만들면
 --      운영과 같은 ddl-auto=validate에서 서버가 뜨지 않던 5개 컬럼.
 --   1. accounts.charge_count, investment_profile.investment_tendency / fund_tendency: TINYINT → INT (엔티티 int와 동일).
@@ -370,6 +375,7 @@ CREATE TABLE accounts (
     version         BIGINT          NOT NULL DEFAULT 0,        -- 낙관적 락용 버전 번호
     status          ENUM('ACTIVE','SUSPENDED')
                                     NOT NULL DEFAULT 'ACTIVE', -- v7 추가: 관리자에 의한 거래 정지
+    suspension_reason VARCHAR(500)  NULL,                      -- v22 추가: 관리자 거래 정지 사유(해제 시 NULL)
     created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (account_id),
     INDEX idx_account_status (status),               -- v7 추가: 관리자 페이지 정지 계좌 필터링용
@@ -765,7 +771,7 @@ CREATE TABLE news_briefings (
     source_links   JSON            NOT NULL,             -- 요약 근거 기사 [{title,link,outlet}, ...] (원문 이동용)
     created_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (briefing_id),
-    UNIQUE KEY uq_news_briefing_user_date (user_id, briefing_date),
+    UNIQUE KEY uq_news_briefing_user_date_setting (user_id, briefing_date, outlet_domain, briefing_time), -- v22: 설정마다 하루 1건
     INDEX idx_news_briefing_user (user_id, briefing_date),
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
@@ -779,6 +785,7 @@ CREATE TABLE news_chat_sessions (
     delivery_time  TIME        NULL,
     created_at     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at     DATETIME    NULL,                -- v22 추가: 사용자가 삭제한 채팅
     PRIMARY KEY (session_id),
     UNIQUE KEY uq_news_chat_user_setting (user_id, setting_key),
     INDEX idx_news_chat_user_updated (user_id, updated_at),

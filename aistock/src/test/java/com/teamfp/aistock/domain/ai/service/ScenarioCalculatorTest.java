@@ -149,6 +149,24 @@ class ScenarioCalculatorTest {
     }
 
     @Test
+    @DisplayName("필요 월 납입 - 성장률 0이면 부족분 ÷ 개월, 1만원 단위 올림, 납입 없이 닿으면 0")
+    void requiredMonthlyContribution_zeroRate() {
+        assertThat(ScenarioCalculator.requiredMonthlyContribution(1_000_000, 0.0, 10, 2_000_000)).isEqualTo(100_000);
+        assertThat(ScenarioCalculator.requiredMonthlyContribution(0, 0.0, 3, 100_000)).isEqualTo(40_000);
+        assertThat(ScenarioCalculator.requiredMonthlyContribution(5_000_000, 0.01, 12, 1_000_000)).isZero();
+    }
+
+    @Test
+    @DisplayName("필요 월 납입 - 그 금액으로 곡선을 굴리면 기한 안에 목표에 닿는다")
+    void requiredMonthlyContribution_reachesTarget() {
+        long required = ScenarioCalculator.requiredMonthlyContribution(10_000_000, 0.01, 36, 10_000_000_000L);
+        List<ScenarioPointDto> points = ScenarioCalculator.projectCurve(10_000_000, required, 0.01, 36, START_DATE);
+
+        assertThat(ScenarioCalculator.findReachMonths(points, 10_000_000_000L)).isNotNull().isLessThanOrEqualTo(36);
+        assertThat(required % 10_000).isZero();
+    }
+
+    @Test
     @DisplayName("표시 기간 - 기한과 두 도달 시점 중 가장 늦은 값, 미도달이 있으면 30년, 최소 1개월")
     void displayMonths() {
         assertThat(ScenarioCalculator.displayMonths(null, 24, 18)).isEqualTo(24);

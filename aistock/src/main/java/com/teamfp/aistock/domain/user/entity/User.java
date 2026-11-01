@@ -91,6 +91,24 @@ public class User {
         this.lastLoginAt = loggedInAt;
     }
 
+    /**
+     * 정지된 계정으로 로그인·토큰 재발급을 시도했을 때 보여줄 안내 문구(fix/site-polish). 화면의 빨간 안내 칸이 좁아
+     * 한 줄로 짧게 — 기간 정지는 "정지된 계정입니다(해제 예정 11/05 14:00) 정지사유 : OO", 영구 정지(기한 없음)는
+     * "영구 정지된 계정입니다 정지사유 : OO". 해제 예정이 올해가 아니면 연도까지 붙인다. 사유가 없으면 앞부분만.
+     */
+    public String suspensionNotice() {
+        String notice;
+        if (suspendedUntil == null) {
+            notice = "영구 정지된 계정입니다";
+        } else {
+            String pattern = suspendedUntil.getYear() == LocalDateTime.now(java.time.ZoneId.of("Asia/Seoul")).getYear()
+                    ? "MM/dd HH:mm" : "yyyy/MM/dd HH:mm";
+            notice = "정지된 계정입니다(해제 예정 %s)".formatted(
+                    suspendedUntil.format(java.time.format.DateTimeFormatter.ofPattern(pattern)));
+        }
+        return suspensionReason == null || suspensionReason.isBlank() ? notice : notice + " 정지사유 : " + suspensionReason;
+    }
+
     public void setSuspensionDetails(String reason, LocalDateTime until) {
         this.suspensionReason = reason;
         this.suspendedUntil = until;

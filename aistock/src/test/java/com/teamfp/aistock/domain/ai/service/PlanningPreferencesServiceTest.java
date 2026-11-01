@@ -89,8 +89,8 @@ class PlanningPreferencesServiceTest {
         when(goals.findByPlanIdAndUserId(7L, 2L)).thenReturn(Optional.of(goal));
         var briefing = mock(NewsBriefing.class);
         when(briefing.getContent()).thenReturn("사용자가 저장한 시장 요약");
-        when(news.findByUserIdAndBriefingDate(2L, LocalDate.of(2026, 9, 1)))
-            .thenReturn(Optional.of(briefing));
+        when(news.findAllByUserIdAndBriefingDate(2L, LocalDate.of(2026, 9, 1)))
+            .thenReturn(List.of(briefing));
 
         String context = service.describeConnections(2L);
 

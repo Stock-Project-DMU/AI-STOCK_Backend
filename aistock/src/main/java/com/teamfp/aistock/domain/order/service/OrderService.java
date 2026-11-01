@@ -102,7 +102,7 @@ public class OrderService {
     public CreateOrderResponse createMarketOrder(Long userId, CreateOrderRequest request) {
         Account account = accountService.getOwnedAccount(userId, request.accountId());
         if (account.getStatus() == AccountStatus.SUSPENDED) {
-            throw new CustomException(ErrorCode.ACCOUNT_SUSPENDED);
+            throw new CustomException(ErrorCode.ACCOUNT_SUSPENDED, account.suspensionNotice());
         }
         marketSessionService.requireOpen();
 
@@ -218,7 +218,7 @@ public class OrderService {
     public CreateOrderResponse createLimitOrder(Long userId, CreateOrderRequest request) {
         Account account = accountService.getOwnedAccount(userId, request.accountId());
         if (account.getStatus() == AccountStatus.SUSPENDED) {
-            throw new CustomException(ErrorCode.ACCOUNT_SUSPENDED);
+            throw new CustomException(ErrorCode.ACCOUNT_SUSPENDED, account.suspensionNotice());
         }
         marketSessionService.requireOpen();
 
@@ -370,7 +370,7 @@ public class OrderService {
 
         Account account = order.getAccount();
         if (account.getStatus() == AccountStatus.SUSPENDED) {
-            throw new CustomException(ErrorCode.ACCOUNT_SUSPENDED);
+            throw new CustomException(ErrorCode.ACCOUNT_SUSPENDED, account.suspensionNotice());
         }
 
         if (order.getStatus() != OrderStatus.PENDING) {

@@ -163,7 +163,7 @@ class AiNewsServiceTest {
         @Test
         @DisplayName("검색된 기사가 없으면, 그냥 건너뛰지 않고 안내 문구가 담긴 행을 저장한다(알림은 안 보냄)")
         void savesGuidanceMessageWhenNoArticlesFound() {
-            when(newsBriefingRepository.existsByUserIdAndBriefingDate(any(), any())).thenReturn(false);
+            when(newsBriefingRepository.findByUserIdAndBriefingDateAndSetting(any(), any(), any(), any())).thenReturn(java.util.Optional.empty());
             when(naverNewsApiClient.searchByOutlet("hankyung.com")).thenReturn(new NaverNewsSearchResponse(List.of()));
 
             boolean generated = aiNewsService.generateBriefingForUser(setting, java.time.LocalDate.now());
@@ -180,7 +180,7 @@ class AiNewsServiceTest {
         @Test
         @DisplayName("기사는 있지만 근거 검증을 끝내 통과 못 하면, '기사 없음'과는 다른 문구를 저장하고 링크는 붙이지 않는다(AI가 못 미더워한 기사를 굳이 보여줄 필요 없음, 알림도 안 보냄)")
         void savesGuidanceMessageWhenGroundingNeverPasses() {
-            when(newsBriefingRepository.existsByUserIdAndBriefingDate(any(), any())).thenReturn(false);
+            when(newsBriefingRepository.findByUserIdAndBriefingDateAndSetting(any(), any(), any(), any())).thenReturn(java.util.Optional.empty());
             var article = new NaverNewsSearchResponse.NaverNewsResult("제목", "설명", "https://example.com/1", "2026-09-21", "한국경제");
             when(naverNewsApiClient.searchByOutlet("hankyung.com")).thenReturn(new NaverNewsSearchResponse(List.of(article)));
             // 요약 호출도, 검증 호출도 전부 같은 mock을 거치는데 응답이 "SAFE"로 시작하지 않으면
@@ -196,5 +196,26 @@ class AiNewsServiceTest {
             assertThat(captor.getValue().getSourceLinksJson()).isEqualTo("[]");
             verify(notificationService, never()).notify(anyLong(), any(), anyString(), anyString());
         }
+    }
+
+    @Test
+    @DisplayName("오늘 브리핑은 지금 설정(언론사+시각)의 것을 보여주고, 새 설정 것이 아직 없으면 404(fix/site-polish)")
+    void getTodayBriefing_usesCurrentSetting() {
+        java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul"));
+        NewsBriefingSetting current = NewsBriefingSetting.builder()
+                .user(user).outletDomain("mk.co.kr").briefingTime(LocalTime.of(9, 0)).build();
+        when(newsBriefingSettingRepository.findByUserId(1L)).thenReturn(Optional.of(current));
+        NewsBriefing briefing = NewsBriefing.builder().user(user).outletDomain("mk.co.kr").briefingTime(LocalTime.of(9, 0))
+                .briefingDate(today).content("새 설정 브리핑").sourceLinksJson("[]").build();
+        when(newsBriefingRepository.findByUserIdAndBriefingDateAndSetting(1L, today, "mk.co.kr", LocalTime.of(9, 0)))
+                .thenReturn(Optional.of(briefing));
+
+        assertThat(aiNewsService.getTodayBriefing(1L).content()).isEqualTo("새 설정 브리핑");
+
+        when(newsBriefingRepository.findByUserIdAndBriefingDateAndSetting(1L, today, "mk.co.kr", LocalTime.of(9, 0)))
+                .thenReturn(Optional.empty());
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> aiNewsService.getTodayBriefing(1L))
+                .isInstanceOf(com.teamfp.aistock.global.exception.CustomException.class)
+                .extracting("errorCode").isEqualTo(com.teamfp.aistock.global.exception.ErrorCode.NEWS_BRIEFING_NOT_FOUND);
     }
 }

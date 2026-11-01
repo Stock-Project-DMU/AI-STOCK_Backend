@@ -738,6 +738,15 @@ public class AiPlanningService {
               본론부터 시작해라 — 인사말은 이 프롬프트 밖에서 시스템이 필요할 때만 자동으로
               앞에 붙인다.
 
+            [보유 종목 원칙] (fix/site-polish — 보유하지 않은 종목을 보유했다고 지어내 포트폴리오를 조언한 사례)
+            - 사용자의 실제 보유 종목은 매 턴 주어지는 [보유종목] 목록이 전부이자 유일한 기준이다. 목록에 없는
+              종목은 사용자가 보유한 종목이라고 말하거나, 보유를 전제로 비중·수익·포트폴리오를 조언하지 마라.
+            - [보유종목]이 "없음"이면 사용자는 지금 주식을 하나도 갖고 있지 않다. 이때는 보유 포트폴리오 진단이
+              아니라 앞으로의 투자 방향을 안내해라.
+            - [사용자가 연동한 목표 도달 시뮬레이션]의 리밸런싱 구성은 시뮬레이션이 제안한 안일 뿐 실제 보유가
+              아니다. 이전 대화에 나온 종목도 지금 보유 중이라는 근거가 되지 않는다 — 이전 대화와 [보유종목]이
+              다르면 항상 [보유종목]을 따른다.
+
             [도구 호출과 함께 보내는 텍스트]
             - 도구를 호출하면서 텍스트를 같이 보내야 한다면, "확인해볼게요", "찾아볼게요" 같은
               한 문장으로 짧게 끝내라. 어떤 도구를 쓸지, 몇 개를 호출하는지, "도구를 사용합니다"
@@ -2517,8 +2526,15 @@ public class AiPlanningService {
         investmentProfileRepository.findByUserId(userId).ifPresent(profile ->
                 promptBuilder.append("[사용자 투자성향]\n").append(describeProfile(profile)).append('\n'));
 
-        findPrimaryHolding(userId).ifPresent(holding ->
-                promptBuilder.append("[보유종목]\n").append(describeHolding(holding)).append('\n'));
+        // 보유 종목은 전부 넘기고, 없으면 "없음"이라고 분명히 적는다(fix/site-polish) — 예전에는 평가금액 1위 종목
+        // 하나만 넘기고 없을 때는 아무것도 적지 않아, 모델이 나머지 보유를 추측하거나 이전 대화를 보고 지어냈다.
+        List<HoldingValuationDto> holdings = findHoldings(userId);
+        promptBuilder.append("[보유종목]\n");
+        if (holdings.isEmpty()) {
+            promptBuilder.append("없음(현재 보유한 주식이 없습니다)\n");
+        } else {
+            holdings.forEach(holding -> promptBuilder.append("- ").append(describeHolding(holding)).append('\n'));
+        }
 
         String connectedData = planningPreferencesService.describeConnections(userId);
         if (connectedData != null && !connectedData.isBlank()) {
@@ -2569,17 +2585,17 @@ public class AiPlanningService {
                 && financials.totalEquity() == null;
     }
 
-    // 유저의 첫 번째 계좌 기준으로 평가금액(현재가×수량)이 가장 큰 보유종목 1개를 고른다.
-    // 계좌가 여러 개여도 상담 프롬프트에는 대표 종목 하나만 있으면 충분하다.
-    private Optional<HoldingValuationDto> findPrimaryHolding(Long userId) {
+    // 유저 계좌(유저당 1개)의 보유 종목 전체를 평가금액(현재가×수량) 큰 순으로 돌려준다. 수량 0인 행은 뺀다.
+    private List<HoldingValuationDto> findHoldings(Long userId) {
         List<AccountInfoResponse> accounts = accountService.getMyAccounts(userId);
         if (accounts.isEmpty()) {
-            return Optional.empty();
+            return List.of();
         }
 
-        List<HoldingValuationDto> valuations = holdingValuationService.getHoldingValuations(accounts.get(0).accountId());
-        return valuations.stream()
-                .max(Comparator.comparingLong(v -> v.currentPrice() * v.quantity()));
+        return holdingValuationService.getHoldingValuations(accounts.get(0).accountId()).stream()
+                .filter(valuation -> valuation.quantity() > 0)
+                .sorted(Comparator.comparingLong((HoldingValuationDto v) -> v.currentPrice() * v.quantity()).reversed())
+                .toList();
     }
 
 }
