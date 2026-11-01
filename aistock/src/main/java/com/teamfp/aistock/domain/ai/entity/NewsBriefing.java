@@ -29,14 +29,17 @@ import lombok.NoArgsConstructor;
 
 /**
  * feature/ai-news(맞춤형 뉴스 브리핑) — 스케줄러가 매일 생성한 "오늘의 브리핑" 결과.
- * 사용자별로 하루에 한 건만 존재한다(uq_news_briefing_user_date). outletDomain은
+ * 사용자·설정(언론사+시각)별로 하루에 한 건만 존재한다(uq_news_briefing_user_date_setting, fix/site-polish). outletDomain은
  * 브리핑 생성 시점의 {@link NewsBriefingSetting#getOutletDomain()}을 복사해 저장한다 —
  * 이후 사용자가 언론사를 바꿔도 과거 브리핑이 "그때는 어느 언론사 기준이었는지"를 그대로
  * 유지해야 하기 때문이다(설정과 결과를 분리한 이유).
  */
 @Entity
 @Table(name = "news_briefings",
-        uniqueConstraints = @UniqueConstraint(name = "uq_news_briefing_user_date", columnNames = {"user_id", "briefing_date"}),
+        // 설정(언론사+시각)마다 하루 1건(fix/site-polish, 017_site_polish.sql) — 예전 uq_news_briefing_user_date(사용자+날짜)는
+        // 낮에 설정을 바꾸면 새 설정 세션의 브리핑을 만들 자리가 없었다.
+        uniqueConstraints = @UniqueConstraint(name = "uq_news_briefing_user_date_setting",
+                columnNames = {"user_id", "briefing_date", "outlet_domain", "briefing_time"}),
         indexes = @Index(name = "idx_news_briefing_user", columnList = "user_id, briefing_date"))
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)

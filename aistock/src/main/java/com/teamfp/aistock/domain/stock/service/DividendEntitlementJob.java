@@ -53,6 +53,19 @@ public class DividendEntitlementJob {
         }
     }
 
+    /**
+     * 매일 05:50 — 생성기가 전날 밤(23:00 묶음) 다시 받은 dividends.json을 06:00 권리 부여 전에 DB에 반영한다
+     * (fix/site-polish). 예전에는 서버 기동 때와 관리자 재적재 API로만 반영돼, 새 공시(배당금·지급일)가 늦게 들어왔다.
+     */
+    @Scheduled(cron = "0 50 5 * * *", zone = "Asia/Seoul")
+    public void reloadDailySchedules() {
+        try {
+            dividendScheduleService.reloadSchedules();
+        } catch (RuntimeException e) {
+            log.error("[DividendEntitlementJob] 매일 배당 스케줄 적재 실패", e);
+        }
+    }
+
     @Scheduled(cron = "0 0 6 * * *", zone = "Asia/Seoul")
     public void grantTodayEntitlements() {
         LocalDate today = LocalDate.now(KST);

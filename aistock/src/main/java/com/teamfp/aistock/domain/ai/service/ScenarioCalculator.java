@@ -116,6 +116,23 @@ public final class ScenarioCalculator {
     }
 
     /**
+     * months개월 뒤 targetAmount에 닿으려면 매달 얼마를 넣어야 하는지(1만원 단위 올림). projectCurve와 같은 규칙
+     * (직전 금액 × (1 + 월 성장률) + 그 달 말 납입)의 적립식 미래가치 식을 납입액에 대해 푼 값이다 — 목표가 기한 안에
+     * 닿지 않을 때 "월 납입을 얼마로 늘리면 되는지" 대안을 보여주기 위함(fix/site-polish). 납입 없이도 닿으면 0.
+     */
+    public static long requiredMonthlyContribution(long startAmount, double monthlyRate, int months, long targetAmount) {
+        double growth = Math.pow(1 + monthlyRate, months);
+        double shortfall = targetAmount - startAmount * growth;
+        if (shortfall <= 0) {
+            return 0;
+        }
+        // 성장률이 0에 가까우면 (growth − 1) / rate가 0/0이 되므로 단순 합(months)으로 계산한다.
+        double annuityFactor = Math.abs(monthlyRate) < 1e-9 ? months : (growth - 1) / monthlyRate;
+        long required = (long) Math.ceil(shortfall / annuityFactor);
+        return (required + 9_999) / 10_000 * 10_000;
+    }
+
+    /**
      * 두 차트를 같은 길이로 잘라 보여줄 기간. 기한이 있으면 기한까지는 항상 보여주고, 두 포트폴리오
      * 중 늦게 도달하는 쪽의 도달 시점까지 보여준다. 어느 한쪽이라도 30년 안에 못 미치면 30년 전체.
      * 최소 1개월.

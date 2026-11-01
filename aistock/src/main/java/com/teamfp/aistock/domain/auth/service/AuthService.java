@@ -122,6 +122,10 @@ public class AuthService {
     private static final String DEFAULT_ACCOUNT_NAME = "기본 계좌";
     // 3단계 자금성향의 1번은 수익추구형이다. 기존 4단계의 기본값 2와 의미를 맞춘다.
     private static final int DEFAULT_FUND_TENDENCY = 1;
+    // 같은 이메일 중복 가입 안내(fix/site-polish) — 일반 가입 이메일로 SNS 로그인하려 할 때(SNS 인증을 거친 본인에게만 보인다).
+    private static final String GENERAL_SIGNUP_EMAIL_MESSAGE = "이미 일반 회원으로 가입된 이메일입니다. 아이디·비밀번호로 로그인해 주세요.";
+    // 회원가입 인증코드 발송 때 이미 가입된 이메일 안내 — 누구나 부를 수 있는 API라 가입 방식은 알려주지 않는다.
+    private static final String REGISTERED_EMAIL_MESSAGE = "이미 가입된 이메일입니다.";
 
     private final UserRepository userRepository;
     private final SocialAccountRepository socialAccountRepository;
@@ -201,7 +205,7 @@ public class AuthService {
 
         // 정지된 계정 차단 (UserStatus 검증)
         if (user.getStatus() == UserStatus.SUSPENDED) {
-            throw new CustomException(ErrorCode.USER_SUSPENDED);
+            throw new CustomException(ErrorCode.USER_SUSPENDED, user.suspensionNotice());
         }
 
         redisAuthCodeService.resetLoginFail(request.getLoginId());
@@ -266,6 +270,13 @@ public class AuthService {
                 if (!user.isActive()) {
                     throw new CustomException(ErrorCode.USER_NOT_FOUND);
                 }
+                // 같은 이메일로 아이디·비밀번호(일반) 가입한 회원이 이미 있으면 SNS 계정을 붙이지 않고 막는다
+                // (fix/site-polish) — 예전에는 조용히 연동해 한 사람이 두 방식으로 들어가졌다. SNS끼리(예: 구글로 가입한
+                // 이메일로 네이버 로그인)는 일반 가입이 아니므로 그대로 연동한다. 이미 연동돼 있던 계정은 위
+                // socialAccountOpt 분기에서 로그인되므로 영향이 없다.
+                if (user.getLoginId() != null) {
+                    throw new CustomException(ErrorCode.DUPLICATE_EMAIL, GENERAL_SIGNUP_EMAIL_MESSAGE);
+                }
                 log.info("동일한 이메일[{}]을 사용하는 기존 유저가 존재하여 소셜 연동만 수행합니다.", userInfo.getEmail());
             } else {
                 // 아예 처음 가입하는 유저라면 신규 생성
@@ -291,7 +302,7 @@ public class AuthService {
 
         // 정지 상태 검증
         if (user.getStatus() == UserStatus.SUSPENDED) {
-            throw new CustomException(ErrorCode.USER_SUSPENDED);
+            throw new CustomException(ErrorCode.USER_SUSPENDED, user.suspensionNotice());
         }
 
         return generateLoginResponse(user);
@@ -319,7 +330,7 @@ public class AuthService {
 
         // 정지된 계정 차단
         if (user.getStatus() == UserStatus.SUSPENDED) {
-            throw new CustomException(ErrorCode.USER_SUSPENDED);
+            throw new CustomException(ErrorCode.USER_SUSPENDED, user.suspensionNotice());
         }
 
         // 신규 Access Token 및 Refresh Token 생성 (RTR 전략)
@@ -413,6 +424,11 @@ public class AuthService {
      * 저장한 뒤 MailClient로 실제 메일을 보낸다.
      */
     public void sendEmailCode(String email) {
+        // 이미 가입된 이메일이면 인증코드를 보내기 전에 막는다(fix/site-polish) — 예전에는 인증까지 다 마친 뒤 마지막
+        // 가입 버튼에서야 DUPLICATE_EMAIL이 났다. 가입 방식(일반·SNS)은 알려주지 않는다(가입 여부 외 정보 노출 방지).
+        if (userRepository.findByEmail(email).isPresent()) {
+            throw new CustomException(ErrorCode.DUPLICATE_EMAIL, REGISTERED_EMAIL_MESSAGE);
+        }
         if (!redisAuthCodeService.tryStartEmailSend(email)) {
             throw new CustomException(ErrorCode.EMAIL_SEND_COOLDOWN);
         }

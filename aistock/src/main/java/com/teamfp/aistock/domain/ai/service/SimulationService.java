@@ -143,6 +143,10 @@ public class SimulationService {
             3~5문장으로 설명하세요. 근거 데이터가 없는 종목은 근거를 지어내지 마세요.
             - timeReductionExplanation: 목표 도달 시점이 얼마나 앞당겨지는지(또는 늦어지거나 달라지지 \
             않는지)와 그 이유를 2~4문장으로 설명하세요. 기한이 있으면 기한 안 달성 여부도 언급하세요.
+            - [목표 달성 대안]이 주어지면 timeReductionExplanation에서 현재 조건으로는 목표 달성이 어렵다는 점을 \
+            먼저 분명히 말한 뒤, 기간 연장·목표 금액 조정·월 납입 증액 세 가지 대안을 주어진 숫자 그대로 \
+            제시하세요(이 경우 문장 수 제한은 6문장). 가상자산·급등주·레버리지처럼 위험이 큰 투자로 목표를 \
+            맞추라는 제안은 하지 마세요.
             - 존댓말로 쓰고, 매수·매도를 직접 권유하는 표현은 쓰지 마세요.
             다른 설명 없이 아래 JSON 형식으로만 답하세요.
             {"rebalanceReason": "...", "timeReductionExplanation": "..."}
@@ -274,8 +278,12 @@ public class SimulationService {
         Map<String, DartDataSnapshot> dartData = fetchDartData(rationaleStocks);
         Map<String, NaverNewsSearchResponse> newsData = fetchNewsData(rationaleStocks);
 
+        String goalAlternatives = describeGoalAlternatives(goal, startAmount, request.monthlyContribution(),
+                rebalancedRate, rebalancedCurve, rebalancedReachMonths);
+
         SimulationExplanation explanation = requestExplanation(profile, goal, request.monthlyContribution(),
-                includeCurrentPortfolio, holdingsAmount, cashAmount, current, rebalanced, shortenedMonths, rationaleStocks, dartData, newsData);
+                includeCurrentPortfolio, holdingsAmount, cashAmount, current, rebalanced, shortenedMonths, goalAlternatives,
+                rationaleStocks, dartData, newsData);
 
         String pendingSimulationId = UUID.randomUUID().toString();
         SimulationResponse response = new SimulationResponse(
@@ -559,7 +567,8 @@ public class SimulationService {
     private SimulationExplanation requestExplanation(InvestmentProfile profile, GoalExtraction goal, long monthlyContribution,
                                                      boolean includeCurrentPortfolio, long holdingsAmount, long cashAmount,
                                                      PortfolioProjectionDto current, PortfolioProjectionDto rebalanced,
-                                                     Integer shortenedMonths, Map<String, String> rationaleStocks,
+                                                     Integer shortenedMonths, String goalAlternatives,
+                                                     Map<String, String> rationaleStocks,
                                                      Map<String, DartDataSnapshot> dartData,
                                                      Map<String, NaverNewsSearchResponse> newsData) {
         StringBuilder prompt = new StringBuilder();
@@ -582,6 +591,9 @@ public class SimulationService {
         prompt.append('\n').append("[단축 개월 수] ")
                 .append(shortenedMonths != null ? shortenedMonths + "개월(음수면 늦어짐)" : "비교 불가(한쪽 이상이 30년 안에 도달하지 못함)")
                 .append("\n\n");
+        if (goalAlternatives != null) {
+            prompt.append("[목표 달성 대안] (리밸런싱 구성 기준, 서버 계산값)\n").append(goalAlternatives).append('\n');
+        }
 
         prompt.append("[종목별 근거 데이터] (비중 변화가 큰 종목)\n");
         rationaleStocks.forEach((stockCode, stockName) -> {
@@ -631,6 +643,42 @@ public class SimulationService {
         return goal.periodMonths() != null
                 ? "%d원, 기한 %d개월".formatted(goal.targetAmount(), goal.periodMonths())
                 : "%d원, 기한 없음".formatted(goal.targetAmount());
+    }
+
+    /**
+     * 리밸런싱 구성으로도 목표에 닿지 못할 때(기한이 있으면 기한 안, 없으면 30년 안) 보여줄 현실적인 대안 세 가지 —
+     * 기간 연장·목표 금액 조정·월 납입 증액 — 를 서버가 계산해 문장으로 만든다. "3년에 100억"처럼 터무니없는 목표에
+     * 불가라고만 답하지 않고 숫자로 된 대안을 주기 위함이다(fix/site-polish). Gemini는 숫자를 새로 만들지 않으므로
+     * 여기서 모두 계산해 넘긴다. 목표에 닿으면 null.
+     */
+    private String describeGoalAlternatives(GoalExtraction goal, long startAmount, long monthlyContribution,
+                                            double rebalancedRate, List<ScenarioPointDto> rebalancedCurve,
+                                            Integer rebalancedReachMonths) {
+        Integer periodMonths = goal.periodMonths();
+        boolean isAchievable = periodMonths != null
+                ? rebalancedReachMonths != null && rebalancedReachMonths <= periodMonths
+                : rebalancedReachMonths != null;
+        if (isAchievable) {
+            return null;
+        }
+        // 기한이 30년보다 길면 곡선 끝(30년)까지만 본다.
+        int horizonMonths = periodMonths != null
+                ? Math.min(periodMonths, ScenarioCalculator.MAX_PROJECTION_MONTHS)
+                : ScenarioCalculator.MAX_PROJECTION_MONTHS;
+        String horizonText = periodMonths != null ? "기한 %d개월".formatted(horizonMonths) : "30년";
+        long reachableAmount = rebalancedCurve.get(horizonMonths).value();
+        long requiredContribution = ScenarioCalculator.requiredMonthlyContribution(startAmount, rebalancedRate,
+                horizonMonths, goal.targetAmount());
+
+        StringBuilder text = new StringBuilder();
+        text.append("- 기간 연장: ").append(rebalancedReachMonths != null
+                ? "지금 조건 그대로 %d개월 뒤(%d년 %d개월) 도달".formatted(rebalancedReachMonths,
+                        rebalancedReachMonths / 12, rebalancedReachMonths % 12)
+                : "30년 안에도 도달하지 못해 기간 연장만으로는 어려움").append('\n');
+        text.append("- 목표 금액 조정: %s 안에 도달 가능한 금액 약 %,d원\n".formatted(horizonText, reachableAmount));
+        text.append("- 월 납입 증액: %s 안에 도달하려면 월 납입 %,d원 필요(현재 %,d원)\n"
+                .formatted(horizonText, requiredContribution, monthlyContribution));
+        return text.toString();
     }
 
     private String describeProjection(PortfolioProjectionDto projection) {

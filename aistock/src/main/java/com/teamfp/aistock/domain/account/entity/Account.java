@@ -110,6 +110,11 @@ public class Account {
     @ColumnDefault("'ACTIVE'")
     private AccountStatus status;
 
+    // 관리자가 계좌 거래를 정지할 때 남긴 사유 — 주문·충전이 막힐 때 사용자 화면 안내 문구에 함께 보여준다
+    // (fix/site-polish). 정지 해제 시 비운다. 이 컬럼이 생기기 전에 정지된 계좌는 null이다.
+    @Column(name = "suspension_reason", length = 500)
+    private String suspensionReason;
+
     @Version
     @Column(name = "version", nullable = false)
     private long version;
@@ -236,11 +241,27 @@ public class Account {
      * (차단 로직 자체는 OrderService 쪽에서 처리 — 이 메서드는 상태 전환만 담당).
      */
     public void suspend() {
+        suspend(null);
+    }
+
+    public void suspend(String reason) {
         this.status = AccountStatus.SUSPENDED;
+        this.suspensionReason = reason;
     }
 
     public void activate() {
         this.status = AccountStatus.ACTIVE;
+        this.suspensionReason = null;
+    }
+
+    /**
+     * 정지된 계좌로 주문·취소·충전을 시도했을 때 보여줄 안내 문구(fix/site-polish) — 화면의 빨간 안내 칸이 좁아
+     * "거래 정지된 계좌입니다 정지사유 : OO" 한 줄로 짧게 만든다. 사유가 없으면(이전 정지 건) 앞부분만.
+     */
+    public String suspensionNotice() {
+        return suspensionReason == null || suspensionReason.isBlank()
+                ? "거래 정지된 계좌입니다"
+                : "거래 정지된 계좌입니다 정지사유 : " + suspensionReason;
     }
 
     /**

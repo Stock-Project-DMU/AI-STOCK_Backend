@@ -14,6 +14,7 @@ import com.teamfp.aistock.domain.user.dto.response.UserInfoResponse;
 import com.teamfp.aistock.domain.user.entity.InvestmentProfile;
 import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.repository.InvestmentProfileRepository;
+import com.teamfp.aistock.domain.user.repository.SocialAccountRepository;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
@@ -32,6 +33,7 @@ public class UserService {
     private final ObjectMapper objectMapper;
     private final PasswordEncoder passwordEncoder;
     private final RedisTokenService redisTokenService;
+    private final SocialAccountRepository socialAccountRepository;
 
     @Transactional
     public UserInfoResponse updateProfile(Long userId, com.teamfp.aistock.domain.user.dto.request.ProfileUpdateRequest request) {
@@ -44,7 +46,7 @@ public class UserService {
 
     @Transactional(readOnly = true)
     public UserInfoResponse getMyInfo(Long userId) {
-        return UserInfoResponse.from(findUser(userId));
+        return toUserInfo(findUser(userId));
     }
 
     /**
@@ -72,7 +74,7 @@ public class UserService {
         }
         user.updateInfo(request.name(), request.email());
         if (request.birthdate() != null) user.updateBirthdate(request.birthdate());
-        return UserInfoResponse.from(user);
+        return toUserInfo(user);
     }
 
     // investment_profile.uq_user_profile — 같은 유저의 설문 최초 제출이 동시에 두 건 이상
@@ -216,6 +218,13 @@ public class UserService {
     private User findUser(Long userId) {
         return userRepository.findById(userId)
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+    }
+
+    private UserInfoResponse toUserInfo(User user) {
+        return UserInfoResponse.from(user, socialAccountRepository.findAllByUser_UserId(user.getUserId()).stream()
+                .map(socialAccount -> socialAccount.getProvider())
+                .distinct()
+                .toList());
     }
 
 }

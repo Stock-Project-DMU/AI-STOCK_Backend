@@ -203,7 +203,13 @@ public class AiNewsService {
      */
     @Transactional(readOnly = true)
     public NewsBriefingResponse getTodayBriefing(Long userId) {
-        NewsBriefing briefing = newsBriefingRepository.findByUserIdAndBriefingDate(userId, LocalDate.now(KST))
+        // 오늘 브리핑은 지금 설정(언론사+시각)의 것을 보여준다(fix/site-polish) — 낮에 설정을 바꿨으면 새 설정의
+        // 브리핑이 만들어지기 전까지는 404(아직 생성 전)다. 설정이 없으면 오늘 만든 것 중 가장 최근 것.
+        LocalDate today = LocalDate.now(KST);
+        NewsBriefing briefing = newsBriefingSettingRepository.findByUserId(userId)
+                .map(setting -> newsBriefingRepository.findByUserIdAndBriefingDateAndSetting(
+                        userId, today, setting.getOutletDomain(), setting.getBriefingTime()))
+                .orElseGet(() -> newsBriefingRepository.findAllByUserIdAndBriefingDate(userId, today).stream().findFirst())
                 .orElseThrow(() -> new CustomException(ErrorCode.NEWS_BRIEFING_NOT_FOUND));
         return NewsBriefingResponse.from(briefing, deserializeSourceLinks(briefing.getSourceLinksJson()));
     }
@@ -216,7 +222,8 @@ public class AiNewsService {
 
     @Transactional(readOnly = true)
     public NewsBriefingResponse getBriefing(Long userId, LocalDate date) {
-        NewsBriefing briefing = newsBriefingRepository.findByUserIdAndBriefingDate(userId, date)
+        // 같은 날 설정을 바꿔 여러 건이면 가장 나중에 만든 것(fix/site-polish). 설정별 목록은 getBriefingHistory()에 다 있다.
+        NewsBriefing briefing = newsBriefingRepository.findAllByUserIdAndBriefingDate(userId, date).stream().findFirst()
                 .orElseThrow(() -> new CustomException(ErrorCode.NEWS_BRIEFING_NOT_FOUND));
         return NewsBriefingResponse.from(briefing, deserializeSourceLinks(briefing.getSourceLinksJson()));
     }
@@ -302,7 +309,8 @@ public class AiNewsService {
     @Transactional
     public boolean generateBriefingForUser(NewsBriefingSetting setting, LocalDate today) {
         Long userId = setting.getUser().getUserId();
-        if (newsBriefingRepository.existsByUserIdAndBriefingDate(userId, today)) {
+        if (newsBriefingRepository.findByUserIdAndBriefingDateAndSetting(
+                userId, today, setting.getOutletDomain(), setting.getBriefingTime()).isPresent()) {
             return false;
         }
 

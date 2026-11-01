@@ -24,7 +24,7 @@ public class CustomUserDetailsService implements UserDetailsService {
 
         // 관리자에 의해 정지(UserStatus.SUSPENDED)된 사용자 차단
         if (user.getStatus() == UserStatus.SUSPENDED) {
-            throw new CustomException(ErrorCode.USER_SUSPENDED);
+            throw new CustomException(ErrorCode.USER_SUSPENDED, user.suspensionNotice());
         }
 
         return new CustomUserDetails(user.getUserId(), user.getRole());

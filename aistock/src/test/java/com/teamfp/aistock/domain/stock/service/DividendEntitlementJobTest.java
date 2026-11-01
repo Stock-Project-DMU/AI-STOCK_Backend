@@ -62,4 +62,13 @@ class DividendEntitlementJobTest {
         verify(dividendEntitlementService).grantEntitlements(2L);
         verify(dividendEntitlementService).grantEntitlements(3L);
     }
+
+    @Test
+    void 매일_새벽_배당_스케줄을_다시_적재하고_실패해도_예외를_던지지_않는다() {
+        when(dividendScheduleService.reloadSchedules()).thenThrow(new IllegalStateException("파일 읽기 실패"));
+
+        dividendEntitlementJob.reloadDailySchedules();
+
+        verify(dividendScheduleService).reloadSchedules();
+    }
 }

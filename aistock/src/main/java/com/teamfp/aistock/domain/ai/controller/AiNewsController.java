@@ -2,6 +2,7 @@ package com.teamfp.aistock.domain.ai.controller;
 
 import java.util.List;
 
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -51,6 +52,12 @@ public class AiNewsController {
     @GetMapping("/chat/sessions/{sessionId}/messages")
     public ApiResponse<List<NewsChatMessageResponse>> getChatMessages(@PathVariable Long sessionId) {
         return ApiResponse.success(newsChatSessionService.getMessages(SecurityUtil.getCurrentUserId(), sessionId));
+    }
+
+    @DeleteMapping("/chat/sessions/{sessionId}")
+    public ApiResponse<Void> deleteChatSession(@PathVariable Long sessionId) {
+        newsChatSessionService.delete(SecurityUtil.getCurrentUserId(), sessionId);
+        return ApiResponse.success("채팅을 삭제했습니다.", null);
     }
 
     @PostMapping("/chat/sessions/{sessionId}/messages")

@@ -58,6 +58,9 @@ class UserServiceTest {
     @Mock
     private RedisTokenService redisTokenService;
 
+    @Mock
+    private com.teamfp.aistock.domain.user.repository.SocialAccountRepository socialAccountRepository;
+
     private UserService userService;
 
     private static final Long USER_ID = 1L;
@@ -67,7 +70,8 @@ class UserServiceTest {
     @BeforeEach
     void setUp() {
         ObjectMapper objectMapper = JsonMapper.builder().build();
-        userService = new UserService(userRepository, investmentProfileRepository, objectMapper, passwordEncoder, redisTokenService);
+        userService = new UserService(userRepository, investmentProfileRepository, objectMapper, passwordEncoder, redisTokenService,
+                socialAccountRepository);
 
         user = User.builder()
                 .userId(USER_ID)

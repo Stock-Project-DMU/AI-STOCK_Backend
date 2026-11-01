@@ -129,7 +129,7 @@ public class HighItemApiClient {
     }
 
     public List<RankingItemDto> getTopTradingValue(int limit) {
-        return ranking(dto -> true, Comparator.comparingLong(this::tradingValue).reversed(),
+        return ranking(dto -> true, Comparator.comparingLong(HighItemApiClient::tradingValue).reversed(),
                 dto -> "거래대금 약 %d백만원".formatted(tradingValue(dto) / 1_000_000), limit);
     }
 
@@ -184,6 +184,7 @@ public class HighItemApiClient {
                 .changeAmount(dto.getChangeAmount())
                 .changeRate(dto.getChangeRate())
                 .volume(dto.getVolume())
+                .tradingValue(tradingValue(dto))
                 .extraInfo(extraInfo)
                 .build();
     }
@@ -200,7 +201,7 @@ public class HighItemApiClient {
     }
 
     /** 거래대금(원) 근사치 = 현재가 × 당일 누적 거래량. */
-    private long tradingValue(CurrentPriceDetailDto dto) {
+    private static long tradingValue(CurrentPriceDetailDto dto) {
         return dto.getCurrentPrice() * dto.getVolume();
     }
 }

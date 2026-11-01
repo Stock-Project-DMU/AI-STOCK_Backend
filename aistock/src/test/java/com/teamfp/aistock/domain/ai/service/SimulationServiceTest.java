@@ -346,6 +346,38 @@ class SimulationServiceTest {
             assertThat(response.current().achievableWithinPeriod()).isNull();
             assertThat(response.current().points()).hasSize(361);
         }
+
+        @Test
+        @DisplayName("기한 안에 못 닿는 목표면 설명 프롬프트에 기간 연장·목표 조정·월 납입 증액 대안을 넣는다(fix/site-polish)")
+        void unreachableWithinPeriod_addsAlternatives() {
+            when(geminiApiClient.generate(any())).thenReturn(gemini("{\"targetAmount\": 10000000000, \"periodMonths\": 36}"),
+                    gemini(REBALANCE_JSON), gemini(EXPLANATION_JSON));
+
+            simulationService.runSimulation(USER_ID, new SimulationRequest("3년에 100억", 100_000));
+
+            ArgumentCaptor<GeminiRequest> captor = ArgumentCaptor.forClass(GeminiRequest.class);
+            verify(geminiApiClient, times(3)).generate(captor.capture());
+            assertThat(captor.getAllValues().get(2).prompt())
+                    .contains("[목표 달성 대안]")
+                    .contains("- 기간 연장: ")
+                    .contains("- 목표 금액 조정: 기한 36개월 안에 도달 가능한 금액 약 ")
+                    .contains("- 월 납입 증액: 기한 36개월 안에 도달하려면 월 납입 ")
+                    .contains("(현재 100,000원)");
+        }
+
+        @Test
+        @DisplayName("기한 없이 30년 안에 닿는 목표면 대안을 넣지 않는다")
+        void reachableGoal_noAlternatives() {
+            when(geminiApiClient.generate(any())).thenReturn(gemini("{\"targetAmount\": 20000000, \"periodMonths\": null}"),
+                    gemini(REBALANCE_JSON), gemini(EXPLANATION_JSON));
+
+            SimulationResponse response = simulationService.runSimulation(USER_ID, new SimulationRequest("2천만원 모으기", 100_000));
+
+            ArgumentCaptor<GeminiRequest> captor = ArgumentCaptor.forClass(GeminiRequest.class);
+            verify(geminiApiClient, times(3)).generate(captor.capture());
+            assertThat(response.rebalanced().reachMonths()).isNotNull();
+            assertThat(captor.getAllValues().get(2).prompt()).doesNotContain("[목표 달성 대안]");
+        }
     }
 
     @Nested
