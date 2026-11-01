@@ -77,8 +77,12 @@ public enum ErrorCode {
     USER_SUSPENDED(HttpStatus.LOCKED, "USER_SUSPENDED", "관리자에 의해 정지된 계정입니다."),
 
     // 429 Too Many Requests
+    // 두 경우에 쓴다: (1) 목표 도달 시뮬레이션의 자체 호출 제한(분당3/일일10, SimulationService) 초과 — 이 메시지 그대로,
+    // (2) Gemini API 자체가 429(RESOURCE_EXHAUSTED)를 재시도 후에도 돌려준 경우 — GeminiApiClient가 RATE_LIMIT_MESSAGE로 응답.
     GEMINI_RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "GEMINI_RATE_LIMIT_EXCEEDED", "AI 서비스 요청 제한을 초과했습니다."),
     DART_RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "DART_RATE_LIMIT_EXCEEDED", "공시 데이터 요청 제한을 초과했습니다. 잠시 후 다시 시도해 주세요."),
+    // 시뮬레이터·AI 재무설계의 계정당 하루 사용 횟수 초과(RedisRateLimiterService). 기능별 문구는 각 서비스가 넘긴다.
+    DAILY_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "DAILY_LIMIT_EXCEEDED", "오늘 사용 횟수를 모두 사용했습니다. 내일 다시 이용해 주세요."),
 
     // 500 Internal Server Error
     REDIS_SERIALIZATION_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "REDIS_SERIALIZATION_ERROR", "Redis 데이터 직렬화 에러가 발생했습니다."),
@@ -97,7 +101,11 @@ public enum ErrorCode {
     // 외부 시세 데이터 제공사 REST 호출(토큰 발급 포함) 자체가 실패한 경우 — "조회는 성공했지만 데이터가
     // 없음"(빈 목록)과 구분하기 위해 EXTERNAL_API_ERROR와 별도로 둔다(외부 장애와 빈 목록 구분 처리, #05).
     MARKET_DATA_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "MARKET_DATA_UNAVAILABLE", "시세 데이터 제공사와 일시적으로 연결할 수 없습니다. 잠시 후 다시 시도해 주세요."),
-    STOCK_PRICE_NOT_AVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "STOCK_PRICE_NOT_AVAILABLE", "현재가 정보를 일시적으로 가져올 수 없습니다. 잠시 후 다시 시도해 주세요.");
+    STOCK_PRICE_NOT_AVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "STOCK_PRICE_NOT_AVAILABLE", "현재가 정보를 일시적으로 가져올 수 없습니다. 잠시 후 다시 시도해 주세요."),
+
+    // 504 Gateway Timeout
+    // AI 재무설계 한 턴(Gemini 판단·도구 실행·최종 답변 전체)이 마감 시간(45초)을 넘긴 경우 — AiPlanningService.sendMessage().
+    AI_RESPONSE_TIMEOUT(HttpStatus.GATEWAY_TIMEOUT, "AI_RESPONSE_TIMEOUT", "응답 생성에 시간이 너무 걸렸습니다. 다시 시도해 주세요.");
 
     private final HttpStatus status;
     private final String code;

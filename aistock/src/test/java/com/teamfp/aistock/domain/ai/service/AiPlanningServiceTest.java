@@ -1,5 +1,6 @@
 package com.teamfp.aistock.domain.ai.service;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -13,6 +14,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.teamfp.aistock.domain.account.dto.response.AccountInfoResponse;
@@ -31,6 +34,7 @@ import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.redis.RedisAiToolCacheService;
+import com.teamfp.aistock.global.redis.RedisRateLimiterService;
 import com.teamfp.aistock.infra.dart.DartApiClient;
 import com.teamfp.aistock.infra.dart.dto.DartFinancialResponse;
 import com.teamfp.aistock.infra.gemini.GeminiApiClient;
@@ -59,8 +63,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -72,7 +78,7 @@ import static org.mockito.Mockito.when;
  * 2026-07-31 코드리뷰 후속 수정 사항이 실제로 지켜지는지 검증한다: Gemini 실패 시 사용자
  * 메시지가 남지 않는지(orphan 메시지 방지), 대표 계좌를 AccountService를 통해서만
  * 조회하는지, 세션 소유권 검증, 세션 제목이 최초 1회만 채워지는지.
- * (분당3/일일10 자체 호출 제한은 2026-09-21 제거됨 — rate-limit 관련 테스트도 함께 삭제)
+ * (분당3/일일10 자체 호출 제한은 2026-09-21 제거됐다가 fix/ai-daily-rate-limit에서 하루 3회로 재적용 — SendMessageDailyLimit 참고)
  */
 @ExtendWith(MockitoExtension.class)
 class AiPlanningServiceTest {
@@ -92,6 +98,8 @@ class AiPlanningServiceTest {
     private HoldingValuationService holdingValuationService;
     @Mock
     private RedisAiToolCacheService aiToolCacheService;
+    @Mock
+    private RedisRateLimiterService rateLimiterService;
     @Mock
     private GeminiApiClient geminiApiClient;
     @Mock
@@ -153,6 +161,9 @@ class AiPlanningServiceTest {
         // 그대로 실행하는 동기 Executor를 넣는다 — 실제 스레드 풀을 쓰면 Mockito stub이 테스트
         // 스레드가 아닌 다른 스레드에서 호출돼 검증이 불안정해질 수 있다.
         ReflectionTestUtils.setField(aiPlanningService, "aiToolTaskExecutor", (Executor) Runnable::run);
+        // 한 턴 전체를 돌리는 aiPlanningTaskExecutor도 같은 이유로 동기 Executor를 넣는다 — 마감 시간(45초)
+        // 동작 자체는 SendMessageDeadline에서 실제 스레드로 따로 검증한다.
+        ReflectionTestUtils.setField(aiPlanningService, "aiPlanningTaskExecutor", (Executor) Runnable::run);
 
         // rate-limit/세션 소유권 검증처럼 Gemini 호출까지 가지 않고 일찍 끝나는 테스트에서는
         // 이 스텁이 실제로 쓰이지 않는다 — lenient()로 STRICT_STUBS의 UnnecessaryStubbingException을 피한다.
@@ -160,6 +171,8 @@ class AiPlanningServiceTest {
         // 캐시 미스를 기본값으로 둔다 — 캐시 재사용 자체를 검증하는 테스트에서만 별도로
         // getCachedResult()가 값을 반환하도록 덮어써서 쓴다.
         lenient().when(aiToolCacheService.getCachedResult(any(), any())).thenReturn(Optional.empty());
+        // 하루 3회 제한은 SendMessageDailyLimit에서만 검증한다 — 나머지 테스트는 한도 안이라고 본다.
+        lenient().when(rateLimiterService.tryAcquirePlanning(anyLong())).thenReturn(true);
     }
 
     private void stubHappyPathUpTo(GeminiResponse geminiResponse) {
@@ -189,6 +202,63 @@ class AiPlanningServiceTest {
                     .isEqualTo(ErrorCode.EXTERNAL_API_ERROR);
 
             verify(messageRepository, never()).save(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("메시지 전송 - 응답 마감 시간과 Gemini 할당량 초과")
+    class SendMessageDeadline {
+
+        @Test
+        @DisplayName("한 턴이 마감 시간을 넘기면 AI_RESPONSE_TIMEOUT을 던지고 메시지를 저장하지 않는다")
+        void fail_overDeadline_throwsAiResponseTimeout() {
+            java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+            try {
+                ReflectionTestUtils.setField(aiPlanningService, "aiPlanningTaskExecutor", executor);
+                ReflectionTestUtils.setField(aiPlanningService, "responseTimeoutMillis", 100L);
+                when(sessionRepository.findByUserIdAndSessionId(USER_ID, SESSION_ID)).thenReturn(Optional.of(session));
+                when(messageRepository.findRecentBySessionId(anyLong(), any())).thenReturn(List.of());
+                when(accountService.getMyAccounts(USER_ID)).thenReturn(List.of());
+                when(investmentProfileRepository.findByUserId(USER_ID)).thenReturn(Optional.empty());
+                when(geminiApiClient.generate(any())).thenAnswer(invocation -> {
+                    Thread.sleep(1_000);
+                    return new GeminiResponse("늦은 답변", 5);
+                });
+
+                assertThatThrownBy(() -> aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("질문")))
+                        .isInstanceOf(CustomException.class)
+                        .extracting(e -> ((CustomException) e).getErrorCode())
+                        .isEqualTo(ErrorCode.AI_RESPONSE_TIMEOUT);
+
+                verify(messageRepository, never()).save(any());
+            } finally {
+                executor.shutdownNow();
+            }
+        }
+
+        @Test
+        @DisplayName("Gemini 할당량 초과(GEMINI_RATE_LIMIT_EXCEEDED)는 다른 스레드에서 나도 그대로 전달된다")
+        void fail_geminiRateLimit_propagatesErrorCode() {
+            java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+            try {
+                ReflectionTestUtils.setField(aiPlanningService, "aiPlanningTaskExecutor", executor);
+                when(sessionRepository.findByUserIdAndSessionId(USER_ID, SESSION_ID)).thenReturn(Optional.of(session));
+                when(messageRepository.findRecentBySessionId(anyLong(), any())).thenReturn(List.of());
+                when(accountService.getMyAccounts(USER_ID)).thenReturn(List.of());
+                when(investmentProfileRepository.findByUserId(USER_ID)).thenReturn(Optional.empty());
+                when(geminiApiClient.generate(any())).thenThrow(
+                        new CustomException(ErrorCode.GEMINI_RATE_LIMIT_EXCEEDED, GeminiApiClient.RATE_LIMIT_MESSAGE));
+
+                assertThatThrownBy(() -> aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("질문")))
+                        .isInstanceOf(CustomException.class)
+                        .hasMessage(GeminiApiClient.RATE_LIMIT_MESSAGE)
+                        .extracting(e -> ((CustomException) e).getErrorCode())
+                        .isEqualTo(ErrorCode.GEMINI_RATE_LIMIT_EXCEEDED);
+
+                verify(messageRepository, never()).save(any());
+            } finally {
+                executor.shutdownNow();
+            }
         }
     }
 
@@ -956,6 +1026,68 @@ class AiPlanningServiceTest {
             aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("두 번째 질문"));
 
             assertThat(session.getUpdatedAt()).isAfterOrEqualTo(firstUpdatedAt);
+        }
+    }
+
+    @Nested
+    @DisplayName("메시지 전송 - 계정당 하루 3회 제한")
+    class SendMessageDailyLimit {
+
+        // RedisTemplate만 메모리 맵으로 흉내 내고 RedisRateLimiterService는 실제 코드를 써서,
+        // "3회 성공 → 4번째 거절"이 서비스와 제한기 사이에서 실제로 맞물려 동작하는지 검증한다.
+        private final Map<String, Long> redisCounters = new HashMap<>();
+
+        @BeforeEach
+        @SuppressWarnings("unchecked")
+        void useRealRateLimiter() {
+            RedisTemplate<String, String> redisTemplate = mock(RedisTemplate.class);
+            ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
+            lenient().when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+            lenient().when(valueOperations.increment(anyString()))
+                    .thenAnswer(invocation -> redisCounters.merge(invocation.getArgument(0), 1L, Long::sum));
+            lenient().when(valueOperations.decrement(anyString()))
+                    .thenAnswer(invocation -> redisCounters.merge(invocation.getArgument(0), -1L, Long::sum));
+            lenient().when(redisTemplate.delete(anyString()))
+                    .thenAnswer(invocation -> redisCounters.remove((String) invocation.getArgument(0)) != null);
+            ReflectionTestUtils.setField(aiPlanningService, "rateLimiterService", new RedisRateLimiterService(redisTemplate));
+        }
+
+        @Test
+        @DisplayName("하루 3회까지는 답변하고, 4번째 메시지는 Gemini를 부르지 않고 DAILY_LIMIT_EXCEEDED")
+        void fourthMessage_dailyLimitExceeded() {
+            stubHappyPathUpTo(new GeminiResponse("답변", 5));
+
+            for (int i = 0; i < RedisRateLimiterService.PLANNING_DAILY_LIMIT; i++) {
+                aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("질문" + i));
+            }
+
+            assertThatThrownBy(() -> aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("네 번째 질문")))
+                    .isInstanceOf(CustomException.class)
+                    .hasMessage("오늘 재무설계 사용 횟수(3회)를 모두 사용했습니다. 내일 다시 이용해 주세요.")
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.DAILY_LIMIT_EXCEEDED);
+
+            verify(geminiApiClient, times(3)).generate(any());
+            assertThat(redisCounters).containsEntry("ai_planning:" + USER_ID + ":daily", 3L);
+        }
+
+        @Test
+        @DisplayName("Gemini 오류로 답변을 저장하지 못한 메시지는 하루 횟수에서 빼지 않는다")
+        void failedMessage_isNotCounted() {
+            stubHappyPathUpTo(new GeminiResponse("답변", 5));
+            when(geminiApiClient.generate(any()))
+                    .thenThrow(new CustomException(ErrorCode.EXTERNAL_API_ERROR))
+                    .thenReturn(new GeminiResponse("답변", 5));
+
+            assertThatThrownBy(() -> aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("실패할 질문")))
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.EXTERNAL_API_ERROR);
+            assertThat(redisCounters).doesNotContainKey("ai_planning:" + USER_ID + ":daily");
+
+            for (int i = 0; i < RedisRateLimiterService.PLANNING_DAILY_LIMIT; i++) {
+                aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("질문" + i));
+            }
+            assertThat(redisCounters).containsEntry("ai_planning:" + USER_ID + ":daily", 3L);
         }
     }
 

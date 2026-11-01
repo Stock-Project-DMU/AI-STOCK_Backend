@@ -6,9 +6,11 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
@@ -52,7 +54,14 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 public class GeminiApiClient {
 
+    // Gemini 429 응답에 대한 사용자 안내 문구 — ErrorCode.GEMINI_RATE_LIMIT_EXCEEDED의 기본 메시지는 시뮬레이션
+    // 자체 호출 제한용이라, Gemini 쪽 할당량 초과는 이 문구로 따로 안내한다.
+    public static final String RATE_LIMIT_MESSAGE = "AI 요청이 일시적으로 많습니다. 잠시 후 다시 시도해 주세요.";
+
     private final RestClient restClient;
+
+    // 429 재시도 대기 시간(지수 백오프: 1초 → 2초). 단위 테스트에서 대기 없이 돌리도록 final로 두지 않는다.
+    long[] rateLimitRetryDelaysMillis = {1000L, 2000L};
 
     @Value("${app.gemini.api-key}")
     private String apiKey;
@@ -83,15 +92,60 @@ public class GeminiApiClient {
         }
 
         String apiUrl = request.model() == GeminiRequest.GeminiModel.ANSWER ? answerApiUrl : judgeApiUrl;
-        GeminiApiResponse response = ExternalApiInvoker.call(() -> restClient.post()
-                .uri(apiUrl + "?key={apiKey}", apiKey)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(requestBody)
-                .retrieve()
-                .body(GeminiApiResponse.class),
+        // 429(할당량 초과)는 postWithRateLimitRetry()가 재시도 후 GEMINI_RATE_LIMIT_EXCEEDED(CustomException)로
+        // 바꿔 던진다 — CustomException은 RestClientException이 아니라 ExternalApiInvoker를 그대로 통과하고,
+        // 그 밖의 RestClientException만 기존처럼 EXTERNAL_API_ERROR(502)로 변환된다.
+        GeminiApiResponse response = ExternalApiInvoker.call(
+                () -> postWithRateLimitRetry(apiUrl, requestBody),
                 "Gemini API 호출 실패");
 
         return toGeminiResponse(response);
+    }
+
+    /**
+     * Gemini가 429(RESOURCE_EXHAUSTED — 분당 요청·토큰 할당량 초과)를 돌려주면 1초, 2초 간격으로 최대 2번
+     * 다시 보낸다. 분당 할당량은 몇 초 안에 풀리는 경우가 많아 짧은 재시도로 대부분 회복되고, 그래도 안 되면
+     * "외부 API 연동 에러"(502) 대신 "요청이 많으니 잠시 후 다시"(429)로 안내해 사용자가 원인을 알 수 있게 한다.
+     */
+    private GeminiApiResponse postWithRateLimitRetry(String apiUrl, Map<String, Object> requestBody) {
+        for (int attempt = 0; ; attempt++) {
+            try {
+                return restClient.post()
+                        .uri(apiUrl + "?key={apiKey}", apiKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(requestBody)
+                        .retrieve()
+                        .body(GeminiApiResponse.class);
+            } catch (RestClientResponseException e) {
+                if (!isRateLimited(e)) {
+                    throw e;
+                }
+                if (attempt >= rateLimitRetryDelaysMillis.length) {
+                    log.warn("Gemini API 할당량 초과(429)가 재시도 {}회 후에도 계속됨", rateLimitRetryDelaysMillis.length);
+                    throw new CustomException(ErrorCode.GEMINI_RATE_LIMIT_EXCEEDED, RATE_LIMIT_MESSAGE);
+                }
+                log.warn("Gemini API 할당량 초과(429), {}ms 후 재시도 {}/{}회",
+                        rateLimitRetryDelaysMillis[attempt], attempt + 1, rateLimitRetryDelaysMillis.length);
+                sleepBeforeRetry(rateLimitRetryDelaysMillis[attempt]);
+            }
+        }
+    }
+
+    // 상태 코드가 429이거나, 프록시 등을 거쳐 상태 코드가 바뀌었더라도 Gemini 에러 바디의 status가
+    // RESOURCE_EXHAUSTED면 할당량 초과로 본다.
+    private boolean isRateLimited(RestClientResponseException e) {
+        return e.getStatusCode().value() == HttpStatus.TOO_MANY_REQUESTS.value()
+                || e.getResponseBodyAsString().contains("RESOURCE_EXHAUSTED");
+    }
+
+    private void sleepBeforeRetry(long delayMillis) {
+        try {
+            Thread.sleep(delayMillis);
+        } catch (InterruptedException e) {
+            // 요청 마감 시간(AiPlanningService) 초과 등으로 중단된 경우 — 더 기다리지 않고 바로 끝낸다.
+            Thread.currentThread().interrupt();
+            throw new CustomException(ErrorCode.GEMINI_RATE_LIMIT_EXCEEDED, RATE_LIMIT_MESSAGE);
+        }
     }
 
     private List<Map<String, Object>> buildContents(GeminiRequest request) {

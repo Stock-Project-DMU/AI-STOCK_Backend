@@ -162,15 +162,20 @@ class LiveGeminiManualCheck {
                 new com.teamfp.aistock.infra.marketdata.IndustryApiClient(localMarketDataReader);
 
         Executor syncExecutor = Runnable::run;
+        // 수동 점검은 하루 3회 제한과 무관하게 돌려야 하므로 항상 통과시킨다.
+        com.teamfp.aistock.global.redis.RedisRateLimiterService rateLimiterService =
+                org.mockito.Mockito.mock(com.teamfp.aistock.global.redis.RedisRateLimiterService.class);
+        org.mockito.Mockito.when(rateLimiterService.tryAcquirePlanning(USER_ID)).thenReturn(true);
 
         AiPlanningService aiPlanningService = new AiPlanningService(
                 org.mockito.Mockito.mock(com.teamfp.aistock.domain.ai.service.PlanningPreferencesService.class),
                 sessionRepository, messageRepository, userRepository, investmentProfileRepository,
                 accountService, holdingValuationService, aiToolCacheService,
+                rateLimiterService,
                 geminiApiClient, dartApiClient, naverNewsApiClient, marketDataApiClient,
                 investorTrendApiClient, investInfoApiClient, highItemApiClient, sectorApiClient,
                 etfApiClient, programApiClient, investorApiClient, etcApiClient, industryApiClient,
-                syncExecutor);
+                syncExecutor, syncExecutor);
         ReflectionTestUtils.setField(aiPlanningService, "self", aiPlanningService);
 
         System.out.println("### 세션 " + SESSION_NUMBER + " / 턴 " + (previousTurnCount + 1) + " ###");
