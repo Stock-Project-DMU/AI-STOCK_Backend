@@ -71,7 +71,7 @@ import lombok.extern.slf4j.Slf4j;
  * 구조를 "내 보유종목 유지 vs 투자성향 리밸런싱" 비교 구조로 재작성).
  *
  * 실행 순서(runSimulation):
- * ① Gemini 호출 한도 확인(분당3/일일10) ② 투자성향·계좌 확인
+ * ① 하루 사용 횟수 확인(계정당 하루 3회) ② 투자성향·계좌 확인
  * ③ Gemini 1차 — 자유 문장에서 목표 금액·기한 추출, 성공하면 한도 1회 차감 ④ 보유종목 평가금액 + 예수금 = 시작 금액
  *    (includeCurrentPortfolio=false면 계좌를 보지 않고 시작 금액 0원 — 월 추가 납입액만으로 계산, v3)
  * ⑤ 보유종목별 최근 3년 월봉 → 보수적 월 성장률(ScenarioCalculator) → 왼쪽 차트
@@ -107,6 +107,10 @@ public class SimulationService {
 
     // 리밸런싱 추천 결과가 규칙을 어기면 1회만 다시 요청한다(총 2회).
     private static final int MAX_REBALANCE_ATTEMPTS = 2;
+
+    // 하루 실행 횟수(RedisRateLimiterService.SIMULATION_DAILY_LIMIT)를 다 쓴 경우의 안내 문구.
+    static final String DAILY_LIMIT_MESSAGE = "오늘 시뮬레이터 사용 횟수(" + RedisRateLimiterService.SIMULATION_DAILY_LIMIT
+            + "회)를 모두 사용했습니다. 내일 다시 이용해 주세요.";
 
     private static final String GOAL_EXTRACTION_INSTRUCTION = """
             당신은 모의투자 플랫폼 AI STOCK의 목표 해석기입니다. 사용자가 적은 투자 목표 문장에서 \
@@ -186,7 +190,7 @@ public class SimulationService {
 
     public SimulationResponse runSimulation(Long userId, SimulationRequest request) {
         if (!rateLimiterService.isAllowed(userId)) {
-            throw new CustomException(ErrorCode.GEMINI_RATE_LIMIT_EXCEEDED);
+            throw new CustomException(ErrorCode.DAILY_LIMIT_EXCEEDED, DAILY_LIMIT_MESSAGE);
         }
 
         InvestmentProfile profile = investmentProfileRepository.findByUserId(userId)
@@ -200,7 +204,7 @@ public class SimulationService {
 
         GoalExtraction goal = extractGoal(request.goalText());
         // 설문·계좌 확인과 목표 해석이 성공한 뒤에만 1회 차감한다 — 설문 미완료·목표 문장 오타처럼 사용자가
-        // 고쳐서 다시 시도할 실패까지 하루 10회 한도에서 빼지 않기 위함이다(2026-10-03). Gemini를 여러 번
+        // 고쳐서 다시 시도할 실패까지 하루 3회 한도에서 빼지 않기 위함이다(2026-10-03). Gemini를 여러 번
         // 부르지만 사용자 기준 "실행 1회"로 1만 올린다. RedisRateLimiterService 계약("isAllowed() 직후
         // increment")보다 늦게 올리므로 한도 직전에 동시에 들어온 요청은 목표 해석 1회만큼 더 통과할 수 있다 —
         // 목표 해석(JUDGE 모델 1회) 비용이라 감수한다.
