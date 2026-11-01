@@ -171,7 +171,7 @@
 | `RESOURCE_NOT_FOUND` | 404 |
 | `OPTIMISTIC_LOCK_CONFLICT` | 409 |
 | `AI_SESSION_NOT_FOUND` | 404 (feature/ai-planning 추가 — 본인 소유가 아니거나 존재하지 않는 AI 상담 세션 조회/메시지 전송 시) |
-| `GEMINI_RATE_LIMIT_EXCEEDED` | 429 (시뮬레이션 자체 호출 제한 초과 + fix/ai-ux-improvement부터 Gemini API 자체 429(`RESOURCE_EXHAUSTED`)가 재시도 후에도 계속될 때 — 후자는 `GeminiApiClient.RATE_LIMIT_MESSAGE`로 응답) |
+| `GEMINI_RATE_LIMIT_EXCEEDED` | 429 (Gemini API 자체 429(`RESOURCE_EXHAUSTED`)가 재시도 후에도 계속될 때 — `GeminiApiClient.RATE_LIMIT_MESSAGE`로 응답) |
 | `DAILY_LIMIT_EXCEEDED` | 429 (fix/ai-daily-rate-limit 추가 — 시뮬레이터·AI 재무설계의 계정당 하루 3회를 다 씀. 문구는 기능별로 `SimulationService.DAILY_LIMIT_MESSAGE`·`AiPlanningService.DAILY_LIMIT_MESSAGE`가 넘긴다) |
 | `GOAL_TEXT_PARSE_FAILED` | 400 (feature/goal-simulation-v2 추가 — Gemini가 목표 문장에서 목표 금액을 추출하지 못함. 재입력 안내는 입력 예시가 들어간 고정 문구) |
 | `GOAL_PERIOD_OUT_OF_RANGE` | 400 (feature/goal-simulation-v2 추가 — 추출한 목표 기한이 1~360개월 밖) |
