@@ -1,5 +1,7 @@
 package com.teamfp.aistock.domain.stock.service;
 
+import java.util.Map;
+
 import org.springframework.stereotype.Service;
 
 import com.teamfp.aistock.domain.stock.dto.PriceDirection;
@@ -20,14 +22,23 @@ public class StockService {
     private final LocalMarketDataReader localMarketDataReader;
 
     /**
-     * 현재가 조회 — local-market-data-generator가 갱신하는 market_data.json을 읽는다. 종목이 없으면 종목 자체가 없는 게 아니라
-     * 시세를 일시적으로 못 가져오는 상황으로 보고 STOCK_PRICE_NOT_AVAILABLE을 던진다(OrderService.createMarketOrder()와
-     * 동일한 판단, NAMING.md 8-4 참고).
+     * 현재가 조회 — local-market-data-generator가 갱신하는 market_data.json을 읽는다. 시세 데이터는 정상으로 읽혔는데 그 안에
+     * 종목코드가 없으면 등록되지 않은 종목이므로 STOCK_NOT_FOUND(404), 시세 데이터 자체를 못 읽었으면(파일 없음·생성기 중단)
+     * 시세를 일시적으로 못 가져오는 상황으로 보고 STOCK_PRICE_NOT_AVAILABLE(503)을 던진다(NAMING.md 8-4 참고).
      */
     public StockPriceResponse getCurrentPrice(String stockCode) {
         CurrentPriceDetailDto local = localMarketDataReader.getCurrentPrice(stockCode)
-                .orElseThrow(() -> new CustomException(ErrorCode.STOCK_PRICE_NOT_AVAILABLE));
+                .orElseThrow(() -> missingPriceException(stockCode));
         return toStockPriceResponse(local);
+    }
+
+    // 원본이 비어 있으면 일시 장애(503), 원본에 다른 종목은 있는데 이 종목만 없으면 없는 종목(404).
+    private CustomException missingPriceException(String stockCode) {
+        Map<String, CurrentPriceDetailDto> currentPrices = localMarketDataReader.getAllCurrentPrices();
+        if (!currentPrices.isEmpty() && !currentPrices.containsKey(stockCode)) {
+            return new CustomException(ErrorCode.STOCK_NOT_FOUND);
+        }
+        return new CustomException(ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
     }
 
     private StockPriceResponse toStockPriceResponse(CurrentPriceDetailDto dto) {
@@ -42,10 +53,13 @@ public class StockService {
         );
     }
 
-    /** 호가 조회 — market_data.json의 호가 필드(askPrices 등). 없으면 getCurrentPrice()와 같은 이유로 STOCK_PRICE_NOT_AVAILABLE. */
+    /**
+     * 호가 조회 — market_data.json의 호가 필드(askPrices 등). 등록되지 않은 종목이면 STOCK_NOT_FOUND, 종목은 있는데 호가가
+     * 비어 있거나 원본을 못 읽었으면 STOCK_PRICE_NOT_AVAILABLE(getCurrentPrice()와 같은 판단).
+     */
     public HogaResponse getHoga(String stockCode) {
         HogaData local = localMarketDataReader.getHoga(stockCode)
-                .orElseThrow(() -> new CustomException(ErrorCode.STOCK_PRICE_NOT_AVAILABLE));
+                .orElseThrow(() -> missingPriceException(stockCode));
         return toHogaResponse(local);
     }
 

@@ -37,4 +37,10 @@ class StockQuoteServiceTest {
                 .stockName("삼성전자").currentPrice(0).build()));
         assertThat(service.getStockPrice("005930")).isNull();
     }
+
+    @Test void unlistedStockCheckDelegatesToMarketData() {
+        when(ls.isUnlistedStock("999999")).thenReturn(true);
+        assertThat(service.isUnlistedStock("999999")).isTrue();
+        assertThat(service.isUnlistedStock("005930")).isFalse();
+    }
 }

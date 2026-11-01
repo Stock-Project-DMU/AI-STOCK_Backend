@@ -409,7 +409,8 @@ public class MarketQueryService {
     public CurrentPriceDetailDto getDetail(String stockCode) {
         validateCode(stockCode);
         return marketDataApiClient.getCurrentPrice(stockCode)
-                .orElseThrow(() -> new CustomException(ErrorCode.STOCK_PRICE_NOT_AVAILABLE));
+                .orElseThrow(() -> new CustomException(marketDataApiClient.isUnlistedStock(stockCode)
+                        ? ErrorCode.STOCK_NOT_FOUND : ErrorCode.STOCK_PRICE_NOT_AVAILABLE));
     }
     public NaverNewsSearchResponse getNews(String query) {
         if (query == null || query.isBlank() || query.length() > 100) throw new CustomException(ErrorCode.INVALID_INPUT);

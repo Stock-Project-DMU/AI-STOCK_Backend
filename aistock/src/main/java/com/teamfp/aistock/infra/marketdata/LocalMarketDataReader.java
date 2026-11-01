@@ -139,6 +139,15 @@ public class LocalMarketDataReader {
 
     private JsonNode cachedPricesRoot;
 
+    /**
+     * 시세 원본은 정상으로 읽혔는데 그 안에 이 종목코드만 없으면 true — 등록되지 않은 종목(404)으로 본다. 원본 자체가 비어 있으면
+     * (파일 없음·생성기 중단) 종목 유무를 판단할 수 없으므로 false — 호출 측은 일시 장애(503)로 처리한다.
+     */
+    public boolean isUnlistedStock(String stockCode) {
+        Map<String, CurrentPriceDetailDto> prices = getAllCurrentPrices();
+        return !prices.isEmpty() && !prices.containsKey(stockCode);
+    }
+
     /** 종목코드의 호가(askPrices 등). 원본·종목·호가 필드가 없으면 빈 값. */
     public Optional<HogaData> getHoga(String stockCode) {
         Optional<HogaData> hoga = convert(stockNode(stockCode), HogaData.class);

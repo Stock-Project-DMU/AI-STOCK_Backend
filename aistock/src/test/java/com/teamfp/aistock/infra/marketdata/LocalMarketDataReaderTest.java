@@ -54,6 +54,18 @@ class LocalMarketDataReaderTest {
     }
 
     @Test
+    @DisplayName("원본에 다른 종목은 있는데 이 종목만 없으면 미등록 종목, 원본이 없으면 판단 불가(false)")
+    void isUnlistedStock_distinguishesMissingStockFromMissingFile() throws IOException {
+        assertThat(reader.isUnlistedStock("999999")).isFalse();
+
+        Files.writeString(tempDir.resolve("market_data.json"), """
+                {"005930": {"stockCode":"005930","stockName":"삼성전자","currentPrice":78500}}""");
+
+        assertThat(reader.isUnlistedStock("999999")).isTrue();
+        assertThat(reader.isUnlistedStock(STOCK_CODE)).isFalse();
+    }
+
+    @Test
     @DisplayName("market_data.json에서 종목코드 키를 찾아 CurrentPriceDetailDto로 반환한다")
     void success_readsMarketDataFile() throws IOException {
         Files.writeString(tempDir.resolve("market_data.json"), """

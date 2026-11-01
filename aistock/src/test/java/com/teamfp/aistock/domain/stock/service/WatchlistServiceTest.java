@@ -9,6 +9,7 @@ import com.teamfp.aistock.domain.stock.repository.WatchlistRepository;
 import com.teamfp.aistock.domain.user.entity.User;
 import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.exception.CustomException;
+import com.teamfp.aistock.global.exception.ErrorCode;
 
 class WatchlistServiceTest {
     private final WatchlistRepository repository = mock(WatchlistRepository.class);
@@ -33,5 +34,20 @@ class WatchlistServiceTest {
         assertThatThrownBy(() -> service.addWatchlist(1L, "005930")).isInstanceOf(CustomException.class);
         verify(repository, never()).save(any());
         verifyNoInteractions(subscriptions);
+    }
+
+    @Test void unlistedStockIsNotFound() {
+        when(quotes.isUnlistedStock("999999")).thenReturn(true);
+        assertThatThrownBy(() -> service.addWatchlist(1L, "999999"))
+                .isInstanceOf(CustomException.class)
+                .extracting(e -> ((CustomException) e).getErrorCode())
+                .isEqualTo(ErrorCode.STOCK_NOT_FOUND);
+        verify(repository, never()).save(any());
+    }
+
+    @Test void unreadableMarketDataIsServiceUnavailable() {
+        assertThatThrownBy(() -> service.addWatchlist(1L, "005930"))
+                .extracting(e -> ((CustomException) e).getErrorCode())
+                .isEqualTo(ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
     }
 }

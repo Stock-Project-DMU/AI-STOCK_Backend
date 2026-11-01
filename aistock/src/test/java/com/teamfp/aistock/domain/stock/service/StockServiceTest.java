@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.junit.jupiter.api.DisplayName;
@@ -86,6 +87,20 @@ class StockServiceTest {
 
             verify(redisStockCacheService, never()).getStockPrice(STOCK_CODE);
         }
+
+        @Test
+        @DisplayName("시세 데이터는 읽혔는데 종목코드가 없으면 STOCK_NOT_FOUND(404)를 던진다")
+        void throws_stockNotFound_whenCodeNotInMarketData() {
+            StockService service = new StockService(localMarketDataReader);
+            when(localMarketDataReader.getCurrentPrice("999999")).thenReturn(Optional.empty());
+            when(localMarketDataReader.getAllCurrentPrices())
+                    .thenReturn(Map.of(STOCK_CODE, CurrentPriceDetailDto.builder().stockCode(STOCK_CODE).build()));
+
+            assertThatThrownBy(() -> service.getCurrentPrice("999999"))
+                    .isInstanceOf(CustomException.class)
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.STOCK_NOT_FOUND);
+        }
     }
 
     @Nested
@@ -128,6 +143,23 @@ class StockServiceTest {
                     .isEqualTo(ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
 
             verifyNoInteractions(redisStockCacheService);
+        }
+
+        @Test
+        @DisplayName("시세 데이터에 종목코드가 없으면 STOCK_NOT_FOUND, 종목은 있는데 호가만 없으면 STOCK_PRICE_NOT_AVAILABLE")
+        void distinguishesMissingStock_fromMissingHoga() {
+            StockService service = new StockService(localMarketDataReader);
+            when(localMarketDataReader.getHoga("999999")).thenReturn(Optional.empty());
+            when(localMarketDataReader.getHoga(STOCK_CODE)).thenReturn(Optional.empty());
+            when(localMarketDataReader.getAllCurrentPrices())
+                    .thenReturn(Map.of(STOCK_CODE, CurrentPriceDetailDto.builder().stockCode(STOCK_CODE).build()));
+
+            assertThatThrownBy(() -> service.getHoga("999999"))
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.STOCK_NOT_FOUND);
+            assertThatThrownBy(() -> service.getHoga(STOCK_CODE))
+                    .extracting(e -> ((CustomException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.STOCK_PRICE_NOT_AVAILABLE);
         }
     }
 }
