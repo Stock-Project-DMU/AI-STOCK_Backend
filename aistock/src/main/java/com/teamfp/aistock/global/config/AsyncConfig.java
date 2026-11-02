@@ -60,7 +60,7 @@ public class AsyncConfig {
     // 예상 못한 병목이 생길 수 있어 전용 풀을 둔다. 한 라운드에서 한 사용자가 동시에 요청할 수
     // 있는 도구는 최대 5개(NEWS_SEARCH/FINANCIALS/CAPITAL_CHANGE/OWNERSHIP/DISCLOSURE)지만, 이
     // 풀은 모든 사용자의 요청이 공유하는 전역 빈이므로 "동시 접속 사용자 여러 명 × 최대 5개"까지
-    // 감당할 수 있게 여유를 둔다(Gemini 분당3/일일10 요청 한도가 자연스러운 상한 역할도 한다).
+    // 감당할 수 있게 여유를 둔다(계정당 하루 사용 횟수 제한과 GeminiApiClient의 동시 호출 세마포어가 자연스러운 상한 역할도 한다).
     @Bean
     public Executor aiToolTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();

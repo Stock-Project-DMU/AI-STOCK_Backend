@@ -1083,7 +1083,7 @@ public class AiPlanningService {
     // 평가 로직을 그대로 재사용한다(AccountService와 동일한 방식 — 도메인 경계 준수).
     private final HoldingValuationService holdingValuationService;
     private final RedisAiToolCacheService aiToolCacheService;
-    // 메시지 전송 하루 3회 제한(fix/ai-daily-rate-limit) — sendMessage() 참고.
+    // 메시지 전송 하루 5회 제한(fix/ai-daily-rate-limit) — sendMessage() 참고.
     private final RedisRateLimiterService rateLimiterService;
     private final GeminiApiClient geminiApiClient;
     private final DartApiClient dartApiClient;
@@ -1182,7 +1182,7 @@ public class AiPlanningService {
      * 것을 막기 위함이다.
      *
      * 2026-09-21에 제거했던 자체 호출 제한(분당3/일일10)을 fix/ai-daily-rate-limit(2026-11-01)에서 계정당
-     * 하루 3회(메시지 전송 기준)로 다시 적용한다. 진입 시점에 RedisRateLimiterService.tryAcquirePlanning()으로
+     * 하루 횟수(메시지 전송 기준, PLANNING_DAILY_LIMIT — 처음 3회, 2026-11-02 5회로 상향)로 다시 적용한다. 진입 시점에 RedisRateLimiterService.tryAcquirePlanning()으로
      * 차감하고, 세션 없음·Gemini 오류 등으로 답변을 저장하지 못하면 releasePlanning()으로 되돌려 실패한
      * 메시지는 횟수에서 빼지 않는다.
      *

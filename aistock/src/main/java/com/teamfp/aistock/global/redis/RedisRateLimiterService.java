@@ -19,7 +19,7 @@ import lombok.RequiredArgsConstructor;
  *
  * 제한 정책(fix/ai-daily-rate-limit, 2026-11-01):
  * - 시뮬레이터: 하루 3회 (기존 분당 3회 제한은 제거 — 하루 3회 안에서는 의미가 없다)
- * - AI 재무설계: 메시지 전송 하루 3회 (2026-09-21에 제거했던 제한을 하루 횟수만 다시 적용)
+ * - AI 재무설계: 메시지 전송 하루 5회(2026-11-02 3회→5회) (2026-09-21에 제거했던 제한을 하루 횟수만 다시 적용)
  * 두 카운터는 키가 달라 서로 차감하지 않는다. 하루는 한국 시간 자정에 초기화된다 — 첫 사용 때
  * TTL을 "다음 자정까지 남은 시간"으로 건다(예전처럼 24시간이면 첫 사용 시각에 따라 초기화 시각이 달라진다).
  */
@@ -34,7 +34,7 @@ public class RedisRateLimiterService {
     private static final String AI_PLANNING_KEY = "ai_planning:";
 
     public static final int SIMULATION_DAILY_LIMIT = 3;   // 시뮬레이터 하루 최대 허용 횟수
-    public static final int PLANNING_DAILY_LIMIT = 3;     // AI 재무설계 하루 최대 메시지 수
+    public static final int PLANNING_DAILY_LIMIT = 5;     // AI 재무설계 하루 최대 메시지 수
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
@@ -97,7 +97,7 @@ public class RedisRateLimiterService {
 
     /**
      * {@link #tryAcquirePlanning(Long)}로 차감한 1회를 되돌린다. Gemini 오류 등으로 답변을 받지 못한 메시지까지
-     * 하루 3회에서 빼지 않기 위해 쓴다.
+     * 하루 한도에서 빼지 않기 위해 쓴다.
      *
      * @param userId 되돌릴 사용자 ID
      */

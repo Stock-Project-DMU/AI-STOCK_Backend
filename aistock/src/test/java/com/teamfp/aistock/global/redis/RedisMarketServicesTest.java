@@ -207,12 +207,14 @@ class RedisMarketServicesTest {
     }
 
     @Test
-    @DisplayName("재무설계 Rate Limiter - 오늘 3회째까지는 차감 성공, 첫 차감 때 자정까지 TTL 설정")
+    @DisplayName("재무설계 Rate Limiter - 오늘 5회째까지는 차감 성공, 첫 차감 때 자정까지 TTL 설정")
     void tryAcquirePlanning_WithinLimit() {
         redisRateLimiterService.clock = Clock.fixed(Instant.parse("2026-11-01T14:59:00Z"), ZoneId.of("Asia/Seoul"));
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.increment("ai_planning:1:daily")).thenReturn(1L, 2L, 3L);
+        when(valueOperations.increment("ai_planning:1:daily")).thenReturn(1L, 2L, 3L, 4L, 5L);
 
+        assertThat(redisRateLimiterService.tryAcquirePlanning(1L)).isTrue();
+        assertThat(redisRateLimiterService.tryAcquirePlanning(1L)).isTrue();
         assertThat(redisRateLimiterService.tryAcquirePlanning(1L)).isTrue();
         assertThat(redisRateLimiterService.tryAcquirePlanning(1L)).isTrue();
         assertThat(redisRateLimiterService.tryAcquirePlanning(1L)).isTrue();
@@ -222,11 +224,11 @@ class RedisMarketServicesTest {
     }
 
     @Test
-    @DisplayName("재무설계 Rate Limiter - 4번째는 거절하고 방금 올린 1을 되돌린다")
+    @DisplayName("재무설계 Rate Limiter - 6번째는 거절하고 방금 올린 1을 되돌린다")
     void tryAcquirePlanning_OverLimit_Rollback() {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.increment("ai_planning:1:daily")).thenReturn(4L);
-        when(valueOperations.decrement("ai_planning:1:daily")).thenReturn(3L);
+        when(valueOperations.increment("ai_planning:1:daily")).thenReturn(6L);
+        when(valueOperations.decrement("ai_planning:1:daily")).thenReturn(5L);
 
         assertThat(redisRateLimiterService.tryAcquirePlanning(1L)).isFalse();
 

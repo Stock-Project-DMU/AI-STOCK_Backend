@@ -77,8 +77,9 @@ public enum ErrorCode {
     USER_SUSPENDED(HttpStatus.LOCKED, "USER_SUSPENDED", "관리자에 의해 정지된 계정입니다."),
 
     // 429 Too Many Requests
-    // 두 경우에 쓴다: (1) 목표 도달 시뮬레이션의 자체 호출 제한(분당3/일일10, SimulationService) 초과 — 이 메시지 그대로,
-    // (2) Gemini API 자체가 429(RESOURCE_EXHAUSTED)를 재시도 후에도 돌려준 경우 — GeminiApiClient가 RATE_LIMIT_MESSAGE로 응답.
+    // GeminiApiClient가 쓴다: (1) Gemini API 자체가 429(RESOURCE_EXHAUSTED)를 재시도 후에도 돌려준 경우 — RATE_LIMIT_MESSAGE,
+    // (2) 동시 호출 허가(세마포어)를 대기 상한·요청 마감 시각 안에 받지 못한 경우 — CONCURRENCY_LIMIT_MESSAGE.
+    // 계정당 하루 사용 횟수 초과는 이 코드가 아니라 아래 DAILY_LIMIT_EXCEEDED다.
     GEMINI_RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "GEMINI_RATE_LIMIT_EXCEEDED", "AI 서비스 요청 제한을 초과했습니다."),
     DART_RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "DART_RATE_LIMIT_EXCEEDED", "공시 데이터 요청 제한을 초과했습니다. 잠시 후 다시 시도해 주세요."),
     // 시뮬레이터·AI 재무설계의 계정당 하루 사용 횟수 초과(RedisRateLimiterService). 기능별 문구는 각 서비스가 넘긴다.

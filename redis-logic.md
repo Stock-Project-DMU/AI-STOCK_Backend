@@ -69,7 +69,7 @@
 | `stock:price:{stockCode}` | 5초 | 실시간 주가 캐시 |
 | `pending:orders:{stockCode}` | 없음 | 지정가 미체결 주문 목록 |
 | `gemini:rate:{userId}:daily` | 다음 자정(KST)까지 | 목표 도달 시뮬레이션 실행 횟수 (하루 3회 제한 — fix/ai-daily-rate-limit에서 일일 10회 → 3회, 분당 키 `gemini:rate:{userId}:minute`는 제거) |
-| `ai_planning:{userId}:daily` | 다음 자정(KST)까지 | AI 재무설계 메시지 전송 횟수 (하루 3회 제한, fix/ai-daily-rate-limit 추가) |
+| `ai_planning:{userId}:daily` | 다음 자정(KST)까지 | AI 재무설계 메시지 전송 횟수 (하루 5회 제한 — fix/ai-daily-rate-limit에서 3회로 추가, 2026-11-02 5회로 상향) |
 | `simulation:pending:{userId}:{pendingSimulationId}` | 30분 | 목표 도달 시뮬레이션 실행 결과 임시 보관 (`RedisPendingSimulationService` — `savePending`, `claimPending`(GET 후 `__SAVED__` 표시로 교체하는 Lua 스크립트, 남은 TTL 유지)). 저장 버튼 요청에는 임시 ID만 받아 값 조작을 막고, 꺼내면서 "저장됨" 표시로 바꿔 중복 저장을 막는다 — 두 번째 요청은 만료가 아니라 "이미 저장함"으로 안내한다 (2026-10-01, 2026-10-03 표시 방식으로 변경) |
 | `admin:online:users` | 없음 (이벤트 기반) | 현재 WebSocket 연결 중인 userId 집합 (관리자 대시보드) |
 | `ai:tool:{sessionId}:{도구이름}?{인자}` | 30분 | AI 상담 세션 내 DART/네이버 도구 실행 결과 캐시 |
@@ -441,20 +441,27 @@ for (PendingOrderDto order : pending) {
 
 ---
 
-## 6. RedisRateLimiterService — Gemini API Rate Limit
+## 6. RedisRateLimiterService — AI 기능 계정당 하루 사용 횟수 제한
 
 **큐 방식 대신 Rate Limiter를 선택한 이유**
 - 큐: 요청을 쌓아두고 순서대로 처리 → 사용자가 수분씩 대기
 - Rate Limiter: 한도 초과 시 즉시 거절 → 사용자에게 즉시 안내
 
-Gemini API는 즉시 응답이 중요한 기능이라 대기열보다 제한 초과 시 즉각 안내가 UX상 더 적합하다.
+목표 도달 시뮬레이션·AI 재무설계는 즉시 응답이 중요한 기능이라 대기열보다 제한 초과 시 즉각 안내가 UX상 더 적합하다.
 
-**제한 정책**: 분당 3회(연속 요청 방지), 일일 10회(무제한 사용 방지)
+**제한 정책** (fix/ai-daily-rate-limit, 2026-11-01 / 재무설계 한도 2026-11-02 상향)
 
-> fix/ai-daily-rate-limit(2026-11-01) 변경: 분당 제한을 없애고 시뮬레이터(`gemini:rate:{userId}:daily`)·AI 재무설계(`ai_planning:{userId}:daily`)
-> 모두 계정당 하루 3회로 바꿨다. TTL은 24시간이 아니라 첫 사용 때 다음 자정(KST)까지 건다. 재무설계는 `tryAcquirePlanning()`(INCR로 확인·차감을
-> 한 번에, 초과 시 되돌림)·`releasePlanning()`(답변 저장 실패 시 되돌림)을 쓴다. 아래 코드는 최초 설계안이며 현재 구현은
-> `global/redis/RedisRateLimiterService.java`가 기준이다.
+| 기능 | 키 | 하루 한도 | 차감 방식 |
+|---|---|---|---|
+| 목표 도달 시뮬레이터 | `gemini:rate:{userId}:daily` | 3회 (`SIMULATION_DAILY_LIMIT`) | `isAllowed()` 확인 → 설문·계좌·목표 해석 성공 후 `increment()` |
+| AI 재무설계 메시지 전송 | `ai_planning:{userId}:daily` | 5회 (`PLANNING_DAILY_LIMIT`) | `tryAcquirePlanning()`(INCR 한 번으로 확인·차감) → 답변 저장 실패 시 `releasePlanning()` |
+
+- 분당 제한은 없다(하루 3~5회 안에서는 의미가 없어 제거).
+- 하루는 한국 시간 자정에 초기화된다 — 첫 사용(INCR 결과 1) 때만 TTL을 "다음 자정(KST)까지 남은 시간"으로 건다.
+  24시간 TTL이면 첫 사용 시각에 따라 초기화 시각이 달라지고, 매번 TTL을 다시 걸면 계속 쓰는 사용자의 카운터가 만료되지 않는다.
+- 두 카운터는 키가 달라 서로 차감하지 않는다. 한도 초과 시 둘 다 `DAILY_LIMIT_EXCEEDED`(429)를 던지고, 안내 문구는
+  `SimulationService.DAILY_LIMIT_MESSAGE`·`AiPlanningService.DAILY_LIMIT_MESSAGE`가 기능별로 넘긴다.
+- Gemini API 자체 할당량(429)과 동시 호출 수는 이 서비스가 아니라 `GeminiApiClient`(429 재시도 + 동시 호출 세마포어)가 맡는다.
 
 ```java
 @Service
@@ -463,67 +470,76 @@ public class RedisRateLimiterService {
 
     private final RedisTemplate<String, String> redisTemplate;
 
-    private static final String GEMINI_RATE_KEY = "gemini:rate:";   // gemini:rate:{userId}:minute, gemini:rate:{userId}:daily
+    private static final String GEMINI_RATE_KEY = "gemini:rate:";   // 시뮬레이터
+    private static final String AI_PLANNING_KEY = "ai_planning:";   // AI 재무설계
 
-    private static final int  MINUTE_LIMIT       = 3;   // 분당 최대 3회
-    private static final long MINUTE_TTL_SECONDS = 60;  // 1분 TTL
+    public static final int SIMULATION_DAILY_LIMIT = 3;
+    public static final int PLANNING_DAILY_LIMIT = 5;
 
-    private static final int  DAILY_LIMIT        = 10;  // 일일 최대 10회
-    private static final long DAILY_TTL_SECONDS  = 86400; // 24시간 TTL
-
-    // Gemini API 호출 가능 여부 확인
+    // 시뮬레이터: 확인만(부작용 없음)
     public boolean isAllowed(Long userId) {
-        String minuteKey = GEMINI_RATE_KEY + userId + ":minute";
-        String dailyKey  = GEMINI_RATE_KEY + userId + ":daily";
-
-        String minuteCount = redisTemplate.opsForValue().get(minuteKey);
-        String dailyCount  = redisTemplate.opsForValue().get(dailyKey);
-
-        int minute = minuteCount != null ? Integer.parseInt(minuteCount) : 0;
-        int daily  = dailyCount  != null ? Integer.parseInt(dailyCount)  : 0;
-
-        return minute < MINUTE_LIMIT && daily < DAILY_LIMIT;
+        return readCount(GEMINI_RATE_KEY + userId + ":daily") < SIMULATION_DAILY_LIMIT;
     }
 
-    // Gemini API 호출 시 카운터 증가
+    // 시뮬레이터: 실행 1회 차감
     public void increment(Long userId) {
-        String minuteKey = GEMINI_RATE_KEY + userId + ":minute";
-        String dailyKey  = GEMINI_RATE_KEY + userId + ":daily";
-
-        // 분당 카운터
-        Long minuteCount = redisTemplate.opsForValue().increment(minuteKey);
-        if (minuteCount != null && minuteCount == 1) {
-            redisTemplate.expire(minuteKey, Duration.ofSeconds(MINUTE_TTL_SECONDS));
-        }
-
-        // 일일 카운터
-        Long dailyCount = redisTemplate.opsForValue().increment(dailyKey);
-        if (dailyCount != null && dailyCount == 1) {
-            redisTemplate.expire(dailyKey, Duration.ofSeconds(DAILY_TTL_SECONDS));
-        }
+        incrementDaily(GEMINI_RATE_KEY + userId + ":daily");
     }
 
-    // 남은 호출 횟수 조회 (프론트 표시용)
-    public int getRemainingDaily(Long userId) {
-        String dailyKey = GEMINI_RATE_KEY + userId + ":daily";
-        String count = redisTemplate.opsForValue().get(dailyKey);
-        int used = count != null ? Integer.parseInt(count) : 0;
-        return Math.max(0, DAILY_LIMIT - used);
+    // 재무설계: 확인과 차감을 INCR 한 번으로 — 한도 직전 동시 요청이 함께 통과하지 못한다
+    public boolean tryAcquirePlanning(Long userId) {
+        String key = AI_PLANNING_KEY + userId + ":daily";
+        Long count = incrementDaily(key);
+        if (count != null && count > PLANNING_DAILY_LIMIT) {
+            decrementDaily(key);   // 한도 초과면 방금 올린 1을 되돌린다
+            return false;
+        }
+        return true;
     }
+
+    // 재무설계: 답변을 저장하지 못한 메시지는 횟수에서 뺀다
+    public void releasePlanning(Long userId) {
+        decrementDaily(AI_PLANNING_KEY + userId + ":daily");
+    }
+
+    private Long incrementDaily(String key) {
+        Long count = redisTemplate.opsForValue().increment(key);
+        if (count != null && count == 1) {
+            redisTemplate.expire(key, untilNextMidnight());   // 첫 사용 때만 다음 자정(KST)까지
+        }
+        return count;
+    }
+
+    // 자정 만료 직후 DECR이 오면 TTL 없는 -1 키가 생기므로, 0 이하가 되면 키를 지운다
+    private void decrementDaily(String key) {
+        Long count = redisTemplate.opsForValue().decrement(key);
+        if (count != null && count <= 0) {
+            redisTemplate.delete(key);
+        }
+    }
+    // readCount(), getRemainingDaily(), untilNextMidnight()는 생략 — 전체 코드는 global/redis/RedisRateLimiterService.java
 }
 ```
 
-**Spring Boot 서비스 레이어 사용 예시**
+**서비스 레이어 사용 예시**
 
 ```java
-public AiResponseDto requestAiPlanning(Long userId, String message) {
-    if (!rateLimiterService.isAllowed(userId)) {
-        throw new TooManyRequestsException(
-            "요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요."
-        );
-    }
-    rateLimiterService.increment(userId);
-    return geminiService.call(message);
+// SimulationService.runSimulation()
+if (!rateLimiterService.isAllowed(userId)) {
+    throw new CustomException(ErrorCode.DAILY_LIMIT_EXCEEDED, DAILY_LIMIT_MESSAGE);
+}
+// ... 설문·계좌 확인, 목표 해석 성공 후에만 차감(사용자가 고쳐서 다시 시도할 실패는 세지 않음)
+rateLimiterService.increment(userId);
+
+// AiPlanningService.sendMessage()
+if (!rateLimiterService.tryAcquirePlanning(userId)) {
+    throw new CustomException(ErrorCode.DAILY_LIMIT_EXCEEDED, DAILY_LIMIT_MESSAGE);
+}
+try {
+    // ... Gemini 대화(45초 마감) 후 saveTurn()
+} catch (RuntimeException e) {
+    rateLimiterService.releasePlanning(userId);
+    throw e;
 }
 ```
 

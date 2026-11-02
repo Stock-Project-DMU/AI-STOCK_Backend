@@ -172,7 +172,7 @@
 | `OPTIMISTIC_LOCK_CONFLICT` | 409 |
 | `AI_SESSION_NOT_FOUND` | 404 (feature/ai-planning 추가 — 본인 소유가 아니거나 존재하지 않는 AI 상담 세션 조회/메시지 전송 시) |
 | `GEMINI_RATE_LIMIT_EXCEEDED` | 429 (Gemini API 자체 429(`RESOURCE_EXHAUSTED`)가 재시도 후에도 계속될 때 — `GeminiApiClient.RATE_LIMIT_MESSAGE`로 응답) |
-| `DAILY_LIMIT_EXCEEDED` | 429 (fix/ai-daily-rate-limit 추가 — 시뮬레이터·AI 재무설계의 계정당 하루 3회를 다 씀. 문구는 기능별로 `SimulationService.DAILY_LIMIT_MESSAGE`·`AiPlanningService.DAILY_LIMIT_MESSAGE`가 넘긴다) |
+| `DAILY_LIMIT_EXCEEDED` | 429 (fix/ai-daily-rate-limit 추가 — 시뮬레이터 하루 3회·AI 재무설계 하루 5회 한도를 다 씀. 문구는 기능별로 `SimulationService.DAILY_LIMIT_MESSAGE`·`AiPlanningService.DAILY_LIMIT_MESSAGE`가 넘긴다) |
 | `GOAL_TEXT_PARSE_FAILED` | 400 (feature/goal-simulation-v2 추가 — Gemini가 목표 문장에서 목표 금액을 추출하지 못함. 재입력 안내는 입력 예시가 들어간 고정 문구) |
 | `GOAL_PERIOD_OUT_OF_RANGE` | 400 (feature/goal-simulation-v2 추가 — 추출한 목표 기한이 1~360개월 밖) |
 | `INVESTMENT_PROFILE_REQUIRED` | 403 (feature/goal-simulation-v2 추가 — 투자성향 설문 미완료 상태로 시뮬레이션 실행. 프론트는 설문 화면으로 안내) |
@@ -340,7 +340,7 @@ redis-logic.md(수정본) 기준 확정된 이름 그대로 사용:
 | `RedisAuthCodeService` | `saveEmailCode`, `verifyAndDeleteEmailCode`, `markEmailVerified`(v8 추가), `consumeEmailVerified`(v8 추가), `incrementLoginFail`, `isLoginLocked`, `resetLoginFail` |
 | `RedisStockCacheService` | `saveStockPrice`, `getStockPrice`, `getStockPrices(Collection<String> stockCodes)`(feature/mypage-profit 코드리뷰 반영 — Redis MGET으로 여러 종목 시세를 한 번에 배치 조회. 종목마다 `getStockPrice()`를 순차 호출하면 보유종목이 N개일 때 N번 왕복이 생기는 문제를 막기 위함. 캐시 미스 종목은 반환 `Map`에서 키 자체가 빠짐) |
 | `RedisPendingOrderService` | `initPendingOrders`, `addPendingOrder`, `getPendingOrders`, `removePendingOrder`(fix/realtime-trade-fix부터 실제 제거 여부를 `boolean`으로 반환), `countPendingOrdersByStockCode`(종목코드→대기 건수, SCAN 사용 — `StockSubscriptionManager.restoreOrderSubscriptions()` 전용) |
-| `RedisRateLimiterService` | 시뮬레이터: `isAllowed`, `increment`, `getRemainingDaily`(키 `gemini:rate:{userId}:daily`, 하루 `SIMULATION_DAILY_LIMIT`=3회). AI 재무설계: `tryAcquirePlanning(Long userId)`(INCR로 확인·차감을 한 번에, 한도 초과면 되돌리고 false), `releasePlanning(Long userId)`(답변 저장 실패 시 차감 취소)(키 `ai_planning:{userId}:daily`, 하루 `PLANNING_DAILY_LIMIT`=3회). 두 카운터 모두 첫 사용 때 다음 자정(KST)까지 TTL — fix/ai-daily-rate-limit(2026-11-01)에서 분당 3회 제한을 없애고 재무설계 제한을 다시 넣음(2026-09-21에 제거했었음) |
+| `RedisRateLimiterService` | 시뮬레이터: `isAllowed`, `increment`, `getRemainingDaily`(키 `gemini:rate:{userId}:daily`, 하루 `SIMULATION_DAILY_LIMIT`=3회). AI 재무설계: `tryAcquirePlanning(Long userId)`(INCR로 확인·차감을 한 번에, 한도 초과면 되돌리고 false), `releasePlanning(Long userId)`(답변 저장 실패 시 차감 취소)(키 `ai_planning:{userId}:daily`, 하루 `PLANNING_DAILY_LIMIT`=5회, 2026-11-02 3회→5회). 두 카운터 모두 첫 사용 때 다음 자정(KST)까지 TTL — fix/ai-daily-rate-limit(2026-11-01)에서 분당 3회 제한을 없애고 재무설계 제한을 다시 넣음(2026-09-21에 제거했었음) |
 | `RedisOnlineStatusService` (v8 추가) | `clearOnlineStatus()`(서버 재시작 시 `@PostConstruct` 초기화, v9), `addOnline(Long userId)`, `removeOnline(Long userId)`, `countOnline()`, `isOnline(Long userId)` |
 | `RedisPendingSimulationService` (feature/goal-simulation-v2 추가, 2026-10-01) | `savePending(Long userId, String pendingSimulationId, String resultJson)`, `claimPending(Long userId, String pendingSimulationId)`(GET 후 같은 키를 `SAVED_MARKER`로 바꾸는 Lua 스크립트로 원자 처리, 남은 TTL 유지 — 같은 결과의 중복 저장을 막고, 두 번째 요청은 `SAVED_MARKER`를 받아 `SIMULATION_ALREADY_SAVED`로 구분. 로컬 Redis가 6.0 미만이라 GETDEL·SET KEEPTTL 미사용, 2026-10-03 `takePending`에서 변경), 상수 `SAVED_MARKER`(`"__SAVED__"`). 저장 트랜잭션이 롤백되면 `SimulationService`가 `savePending`으로 원래 결과를 되돌린다 — 키 `simulation:pending:{userId}:{pendingSimulationId}`(TTL 30분), 저장 버튼을 누르기 전 시뮬레이션 실행 결과 임시 보관. 8-11 참고 |
 | `RedisAiToolCacheService` (feature/ai-planning 추가) | `getCachedResult(Long sessionId, String toolKey)`, `cacheResult(Long sessionId, String toolKey, String result)` — 키 `ai:tool:{sessionId}:{toolKey}`(TTL 30분), AI 상담 세션 내 DART/외부 시세 데이터/네이버 도구 실행 결과 캐시(같은 조건 재조회 시 재사용). 8-9 참고 |
@@ -700,7 +700,7 @@ DTO: `StockPriceDto`(stockCode, stockName, currentPrice, changeAmount, changeRat
 |---|---|
 | Controller | `AiPlanningController` |
 | 엔드포인트 | `POST /api/ai/planning/sessions`, `GET /api/ai/planning/sessions`, `GET /api/ai/planning/sessions/{sessionId}/messages`, `POST /api/ai/planning/sessions/{sessionId}/messages` — 사용자 식별은 4개 전부 요청 바디가 아니라 `SecurityUtil.getCurrentUserId()`로 한다 |
-| Service | `AiPlanningService` — `createSession(Long userId)`, `getMySessions(Long userId)`, `getMessages(Long userId, Long sessionId)`, `sendMessage(Long userId, Long sessionId, AiChatRequest request)`. `loadHistory(Long userId, Long sessionId)`/`saveTurn(Long userId, Long sessionId, String userContent, GeminiResponse geminiResponse)`도 public인데, 실제 용도가 아니라 `@Lazy self` 프록시로 자기 자신을 주입받아 `@Transactional` 트랜잭션 경계를 강제로 나누기 위한 self-invocation 패턴(Spring AOP 프록시는 같은 빈 안에서의 직접 호출엔 안 걸리는 한계 우회) — 외부에서 호출할 일은 없다. fix/ai-ux-improvement: `converseWithinDeadline(Long userId, Long sessionId, String userContent, List<HistoryTurn> history)`(private)가 마감 시각 `deadline`을 정해 `converseWithTools(..., Instant deadline)`를 `aiPlanningTaskExecutor`에서 돌리고 `responseTimeoutMillis`(45초)를 넘기면 `AI_RESPONSE_TIMEOUT`. fix/ai-daily-rate-limit: `sendMessage()` 진입 시 `RedisRateLimiterService.tryAcquirePlanning()`(하루 3회, 초과 시 `DAILY_LIMIT_EXCEEDED` + 상수 `DAILY_LIMIT_MESSAGE`), 예외로 끝나면 `releasePlanning()` |
+| Service | `AiPlanningService` — `createSession(Long userId)`, `getMySessions(Long userId)`, `getMessages(Long userId, Long sessionId)`, `sendMessage(Long userId, Long sessionId, AiChatRequest request)`. `loadHistory(Long userId, Long sessionId)`/`saveTurn(Long userId, Long sessionId, String userContent, GeminiResponse geminiResponse)`도 public인데, 실제 용도가 아니라 `@Lazy self` 프록시로 자기 자신을 주입받아 `@Transactional` 트랜잭션 경계를 강제로 나누기 위한 self-invocation 패턴(Spring AOP 프록시는 같은 빈 안에서의 직접 호출엔 안 걸리는 한계 우회) — 외부에서 호출할 일은 없다. fix/ai-ux-improvement: `converseWithinDeadline(Long userId, Long sessionId, String userContent, List<HistoryTurn> history)`(private)가 마감 시각 `deadline`을 정해 `converseWithTools(..., Instant deadline)`를 `aiPlanningTaskExecutor`에서 돌리고 `responseTimeoutMillis`(45초)를 넘기면 `AI_RESPONSE_TIMEOUT`. fix/ai-daily-rate-limit: `sendMessage()` 진입 시 `RedisRateLimiterService.tryAcquirePlanning()`(하루 5회, 초과 시 `DAILY_LIMIT_EXCEEDED` + 상수 `DAILY_LIMIT_MESSAGE`), 예외로 끝나면 `releasePlanning()` |
 | Request DTO | `AiChatRequest`(`@NotBlank @Size(max = 2000) content`) — 2000자 제한은 DB TEXT 컬럼 여유 확보 + Gemini 토큰 비용 통제 목적 |
 | Response DTO | `AiChatResponse`(messageId, role, content, createdAt), `AiPlanningSessionResponse`(sessionId, title, status, createdAt, updatedAt) — 둘 다 정적 팩토리 `from(Entity)` 보유 |
 
@@ -1331,7 +1331,7 @@ AI 재무설계사(`feature/ai-planning`)와 달리 대화형이 아니다. 사�
 
 > **Gemini 요약 호출**: 대화 이력(`history`)도, 도구(`tools`)도 없이 `systemInstruction` +
 > `prompt`만 채운 1회성 `GeminiRequest`를 `GeminiRequest.GeminiModel.ANSWER`로 호출한다.
-> `RedisRateLimiterService`(하루 3회)는 적용하지 않는다 — 그 한도는 사용자가 직접 채팅을
+> `RedisRateLimiterService`(시뮬레이터 하루 3회·재무설계 하루 5회)는 적용하지 않는다 — 그 한도는 사용자가 직접 채팅을
 > 남용하는 것을 막기 위한 것이라, 서버가 스스로 도는 배치 작업의 목적과 다르다.
 
 > **근거 검증/재생성 (2026-08-24 1차 시도 후 보류 → 같은 날 재도입, 라이브 재검증 완료)**:

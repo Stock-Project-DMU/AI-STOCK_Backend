@@ -45,15 +45,9 @@ import com.teamfp.aistock.infra.marketdata.InvestInfoApiClient;
 import com.teamfp.aistock.infra.marketdata.InvestorTrendApiClient;
 import com.teamfp.aistock.infra.marketdata.MarketDataApiClient;
 import com.teamfp.aistock.infra.marketdata.SectorApiClient;
-import com.teamfp.aistock.infra.marketdata.dto.FinancialRankingDto;
 import com.teamfp.aistock.infra.marketdata.dto.ForeignInstitutionalTrendDto;
 import com.teamfp.aistock.infra.marketdata.dto.InvestmentOpinionDto;
-import com.teamfp.aistock.infra.marketdata.dto.MarketLiquidityDto;
-import com.teamfp.aistock.infra.marketdata.dto.OverseasIndexDto;
-import com.teamfp.aistock.infra.marketdata.dto.RankingItemDto;
 import com.teamfp.aistock.infra.marketdata.dto.ShareholderMeetingDto;
-import com.teamfp.aistock.infra.marketdata.dto.ThemeConstituentDto;
-import com.teamfp.aistock.infra.marketdata.dto.ThemeDto;
 import com.teamfp.aistock.infra.naver.NaverNewsApiClient;
 import com.teamfp.aistock.infra.naver.dto.NaverNewsSearchRequest;
 import com.teamfp.aistock.infra.naver.dto.NaverNewsSearchResponse;
@@ -78,7 +72,7 @@ import static org.mockito.Mockito.when;
  * 2026-07-31 코드리뷰 후속 수정 사항이 실제로 지켜지는지 검증한다: Gemini 실패 시 사용자
  * 메시지가 남지 않는지(orphan 메시지 방지), 대표 계좌를 AccountService를 통해서만
  * 조회하는지, 세션 소유권 검증, 세션 제목이 최초 1회만 채워지는지.
- * (분당3/일일10 자체 호출 제한은 2026-09-21 제거됐다가 fix/ai-daily-rate-limit에서 하루 3회로 재적용 — SendMessageDailyLimit 참고)
+ * (분당3/일일10 자체 호출 제한은 2026-09-21 제거됐다가 fix/ai-daily-rate-limit에서 하루 횟수 제한으로 재적용, 현재 하루 5회 — SendMessageDailyLimit 참고)
  */
 @ExtendWith(MockitoExtension.class)
 class AiPlanningServiceTest {
@@ -171,7 +165,7 @@ class AiPlanningServiceTest {
         // 캐시 미스를 기본값으로 둔다 — 캐시 재사용 자체를 검증하는 테스트에서만 별도로
         // getCachedResult()가 값을 반환하도록 덮어써서 쓴다.
         lenient().when(aiToolCacheService.getCachedResult(any(), any())).thenReturn(Optional.empty());
-        // 하루 3회 제한은 SendMessageDailyLimit에서만 검증한다 — 나머지 테스트는 한도 안이라고 본다.
+        // 하루 횟수 제한은 SendMessageDailyLimit에서만 검증한다 — 나머지 테스트는 한도 안이라고 본다.
         lenient().when(rateLimiterService.tryAcquirePlanning(anyLong())).thenReturn(true);
     }
 
@@ -1030,11 +1024,11 @@ class AiPlanningServiceTest {
     }
 
     @Nested
-    @DisplayName("메시지 전송 - 계정당 하루 3회 제한")
+    @DisplayName("메시지 전송 - 계정당 하루 5회 제한")
     class SendMessageDailyLimit {
 
         // RedisTemplate만 메모리 맵으로 흉내 내고 RedisRateLimiterService는 실제 코드를 써서,
-        // "3회 성공 → 4번째 거절"이 서비스와 제한기 사이에서 실제로 맞물려 동작하는지 검증한다.
+        // "5회 성공 → 6번째 거절"이 서비스와 제한기 사이에서 실제로 맞물려 동작하는지 검증한다.
         private final Map<String, Long> redisCounters = new HashMap<>();
 
         @BeforeEach
@@ -1053,7 +1047,7 @@ class AiPlanningServiceTest {
         }
 
         @Test
-        @DisplayName("하루 3회까지는 답변하고, 4번째 메시지는 Gemini를 부르지 않고 DAILY_LIMIT_EXCEEDED")
+        @DisplayName("하루 5회까지는 답변하고, 6번째 메시지는 Gemini를 부르지 않고 DAILY_LIMIT_EXCEEDED")
         void fourthMessage_dailyLimitExceeded() {
             stubHappyPathUpTo(new GeminiResponse("답변", 5));
 
@@ -1061,14 +1055,14 @@ class AiPlanningServiceTest {
                 aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("질문" + i));
             }
 
-            assertThatThrownBy(() -> aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("네 번째 질문")))
+            assertThatThrownBy(() -> aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("여섯 번째 질문")))
                     .isInstanceOf(CustomException.class)
-                    .hasMessage("오늘 재무설계 사용 횟수(3회)를 모두 사용했습니다. 내일 다시 이용해 주세요.")
+                    .hasMessage("오늘 재무설계 사용 횟수(5회)를 모두 사용했습니다. 내일 다시 이용해 주세요.")
                     .extracting(e -> ((CustomException) e).getErrorCode())
                     .isEqualTo(ErrorCode.DAILY_LIMIT_EXCEEDED);
 
-            verify(geminiApiClient, times(3)).generate(any());
-            assertThat(redisCounters).containsEntry("ai_planning:" + USER_ID + ":daily", 3L);
+            verify(geminiApiClient, times(RedisRateLimiterService.PLANNING_DAILY_LIMIT)).generate(any());
+            assertThat(redisCounters).containsEntry("ai_planning:" + USER_ID + ":daily", (long) RedisRateLimiterService.PLANNING_DAILY_LIMIT);
         }
 
         @Test
@@ -1087,7 +1081,7 @@ class AiPlanningServiceTest {
             for (int i = 0; i < RedisRateLimiterService.PLANNING_DAILY_LIMIT; i++) {
                 aiPlanningService.sendMessage(USER_ID, SESSION_ID, new AiChatRequest("질문" + i));
             }
-            assertThat(redisCounters).containsEntry("ai_planning:" + USER_ID + ":daily", 3L);
+            assertThat(redisCounters).containsEntry("ai_planning:" + USER_ID + ":daily", (long) RedisRateLimiterService.PLANNING_DAILY_LIMIT);
         }
     }
 

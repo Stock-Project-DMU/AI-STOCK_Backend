@@ -58,8 +58,7 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 public class GeminiApiClient {
 
-    // Gemini 429 응답에 대한 사용자 안내 문구 — ErrorCode.GEMINI_RATE_LIMIT_EXCEEDED의 기본 메시지는 시뮬레이션
-    // 자체 호출 제한용이라, Gemini 쪽 할당량 초과는 이 문구로 따로 안내한다.
+    // Gemini 429(할당량 초과)가 재시도 후에도 계속될 때의 사용자 안내 문구(ErrorCode.GEMINI_RATE_LIMIT_EXCEEDED와 함께 던진다).
     public static final String RATE_LIMIT_MESSAGE = "AI 요청이 일시적으로 많습니다. 잠시 후 다시 시도해 주세요.";
     // 동시 호출 허가를 기다리다 대기 상한(또는 요청 마감 시각)을 넘긴 경우의 안내 문구.
     public static final String CONCURRENCY_LIMIT_MESSAGE = "AI 요청이 많아 잠시 후 다시 시도해 주세요.";
