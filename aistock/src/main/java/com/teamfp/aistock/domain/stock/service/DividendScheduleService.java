@@ -81,7 +81,12 @@ public class DividendScheduleService {
                 updatedCount++;
             }
         }
-        log.info("배당 스케줄 {}건 적재 완료 (신규 {}건 / 업데이트 {}건)", fileSchedules.size(), createdCount, updatedCount);
+        // 5분마다 동기화(DividendEntitlementJob.syncSchedules)하므로 바뀐 회차가 있을 때만 info로 남긴다.
+        if (createdCount > 0 || updatedCount > 0) {
+            log.info("배당 스케줄 {}건 적재 완료 (신규 {}건 / 업데이트 {}건)", fileSchedules.size(), createdCount, updatedCount);
+        } else {
+            log.debug("배당 스케줄 {}건 확인 - 바뀐 회차 없음", fileSchedules.size());
+        }
         return new DividendScheduleReloadResponse(fileSchedules.size(), createdCount, updatedCount);
     }
 

@@ -1,5 +1,11 @@
 package com.teamfp.aistock.domain.stock.service;
 
+import static org.mockito.Mockito.times;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.time.LocalTime;
+
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
@@ -64,11 +70,26 @@ class DividendEntitlementJobTest {
     }
 
     @Test
-    void 매일_새벽_배당_스케줄을_다시_적재하고_실패해도_예외를_던지지_않는다() {
-        when(dividendScheduleService.reloadSchedules()).thenThrow(new IllegalStateException("파일 읽기 실패"));
+    void 배당_스케줄_동기화는_실패해도_예외를_던지지_않는다() {
+        // 06:00·09:00 앞뒤 5분이 아닐 때만 실제로 적재한다 — 그 시각에 테스트가 돌면 호출 자체를 건너뛴다.
+        boolean quiet = DividendEntitlementJob.isQuietWindow(LocalTime.now(ZoneId.of("Asia/Seoul")));
+        if (!quiet) {
+            when(dividendScheduleService.reloadSchedules()).thenThrow(new IllegalStateException("파일 읽기 실패"));
+        }
 
-        dividendEntitlementJob.reloadDailySchedules();
+        dividendEntitlementJob.syncSchedules();
 
-        verify(dividendScheduleService).reloadSchedules();
+        verify(dividendScheduleService, quiet ? never() : times(1)).reloadSchedules();
+    }
+
+    @Test
+    void 권리_부여와_지급_앞뒤_5분은_동기화를_건너뛴다() {
+        assertThat(DividendEntitlementJob.isQuietWindow(LocalTime.of(5, 55))).isTrue();
+        assertThat(DividendEntitlementJob.isQuietWindow(LocalTime.of(6, 4))).isTrue();
+        assertThat(DividendEntitlementJob.isQuietWindow(LocalTime.of(8, 58))).isTrue();
+        assertThat(DividendEntitlementJob.isQuietWindow(LocalTime.of(9, 4, 59))).isTrue();
+        assertThat(DividendEntitlementJob.isQuietWindow(LocalTime.of(5, 54))).isFalse();
+        assertThat(DividendEntitlementJob.isQuietWindow(LocalTime.of(6, 5))).isFalse();
+        assertThat(DividendEntitlementJob.isQuietWindow(LocalTime.of(23, 5))).isFalse();
     }
 }
