@@ -1,7 +1,10 @@
 package com.teamfp.aistock.global.redis;
 
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -145,23 +148,22 @@ class RedisMarketServicesTest {
     }
 
     @Test
-    @DisplayName("Gemini Rate Limiter - 분당/일일 한도 이내면 허용")
+    @DisplayName("시뮬레이터 Rate Limiter - 오늘 3회 미만이면 허용(분당 제한 없음)")
     void isAllowed_True() {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("gemini:rate:1:minute")).thenReturn("1");
         when(valueOperations.get("gemini:rate:1:daily")).thenReturn("2");
 
         boolean allowed = redisRateLimiterService.isAllowed(1L);
 
         assertThat(allowed).isTrue();
+        verify(valueOperations, never()).get("gemini:rate:1:minute");
     }
 
     @Test
-    @DisplayName("Gemini Rate Limiter - 분당 한도 초과 시 거절")
-    void isAllowed_False_MinuteExceeded() {
+    @DisplayName("시뮬레이터 Rate Limiter - 오늘 3회를 다 쓰면 거절")
+    void isAllowed_False_DailyExceeded() {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("gemini:rate:1:minute")).thenReturn("3");
-        when(valueOperations.get("gemini:rate:1:daily")).thenReturn("2");
+        when(valueOperations.get("gemini:rate:1:daily")).thenReturn("3");
 
         boolean allowed = redisRateLimiterService.isAllowed(1L);
 
@@ -169,26 +171,90 @@ class RedisMarketServicesTest {
     }
 
     @Test
-    @DisplayName("Gemini Rate Limiter - 최초 호출 시 카운터 증가 및 TTL 설정")
-    void increment_FirstCall_SetsTtl() {
+    @DisplayName("시뮬레이터 Rate Limiter - 오늘 첫 실행이면 다음 자정(KST)까지 TTL 설정")
+    void increment_FirstCall_SetsTtlUntilMidnight() {
+        // 2026-11-01 21:30 KST → 자정까지 2시간 30분
+        redisRateLimiterService.clock = Clock.fixed(Instant.parse("2026-11-01T12:30:00Z"), ZoneId.of("Asia/Seoul"));
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.increment("gemini:rate:1:minute")).thenReturn(1L);
         when(valueOperations.increment("gemini:rate:1:daily")).thenReturn(1L);
 
         redisRateLimiterService.increment(1L);
 
-        verify(redisTemplate).expire("gemini:rate:1:minute", Duration.ofSeconds(60));
-        verify(redisTemplate).expire("gemini:rate:1:daily", Duration.ofSeconds(86400));
+        verify(redisTemplate).expire("gemini:rate:1:daily", Duration.ofMinutes(150));
+        verify(valueOperations, never()).increment("gemini:rate:1:minute");
     }
 
     @Test
-    @DisplayName("Gemini Rate Limiter - 오늘 남은 횟수 계산")
+    @DisplayName("시뮬레이터 Rate Limiter - 두 번째 실행부터는 TTL을 다시 걸지 않는다")
+    void increment_SecondCall_KeepsTtl() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.increment("gemini:rate:1:daily")).thenReturn(2L);
+
+        redisRateLimiterService.increment(1L);
+
+        verify(redisTemplate, never()).expire(anyString(), any(Duration.class));
+    }
+
+    @Test
+    @DisplayName("시뮬레이터 Rate Limiter - 오늘 남은 횟수 계산")
     void getRemainingDaily_Success() {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("gemini:rate:1:daily")).thenReturn("7");
+        when(valueOperations.get("gemini:rate:1:daily")).thenReturn("1");
 
         int remaining = redisRateLimiterService.getRemainingDaily(1L);
 
-        assertThat(remaining).isEqualTo(3);
+        assertThat(remaining).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("재무설계 Rate Limiter - 오늘 5회째까지는 차감 성공, 첫 차감 때 자정까지 TTL 설정")
+    void tryAcquirePlanning_WithinLimit() {
+        redisRateLimiterService.clock = Clock.fixed(Instant.parse("2026-11-01T14:59:00Z"), ZoneId.of("Asia/Seoul"));
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.increment("ai_planning:1:daily")).thenReturn(1L, 2L, 3L, 4L, 5L);
+
+        assertThat(redisRateLimiterService.tryAcquirePlanning(1L)).isTrue();
+        assertThat(redisRateLimiterService.tryAcquirePlanning(1L)).isTrue();
+        assertThat(redisRateLimiterService.tryAcquirePlanning(1L)).isTrue();
+        assertThat(redisRateLimiterService.tryAcquirePlanning(1L)).isTrue();
+        assertThat(redisRateLimiterService.tryAcquirePlanning(1L)).isTrue();
+
+        verify(redisTemplate, times(1)).expire("ai_planning:1:daily", Duration.ofMinutes(1));
+        verify(valueOperations, never()).decrement(anyString());
+    }
+
+    @Test
+    @DisplayName("재무설계 Rate Limiter - 6번째는 거절하고 방금 올린 1을 되돌린다")
+    void tryAcquirePlanning_OverLimit_Rollback() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.increment("ai_planning:1:daily")).thenReturn(6L);
+        when(valueOperations.decrement("ai_planning:1:daily")).thenReturn(5L);
+
+        assertThat(redisRateLimiterService.tryAcquirePlanning(1L)).isFalse();
+
+        verify(valueOperations).decrement("ai_planning:1:daily");
+        verify(redisTemplate, never()).delete(anyString());
+    }
+
+    @Test
+    @DisplayName("재무설계 Rate Limiter - 시뮬레이터와 다른 키를 써서 서로 차감하지 않는다")
+    void tryAcquirePlanning_SeparateKeyFromSimulation() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.increment("ai_planning:1:daily")).thenReturn(2L);
+
+        redisRateLimiterService.tryAcquirePlanning(1L);
+
+        verify(valueOperations, never()).increment("gemini:rate:1:daily");
+    }
+
+    @Test
+    @DisplayName("재무설계 Rate Limiter - 되돌린 결과가 0 이하면 키를 지워 TTL 없는 카운터가 남지 않게 한다")
+    void releasePlanning_DeletesKeyAtZero() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.decrement("ai_planning:1:daily")).thenReturn(0L);
+
+        redisRateLimiterService.releasePlanning(1L);
+
+        verify(redisTemplate).delete("ai_planning:1:daily");
     }
 }

@@ -1,14 +1,20 @@
 package com.teamfp.aistock.infra.gemini;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
@@ -52,7 +58,25 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 public class GeminiApiClient {
 
+    // Gemini 429(할당량 초과)가 재시도 후에도 계속될 때의 사용자 안내 문구(ErrorCode.GEMINI_RATE_LIMIT_EXCEEDED와 함께 던진다).
+    public static final String RATE_LIMIT_MESSAGE = "AI 요청이 일시적으로 많습니다. 잠시 후 다시 시도해 주세요.";
+    // 동시 호출 허가를 기다리다 대기 상한(또는 요청 마감 시각)을 넘긴 경우의 안내 문구.
+    public static final String CONCURRENCY_LIMIT_MESSAGE = "AI 요청이 많아 잠시 후 다시 시도해 주세요.";
+
     private final RestClient restClient;
+
+    // Gemini 동시 호출 허가(app.gemini.semaphore.permits, 기본 10). 할당량은 프로젝트 단위라 재무설계·시뮬레이터·
+    // 뉴스·브리핑이 이 세마포어 하나를 함께 쓴다. 실측 평균 약 2초/건 기준 P=10 — 11/01 부하 테스트(재무설계 20 +
+    // 시뮬레이터 20 VU)에서 6이면 분당 약 180건에 묶여 대기 초과가 났고, 10이면 분당 약 400건을 Gemini 429 없이 처리했다. 공정 모드라 먼저 기다린 호출이
+    // 먼저 허가를 받는다 — 재무설계처럼 한 요청이 Gemini를 여러 번 부를 때 뒤로 계속 밀리지 않게 한다.
+    // HTTP 요청 1번마다 얻고 놓으며, 429 재시도 대기 중에는 놓는다(postWithRateLimitRetry()).
+    final Semaphore geminiPermits;
+
+    // 허가를 기다리는 최대 시간(20초). 단위 테스트에서 짧게 바꾸도록 final로 두지 않는다.
+    long permitWaitMillis = 20_000L;
+
+    // 429 재시도 대기 시간(지수 백오프: 1초 → 2초). 단위 테스트에서 대기 없이 돌리도록 final로 두지 않는다.
+    long[] rateLimitRetryDelaysMillis = {1000L, 2000L};
 
     @Value("${app.gemini.api-key}")
     private String apiKey;
@@ -67,8 +91,10 @@ public class GeminiApiClient {
     @Value("${app.gemini.answer-api-url}")
     private String answerApiUrl;
 
-    public GeminiApiClient(RestClient.Builder restClientBuilder) {
+    public GeminiApiClient(RestClient.Builder restClientBuilder,
+                           @Value("${app.gemini.semaphore.permits:10}") int semaphorePermits) {
         this.restClient = restClientBuilder.build();
+        this.geminiPermits = new Semaphore(semaphorePermits, true);
     }
 
     public GeminiResponse generate(GeminiRequest request) {
@@ -83,15 +109,93 @@ public class GeminiApiClient {
         }
 
         String apiUrl = request.model() == GeminiRequest.GeminiModel.ANSWER ? answerApiUrl : judgeApiUrl;
-        GeminiApiResponse response = ExternalApiInvoker.call(() -> restClient.post()
-                .uri(apiUrl + "?key={apiKey}", apiKey)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(requestBody)
-                .retrieve()
-                .body(GeminiApiResponse.class),
+        // 429(할당량 초과)는 postWithRateLimitRetry()가 재시도 후 GEMINI_RATE_LIMIT_EXCEEDED(CustomException)로
+        // 바꿔 던진다 — CustomException은 RestClientException이 아니라 ExternalApiInvoker를 그대로 통과하고,
+        // 그 밖의 RestClientException만 기존처럼 EXTERNAL_API_ERROR(502)로 변환된다.
+        GeminiApiResponse response = ExternalApiInvoker.call(
+                () -> postWithRateLimitRetry(apiUrl, requestBody, request.deadline()),
                 "Gemini API 호출 실패");
 
         return toGeminiResponse(response);
+    }
+
+    /**
+     * Gemini가 429(RESOURCE_EXHAUSTED — 분당 요청·토큰 할당량 초과)를 돌려주면 1초, 2초 간격으로 최대 2번
+     * 다시 보낸다. 분당 할당량은 몇 초 안에 풀리는 경우가 많아 짧은 재시도로 대부분 회복되고, 그래도 안 되면
+     * "외부 API 연동 에러"(502) 대신 "요청이 많으니 잠시 후 다시"(429)로 안내해 사용자가 원인을 알 수 있게 한다.
+     *
+     * HTTP 요청 1번마다 동시 호출 허가(geminiPermits)를 얻고, 응답을 받으면 바로 놓는다. 재시도 대기 동안에는
+     * 허가를 놓아 두었다가 다시 얻는다 — 쉬는 동안 허가를 쥐고 있으면 다른 요청이 그만큼 더 기다린다.
+     * 응답 파싱(toGeminiResponse)은 generate()에서 허가 바깥에서 한다.
+     */
+    private GeminiApiResponse postWithRateLimitRetry(String apiUrl, Map<String, Object> requestBody, Instant deadline) {
+        for (int attempt = 0; ; attempt++) {
+            acquirePermit(deadline);
+            try {
+                return restClient.post()
+                        .uri(apiUrl + "?key={apiKey}", apiKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(requestBody)
+                        .retrieve()
+                        .body(GeminiApiResponse.class);
+            } catch (RestClientResponseException e) {
+                if (!isRateLimited(e)) {
+                    throw e;
+                }
+                if (attempt >= rateLimitRetryDelaysMillis.length) {
+                    log.warn("Gemini API 할당량 초과(429)가 재시도 {}회 후에도 계속됨", rateLimitRetryDelaysMillis.length);
+                    throw new CustomException(ErrorCode.GEMINI_RATE_LIMIT_EXCEEDED, RATE_LIMIT_MESSAGE);
+                }
+                log.warn("Gemini API 할당량 초과(429), {}ms 후 재시도 {}/{}회",
+                        rateLimitRetryDelaysMillis[attempt], attempt + 1, rateLimitRetryDelaysMillis.length);
+            } finally {
+                geminiPermits.release();
+            }
+            sleepBeforeRetry(rateLimitRetryDelaysMillis[attempt]);
+        }
+    }
+
+    // 동시 호출 허가를 최대 permitWaitMillis(20초)까지 기다린다. 마감 시각이 있으면 그때까지만 기다리고, 이미
+    // 지났으면 기다리지 않고 바로 끝낸다 — 결과를 받을 쪽이 없는 호출로 허가와 할당량을 쓰지 않기 위함이다.
+    private void acquirePermit(Instant deadline) {
+        long waitMillis = permitWaitMillis;
+        if (deadline != null) {
+            long remainingMillis = Duration.between(Instant.now(), deadline).toMillis();
+            if (remainingMillis <= 0) {
+                log.warn("요청 마감 시각이 지나 Gemini 호출을 하지 않음 - deadline: {}", deadline);
+                throw new CustomException(ErrorCode.GEMINI_RATE_LIMIT_EXCEEDED, CONCURRENCY_LIMIT_MESSAGE);
+            }
+            waitMillis = Math.min(waitMillis, remainingMillis);
+        }
+        boolean acquired;
+        try {
+            acquired = geminiPermits.tryAcquire(waitMillis, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new CustomException(ErrorCode.GEMINI_RATE_LIMIT_EXCEEDED, CONCURRENCY_LIMIT_MESSAGE);
+        }
+        if (!acquired) {
+            log.warn("Gemini 동시 호출 허가를 {}ms 안에 받지 못함 - 대기 중 {}건", waitMillis, geminiPermits.getQueueLength());
+            throw new CustomException(ErrorCode.GEMINI_RATE_LIMIT_EXCEEDED, CONCURRENCY_LIMIT_MESSAGE);
+        }
+    }
+
+    // 상태 코드가 429이거나, 프록시 등을 거쳐 상태 코드가 바뀌었더라도 Gemini 에러 바디의 status가
+    // RESOURCE_EXHAUSTED면 할당량 초과로 본다.
+    private boolean isRateLimited(RestClientResponseException e) {
+        return e.getStatusCode().value() == HttpStatus.TOO_MANY_REQUESTS.value()
+                || e.getResponseBodyAsString().contains("RESOURCE_EXHAUSTED");
+    }
+
+    // 단위 테스트에서 대기 중 허가 수를 확인하도록 private으로 두지 않는다.
+    void sleepBeforeRetry(long delayMillis) {
+        try {
+            Thread.sleep(delayMillis);
+        } catch (InterruptedException e) {
+            // 요청 마감 시간(AiPlanningService) 초과 등으로 중단된 경우 — 더 기다리지 않고 바로 끝낸다.
+            Thread.currentThread().interrupt();
+            throw new CustomException(ErrorCode.GEMINI_RATE_LIMIT_EXCEEDED, RATE_LIMIT_MESSAGE);
+        }
     }
 
     private List<Map<String, Object>> buildContents(GeminiRequest request) {

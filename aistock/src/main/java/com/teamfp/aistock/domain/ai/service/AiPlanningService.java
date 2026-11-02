@@ -1,5 +1,6 @@
 package com.teamfp.aistock.domain.ai.service;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -38,6 +39,7 @@ import com.teamfp.aistock.domain.user.repository.UserRepository;
 import com.teamfp.aistock.global.exception.CustomException;
 import com.teamfp.aistock.global.exception.ErrorCode;
 import com.teamfp.aistock.global.redis.RedisAiToolCacheService;
+import com.teamfp.aistock.global.redis.RedisRateLimiterService;
 import com.teamfp.aistock.global.util.DateUtil;
 import com.teamfp.aistock.infra.dart.DartApiClient;
 import com.teamfp.aistock.infra.dart.dto.DartFinancialRequest;
@@ -126,6 +128,9 @@ public class AiPlanningService {
     // 2026-08-11 추가 — sendMessage()가 세션 첫 턴에 코드로 직접 붙이는 인사말. SYSTEM_PREAMBLE의
     // [첫 인사] 참고 — 모델은 이 인사를 스스로 넣지 않도록 지시돼 있다.
     private static final String FIRST_TURN_GREETING = "안녕하세요! AI 재무설계사 STOCK입니다.\n\n";
+    // 하루 메시지 수(RedisRateLimiterService.PLANNING_DAILY_LIMIT)를 다 쓴 경우의 안내 문구.
+    static final String DAILY_LIMIT_MESSAGE = "오늘 재무설계 사용 횟수(" + RedisRateLimiterService.PLANNING_DAILY_LIMIT
+            + "회)를 모두 사용했습니다. 내일 다시 이용해 주세요.";
 
     private static final String FINANCIALS_TOOL_NAME = "get_financial_statements";
     private static final String CAPITAL_CHANGE_TOOL_NAME = "get_capital_change_info";
@@ -205,6 +210,11 @@ public class AiPlanningService {
     private static final java.util.regex.Pattern FAKE_TOOL_CALL_NARRATION_PATTERN =
             java.util.regex.Pattern.compile("[a-zA-Z_][a-zA-Z0-9_]*\\([a-zA-Z_][a-zA-Z0-9_]*\\s*=");
     private static final int MAX_FAKE_TOOL_CALL_RETRIES = 2;
+
+    // 한 턴(Gemini 순차 호출 3~4회 + 도구 실행) 전체의 마감 시간. Gemini가 느려지면 1~2분까지 걸려 사용자가
+    // 멈춘 건지 알 수 없었으므로, 넘기면 AI_RESPONSE_TIMEOUT(504)으로 끝내고 다시 시도하게 안내한다.
+    // 단위 테스트에서 짧게 바꿔 검증할 수 있도록 static final로 두지 않는다.
+    private long responseTimeoutMillis = 45_000L;
 
     /**
      * "판단 로직"의 핵심 — 사용자 문장을 원문 그대로 검색어로 쓰지 않고, Gemini 스스로 이
@@ -1082,6 +1092,8 @@ public class AiPlanningService {
     // 평가 로직을 그대로 재사용한다(AccountService와 동일한 방식 — 도메인 경계 준수).
     private final HoldingValuationService holdingValuationService;
     private final RedisAiToolCacheService aiToolCacheService;
+    // 메시지 전송 하루 5회 제한(fix/ai-daily-rate-limit) — sendMessage() 참고.
+    private final RedisRateLimiterService rateLimiterService;
     private final GeminiApiClient geminiApiClient;
     private final DartApiClient dartApiClient;
     private final NaverNewsApiClient naverNewsApiClient;
@@ -1114,6 +1126,9 @@ public class AiPlanningService {
     // 실제로 동시에 실행한다 — AsyncConfig.aiToolTaskExecutor() 참고.
     @Qualifier("aiToolTaskExecutor")
     private final Executor aiToolTaskExecutor;
+    // sendMessage()가 한 턴 전체를 responseTimeoutMillis(45초) 마감으로 돌리는 풀 — AsyncConfig.aiPlanningTaskExecutor() 참고.
+    @Qualifier("aiPlanningTaskExecutor")
+    private final Executor aiPlanningTaskExecutor;
 
     // loadHistory()/saveTurn()의 @Transactional은 Spring AOP 프록시를 거쳐야만 실제로 적용된다.
     // sendMessage()가 같은 클래스 안에서 this.loadHistory(...)/this.saveTurn(...)을 그냥 호출하면
@@ -1175,27 +1190,77 @@ public class AiPlanningService {
      * "성공 이후"에 저장하는 이유는 saveTurn()의 주석 참고 — 실패 시 AI 응답 없는 메시지가 남는
      * 것을 막기 위함이다.
      *
-     * 분당3/일일10 자체 호출 제한(RedisRateLimiterService)은 2026-09-21 사용자 요청으로
-     * 제거했다 — "몇 번 대화하다 짤리면 안 된다"는 이유로, 이제는 Gemini API 자체 한도에만
-     * 걸린다.
+     * 2026-09-21에 제거했던 자체 호출 제한(분당3/일일10)을 fix/ai-daily-rate-limit(2026-11-01)에서 계정당
+     * 하루 횟수(메시지 전송 기준, PLANNING_DAILY_LIMIT — 처음 3회, 2026-11-02 5회로 상향)로 다시 적용한다. 진입 시점에 RedisRateLimiterService.tryAcquirePlanning()으로
+     * 차감하고, 세션 없음·Gemini 오류 등으로 답변을 저장하지 못하면 releasePlanning()으로 되돌려 실패한
+     * 메시지는 횟수에서 빼지 않는다.
+     *
+     * Gemini 판단·도구 실행·최종 답변(converseWithTools)은 aiPlanningTaskExecutor에서 돌리고 최대
+     * responseTimeoutMillis(45초)까지만 기다린다 — 넘기면 AI_RESPONSE_TIMEOUT(504)을 던지며, 이 경우
+     * saveTurn()까지 가지 않으므로 대화 기록도 남지 않는다(늦게 끝난 백그라운드 결과는 버려진다).
      */
     public AiChatResponse sendMessage(Long userId, Long sessionId, AiChatRequest request) {
-        List<HistoryTurn> history = self.loadHistory(userId, sessionId);
-
-        GeminiResponse geminiResponse = converseWithTools(userId, sessionId, request.content(), history);
-
-        // 2026-08-11 추가 — 예전엔 "세션 첫 턴이면 인사해라"를 프롬프트로만 요청했는데, 라이브
-        // 테스트에서 모델이 가끔 빠뜨리는 사례가 확인됐다(history가 비어 있는 게 명백한데도
-        // 인사 없이 바로 본론으로 들어감). 프롬프트로 부탁하는 대신, history가 비어 있으면(=이
-        // 세션의 진짜 첫 응답) 코드가 인사를 무조건 앞에 붙인다 — SYSTEM_PREAMBLE의 [첫 인사]가
-        // 모델에게 "너는 인사를 직접 넣지 마라"고 지시해두었으므로 중복될 일이 없다.
-        if (history.isEmpty()) {
-            geminiResponse = new GeminiResponse(
-                    FIRST_TURN_GREETING + geminiResponse.content(),
-                    geminiResponse.tokenCount(), geminiResponse.functionCalls());
+        if (!rateLimiterService.tryAcquirePlanning(userId)) {
+            throw new CustomException(ErrorCode.DAILY_LIMIT_EXCEEDED, DAILY_LIMIT_MESSAGE);
         }
 
-        return self.saveTurn(userId, sessionId, request.content(), geminiResponse);
+        try {
+            List<HistoryTurn> history = self.loadHistory(userId, sessionId);
+
+            GeminiResponse geminiResponse = converseWithinDeadline(userId, sessionId, request.content(), history);
+
+            // 2026-08-11 추가 — 예전엔 "세션 첫 턴이면 인사해라"를 프롬프트로만 요청했는데, 라이브
+            // 테스트에서 모델이 가끔 빠뜨리는 사례가 확인됐다(history가 비어 있는 게 명백한데도
+            // 인사 없이 바로 본론으로 들어감). 프롬프트로 부탁하는 대신, history가 비어 있으면(=이
+            // 세션의 진짜 첫 응답) 코드가 인사를 무조건 앞에 붙인다 — SYSTEM_PREAMBLE의 [첫 인사]가
+            // 모델에게 "너는 인사를 직접 넣지 마라"고 지시해두었으므로 중복될 일이 없다.
+            if (history.isEmpty()) {
+                geminiResponse = new GeminiResponse(
+                        FIRST_TURN_GREETING + geminiResponse.content(),
+                        geminiResponse.tokenCount(), geminiResponse.functionCalls());
+            }
+
+            return self.saveTurn(userId, sessionId, request.content(), geminiResponse);
+        } catch (RuntimeException e) {
+            rateLimiterService.releasePlanning(userId);
+            throw e;
+        }
+    }
+
+    private GeminiResponse converseWithinDeadline(
+            Long userId, Long sessionId, String userContent, List<HistoryTurn> history) {
+        // 마감 시각을 Gemini 호출까지 넘겨, 이 시각이 지나면(=이미 504를 돌려준 뒤) 뒤에서 도는 작업이 Gemini를
+        // 더 부르지 않게 한다 — GeminiApiClient가 동시 호출 허가를 기다릴 때도 이 시각까지만 기다린다.
+        Instant deadline = Instant.now().plusMillis(responseTimeoutMillis);
+        CompletableFuture<GeminiResponse> future;
+        try {
+            future = CompletableFuture.supplyAsync(
+                    () -> converseWithTools(userId, sessionId, userContent, history, deadline), aiPlanningTaskExecutor);
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            log.warn("재무설계 스레드풀 포화로 요청 거부 - userId: {}, sessionId: {}", userId, sessionId);
+            throw new CustomException(ErrorCode.GEMINI_RATE_LIMIT_EXCEEDED, GeminiApiClient.RATE_LIMIT_MESSAGE);
+        }
+
+        try {
+            return future.get(responseTimeoutMillis, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            // CompletableFuture.cancel()은 실행 중인 스레드를 멈추지 못한다 — 백그라운드 작업은 끝까지 돌지만
+            // 결과를 기다리는 쪽이 없으므로 저장되지 않고 버려진다.
+            future.cancel(true);
+            log.warn("재무설계 응답 생성 {}ms 초과 - userId: {}, sessionId: {}", responseTimeoutMillis, userId, sessionId);
+            throw new CustomException(ErrorCode.AI_RESPONSE_TIMEOUT);
+        } catch (java.util.concurrent.ExecutionException e) {
+            // converseWithTools()가 던진 예외(GEMINI_RATE_LIMIT_EXCEEDED, EXTERNAL_API_ERROR 등)를 그대로 다시 던져
+            // GlobalExceptionHandler가 원래 에러 코드로 응답하게 한다.
+            if (e.getCause() instanceof RuntimeException cause) {
+                throw cause;
+            }
+            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, e.getCause());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            future.cancel(true);
+            throw new CustomException(ErrorCode.AI_RESPONSE_TIMEOUT);
+        }
     }
 
     /**
@@ -1213,7 +1278,8 @@ public class AiPlanningService {
      * 응답을 강제한다. SYSTEM_PREAMBLE의 "답변 형식 원칙"이 모든 라운드에 동일하게 적용되므로
      * 별도의 "가공 전용 프롬프트"를 따로 두지 않는다.</p>
      */
-    private GeminiResponse converseWithTools(Long userId, Long sessionId, String userContent, List<HistoryTurn> history) {
+    private GeminiResponse converseWithTools(Long userId, Long sessionId, String userContent, List<HistoryTurn> history,
+                                             Instant deadline) {
         String prompt = buildJudgePrompt(userId, userContent);
         List<GeminiRequest.ToolDeclaration> tools = List.of(
                 NEWS_SEARCH_TOOL, FINANCIALS_TOOL, CAPITAL_CHANGE_TOOL, OWNERSHIP_TOOL, DISCLOSURE_TOOL,
@@ -1241,7 +1307,7 @@ public class AiPlanningService {
             // 쓴다. 판단 라운드에서 도구 없이 바로 텍스트로 답하는 경우(잡담·되묻기 등)는 그
             // 자체가 "단순 작업"이라 JUDGE 모델의 답을 최종 답변으로 그대로 쓴다.
             GeminiRequest.GeminiModel model = isFinalRound ? GeminiRequest.GeminiModel.ANSWER : GeminiRequest.GeminiModel.JUDGE;
-            GeminiRequest request = new GeminiRequest(SYSTEM_PREAMBLE, prompt, history, toolsForThisRound, exchangeRounds, model);
+            GeminiRequest request = new GeminiRequest(SYSTEM_PREAMBLE, prompt, history, toolsForThisRound, exchangeRounds, model, deadline);
             GeminiResponse response = geminiApiClient.generate(request);
 
             int fakeCallRetries = 0;

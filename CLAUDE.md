@@ -235,8 +235,8 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
 | `auth:admin_code_fail:{initial \| user:{userId}}` | 10분 | 관리자 인증 코드 틀린 횟수 (3회 잠금 — 최초 관리자 생성은 `initial` 하나로 합쳐서, 관리자 계정 폐기는 계정별. feat/admin-improvements, 2026-10-06) |
 | `stock:price:{stockCode}` | 5초 | 현재가 캐시 |
 | `pending:orders:{stockCode}` | 없음 | 지정가 미체결 주문 |
-| `gemini:rate:{userId}:minute` | 1분 | Gemini Rate Limiter (분당 3회) — SimulationService만 사용, AI 재무설계사는 2026-09-21부터 미적용 |
-| `gemini:rate:{userId}:daily` | 1일 | Gemini Rate Limiter (일일 10회) — SimulationService만 사용, AI 재무설계사는 2026-09-21부터 미적용 |
+| `gemini:rate:{userId}:daily` | 다음 자정(KST)까지 | 시뮬레이터 하루 사용 횟수 (하루 3회, `SimulationService`) — fix/ai-daily-rate-limit에서 분당 키(`gemini:rate:{userId}:minute`) 제거 |
+| `ai_planning:{userId}:daily` | 다음 자정(KST)까지 | AI 재무설계 하루 메시지 수 (하루 5회, `AiPlanningService.sendMessage()`) — fix/ai-daily-rate-limit 추가(3회), 2026-11-02 5회로 상향 |
 | `simulation:pending:{userId}:{pendingSimulationId}` | 30분 | 목표 도달 시뮬레이션 실행 결과 임시 보관 — 저장 버튼을 눌러야 DB(simulations)에 기록 (`RedisPendingSimulationService`, 2026-10-01) |
 | `admin:online:users` | 없음 (이벤트 기반) | 관리자 대시보드 — 온라인 사용자 집합 (WebSocket CONNECT/DISCONNECT 시 갱신) |
 | `ai:tool:{sessionId}:{도구이름}?{인자}` | 30분 | AI 상담 세션 내 DART/네이버 도구 실행 결과 캐시 (같은 조건 재조회 시 재사용) |
@@ -288,10 +288,10 @@ PATCH  /api/admin/inquiries/{inquiryId}/answer
   종목별 예상체결가는 빈 값). 차트는 실제 과거 봉 그대로에 오늘 봉(생성기의 `tradingDate`·`openPrice`·`highPrice`·`lowPrice`)을 붙인다.
 - **`MARKET_DATA_UNAVAILABLE`(503)**: 외부 시세 호출은 없어졌지만 `AiPlanningService`·`SimulationService`의 장애 처리 분기는
   그대로 둔다(에러코드 유지).
-- **Gemini 호출 전** `RedisRateLimiterService` 통과 필요 — 단, **AI 재무설계사(`AiPlanningService`)는
-  2026-09-21 사용자 요청으로 이 제한을 제거함**("몇 번 대화하다 짤리면 안 된다"는 이유, Gemini
-  자체 API 한도에만 걸림). `SimulationService`(목표 도달 시뮬레이션)는 그대로 분당3/일일10
-  제한을 적용받는다.
+- **Gemini 호출 전** `RedisRateLimiterService` 통과 필요 — 시뮬레이터(`SimulationService`)와 AI 재무설계사
+  (`AiPlanningService.sendMessage()`) 모두 계정당 하루 제한 — **시뮬레이터 3회, 재무설계 5회**(한국 시간 자정 초기화, 초과 시 `DAILY_LIMIT_EXCEEDED` 429).
+  재무설계 제한은 2026-09-21에 제거했다가 fix/ai-daily-rate-limit(2026-11-01)에서 하루 횟수만 다시 넣었다(분당 제한은 두 기능 모두 없음). 재무설계 한도는 2026-11-02에 3회 → 5회로 올렸다.
+  재무설계는 답변 저장에 실패한 메시지를 횟수에서 되돌린다.
 - **온라인 추적**: `StompAuthInterceptor`의 CONNECT/DISCONNECT 시점에 `RedisOnlineStatusService`로
   `admin:online:users` 갱신. 클라이언트가 비정상 종료해 DISCONNECT 프레임 없이 끊기는 경우를
   대비해 `SessionDisconnectEvent` 리스너로 보완 처리한다. 서버 자체가 비정상 종료(크래시)된 경우

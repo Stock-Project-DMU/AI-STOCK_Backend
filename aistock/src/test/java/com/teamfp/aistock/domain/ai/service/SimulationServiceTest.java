@@ -219,13 +219,14 @@ class SimulationServiceTest {
         }
 
         @Test
-        @DisplayName("호출 한도 초과면 Gemini를 부르지 않고 GEMINI_RATE_LIMIT_EXCEEDED")
+        @DisplayName("하루 3회를 다 썼으면 Gemini를 부르지 않고 DAILY_LIMIT_EXCEEDED(시뮬레이터 전용 문구)")
         void rateLimited() {
             when(rateLimiterService.isAllowed(USER_ID)).thenReturn(false);
 
             assertThatThrownBy(() -> simulationService.runSimulation(USER_ID, new SimulationRequest("1억", 0)))
+                    .hasMessage("오늘 시뮬레이터 사용 횟수(3회)를 모두 사용했습니다. 내일 다시 이용해 주세요.")
                     .extracting(e -> ((CustomException) e).getErrorCode())
-                    .isEqualTo(ErrorCode.GEMINI_RATE_LIMIT_EXCEEDED);
+                    .isEqualTo(ErrorCode.DAILY_LIMIT_EXCEEDED);
             verify(geminiApiClient, never()).generate(any());
         }
 

@@ -60,7 +60,7 @@ public class AsyncConfig {
     // 예상 못한 병목이 생길 수 있어 전용 풀을 둔다. 한 라운드에서 한 사용자가 동시에 요청할 수
     // 있는 도구는 최대 5개(NEWS_SEARCH/FINANCIALS/CAPITAL_CHANGE/OWNERSHIP/DISCLOSURE)지만, 이
     // 풀은 모든 사용자의 요청이 공유하는 전역 빈이므로 "동시 접속 사용자 여러 명 × 최대 5개"까지
-    // 감당할 수 있게 여유를 둔다(Gemini 분당3/일일10 요청 한도가 자연스러운 상한 역할도 한다).
+    // 감당할 수 있게 여유를 둔다(계정당 하루 사용 횟수 제한과 GeminiApiClient의 동시 호출 세마포어가 자연스러운 상한 역할도 한다).
     @Bean
     public Executor aiToolTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
@@ -68,6 +68,25 @@ public class AsyncConfig {
         executor.setMaxPoolSize(20);
         executor.setQueueCapacity(200);
         executor.setThreadNamePrefix("ai-tool-executor-");
+        executor.initialize();
+        return executor;
+    }
+
+    // AiPlanningService.sendMessage()가 한 턴 전체(Gemini 판단·도구 실행·최종 답변)를 이 풀에서 돌리고 요청
+    // 스레드는 45초까지만 기다린다(AI_RESPONSE_TIMEOUT). 이 작업은 안에서 aiToolTaskExecutor의 도구 작업을
+    // 기다리므로 같은 풀을 쓰면 서로 자리를 차지해 멈출 수 있어 따로 둔다. 마감 시간을 넘긴 작업은 결과만
+    // 버려지고 끝까지 실행되므로, 큐를 두되 넘치면 바로 거절(RejectedExecutionException)되게 한다.
+    // ThreadPoolTaskExecutor는 큐가 꽉 차기 전까지 코어 수 이상으로 스레드를 늘리지 않는다 — 코어를 10으로 두었을 때
+    // 40명 동시 부하에서 처리량이 초당 약 2.3건에 묶여 p95가 20초까지 늘었다(2026-10-30 부하 테스트). 요청 스레드는
+    // 가상 스레드라 원래 이런 상한이 없었으므로, 동시 50건까지는 바로 실행하고 쉬는 스레드는 정리되게 한다.
+    @Bean
+    public Executor aiPlanningTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(50);
+        executor.setMaxPoolSize(50);
+        executor.setQueueCapacity(100);
+        executor.setAllowCoreThreadTimeOut(true);
+        executor.setThreadNamePrefix("ai-planning-executor-");
         executor.initialize();
         return executor;
     }
