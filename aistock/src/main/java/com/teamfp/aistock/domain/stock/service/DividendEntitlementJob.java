@@ -3,6 +3,7 @@ package com.teamfp.aistock.domain.stock.service;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.util.List;
 
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -34,6 +35,9 @@ public class DividendEntitlementJob {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final LocalTime MARKET_OPEN_TIME = LocalTime.of(9, 0);
+    static final long SYNC_INTERVAL_MILLIS = 300_000L;
+    static final long QUIET_MINUTES = 5;
+    private static final List<LocalTime> QUIET_JOB_TIMES = List.of(LocalTime.of(6, 0), LocalTime.of(9, 0));
 
     private final DividendScheduleRepository dividendScheduleRepository;
     private final DividendScheduleService dividendScheduleService;
@@ -54,16 +58,31 @@ public class DividendEntitlementJob {
     }
 
     /**
-     * 매일 05:50 — 생성기가 전날 밤(23:00 묶음) 다시 받은 dividends.json을 06:00 권리 부여 전에 DB에 반영한다
-     * (fix/site-polish). 예전에는 서버 기동 때와 관리자 재적재 API로만 반영돼, 새 공시(배당금·지급일)가 늦게 들어왔다.
+     * 5분마다 생성기의 dividends.json(배포 서버는 생성기 GET /dividends)을 다시 읽어 바뀐 회차만 DB에 반영한다
+     * (fix/dividend-sync, 2026-11-03). 예전에는 매일 05:50 한 번만 반영해 밤 23:00에 새로 받은 공시가 다음 날 새벽까지
+     * 화면에 보이지 않았다. UPSERT라 몇 번 돌아도 바뀐 값이 없으면 DB를 건드리지 않는다.
+     * 06:00 권리 부여·09:00 지급 앞뒤 5분은 그 작업과 겹치지 않게 건너뛴다.
      */
-    @Scheduled(cron = "0 50 5 * * *", zone = "Asia/Seoul")
-    public void reloadDailySchedules() {
+    @Scheduled(fixedDelay = SYNC_INTERVAL_MILLIS, initialDelay = SYNC_INTERVAL_MILLIS)
+    public void syncSchedules() {
+        if (isQuietWindow(LocalTime.now(KST))) {
+            return;
+        }
         try {
             dividendScheduleService.reloadSchedules();
         } catch (RuntimeException e) {
-            log.error("[DividendEntitlementJob] 매일 배당 스케줄 적재 실패", e);
+            log.error("[DividendEntitlementJob] 배당 스케줄 동기화 실패", e);
         }
+    }
+
+    /** 06:00(권리 부여)·09:00(지급) 앞뒤 {@value #QUIET_MINUTES}분이면 true. */
+    static boolean isQuietWindow(LocalTime now) {
+        for (LocalTime jobTime : QUIET_JOB_TIMES) {
+            if (!now.isBefore(jobTime.minusMinutes(QUIET_MINUTES)) && now.isBefore(jobTime.plusMinutes(QUIET_MINUTES))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Scheduled(cron = "0 0 6 * * *", zone = "Asia/Seoul")

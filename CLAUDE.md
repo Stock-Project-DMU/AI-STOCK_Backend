@@ -68,7 +68,9 @@ local-market-data-generator가 LS증권에서 받아 만드는 `market_data.json
   투자자 매매·테마·신용·공매도·순위 등 부가 데이터도 LS TR로 실제 값을 받는다(장중 1~10분, 장 마감 후 일괄 — generator의
   `market_collectors.py`). 장 마감 후(15:40)에는 `history_collector.py`(과거 시세)·`opinion_collector.py`(투자의견)를 자동으로
   다시 돌린다. `MARKET_SOURCE=simulated`면 예전처럼 LS 없이 정규장 동안 가격을 움직이는 시뮬레이션이다(오프라인 개발용).
-- `python dividend_collector.py`(배당 일정)는 LS·DART 키로 받는 독립 스크립트이고 결과는 관리자 API로 DB에 적재한다.
+- 배당 일정(`dividends.json`)은 생성기가 평일 밤 23:00에 LS·DART로 다시 받고(`dividend_collector.py`), 백엔드가 5분마다 읽어 바뀐 회차를
+  바로 DB에 반영한다(`DividendEntitlementJob.syncSchedules()`, 06:00·09:00 앞뒤 5분 제외 — fix/dividend-sync). 배포 URL 모드에서는
+  같은 생성기 HTTP 서버의 `/dividends`에서 받는다. 관리자 재적재 API(`POST /api/admin/dividend/reload`)로 즉시 반영할 수도 있다.
   `price_history.json`이 없으면 차트·시뮬레이션은 종목별 추세가 있는 합성 시세를 쓴다.
 - generator가 없거나 경로가 틀려도 서버는 기동된다 — 홈 종목 목록이 비어 있으면 경로부터 확인한다.
 

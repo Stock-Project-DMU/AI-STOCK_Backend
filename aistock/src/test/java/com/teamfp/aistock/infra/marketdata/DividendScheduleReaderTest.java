@@ -64,4 +64,38 @@ class DividendScheduleReaderTest {
         assertThat(new DividendScheduleReader(tempDir.toString()).readDividendSchedules()).isEmpty();
         assertThat(new DividendScheduleReader("").readDividendSchedules()).isEmpty();
     }
+
+    @Test
+    void dividendsUrl_isDerivedFromMarketDataUrl() {
+        assertThat(DividendScheduleReader.dividendsUrl("http://gen:8081/market-data")).isEqualTo("http://gen:8081/dividends");
+        assertThat(DividendScheduleReader.dividendsUrl("http://gen:8081/")).isEqualTo("http://gen:8081/dividends");
+    }
+
+    @Test
+    void unreachableUrl_returnsEmptyList() {
+        assertThat(new DividendScheduleReader(tempDir.toString(), "http://127.0.0.1:1/market-data").readDividendSchedules()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("market-data.url이 있으면 같은 생성기 HTTP 서버의 /dividends에서 배당 회차를 읽는다")
+    void readsDividendSchedulesFromGeneratorUrl() throws IOException {
+        com.sun.net.httpserver.HttpServer server = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/dividends", exchange -> {
+            byte[] body = SAMPLE_JSON.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        try {
+            String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/market-data";
+            List<DividendScheduleDto> schedules = new DividendScheduleReader("", url).readDividendSchedules();
+
+            assertThat(schedules).hasSize(3);
+            assertThat(schedules.get(1).dpsCash()).isEqualTo(374);
+        } finally {
+            server.stop(0);
+        }
+    }
 }
