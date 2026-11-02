@@ -10,6 +10,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -46,6 +47,11 @@ import com.teamfp.aistock.global.exception.ErrorCode;
  * 표준적인 대안이다).
  */
 class DartApiClientTest {
+
+    // DartApiClient가 날짜를 한국 시간으로 계산하므로 테스트도 같은 기준을 쓴다 — CI(UTC)가 한국 시간 00~09시에 돌면
+    // LocalDate.now()가 하루 전 날짜가 돼 조회 기간(bgn_de·end_de)이 어긋났다(fix/dividend-sync, 2026-11-03).
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
 
     private static final String API_URL = "http://test-dart/fnlttSinglAcntAll.json";
     private static final String CORP_CODE_URL = "http://test-dart/corpCode.xml";
@@ -367,7 +373,7 @@ class DartApiClientTest {
         @Test
         @DisplayName("분기 실적은 그 분기 3개월 값과 전년 같은 분기(frmtrm_q_amount)를 함께 돌려준다")
         void recentEarnings_includesSameQuarterLastYear() {
-            DartApiClient.ReportPeriod expected = dartApiClient.mostRecentLikelyAvailableQuarter(LocalDate.now());
+            DartApiClient.ReportPeriod expected = dartApiClient.mostRecentLikelyAvailableQuarter(LocalDate.now(KST));
             // 삼성전자 2026 반기보고서 실응답 축약.
             String json = """
                     {"status":"000","message":"정상","list":[
@@ -454,7 +460,7 @@ class DartApiClientTest {
         @Test
         @DisplayName("줄 수 제한 없이 받아 배당 지표만 남기고, 주당 현금배당금부터 정렬한다")
         void success_keepsDividendIndicatorsInOrder() {
-            int lastYear = LocalDate.now().getYear() - 1;
+            int lastYear = LocalDate.now(KST).getYear() - 1;
             mockServer.expect(requestTo(Matchers.startsWith(DIVIDEND_URL)))
                     .andExpect(queryParam("bsns_year", String.valueOf(lastYear)))
                     .andExpect(queryParam("reprt_code", "11011"))
@@ -480,7 +486,7 @@ class DartApiClientTest {
         @Test
         @DisplayName("작년 사업보고서가 아직 없으면 재작년 사업보고서로 대체한다")
         void fallsBackToTwoYearsAgo_whenLastYearIsMissing() {
-            int lastYear = LocalDate.now().getYear() - 1;
+            int lastYear = LocalDate.now(KST).getYear() - 1;
             mockServer.expect(requestTo(Matchers.startsWith(DIVIDEND_URL)))
                     .andExpect(queryParam("bsns_year", String.valueOf(lastYear)))
                     .andRespond(withSuccess("""
@@ -563,7 +569,7 @@ class DartApiClientTest {
         @DisplayName("날짜 기준으로 고른 분기 보고서에 데이터가 있으면 그것만 조회하고 끝난다")
         void success_usesLikelyQuarterOnFirstTry() {
             DartApiClient.ReportPeriod expected =
-                    dartApiClient.mostRecentLikelyAvailableQuarter(LocalDate.now());
+                    dartApiClient.mostRecentLikelyAvailableQuarter(LocalDate.now(KST));
 
             mockServer.expect(requestTo(Matchers.startsWith(API_URL)))
                     .andExpect(queryParam("bsns_year", String.valueOf(expected.year())))
@@ -582,12 +588,12 @@ class DartApiClientTest {
         void fallsBackToLastYearAnnual_whenLikelyQuarterHasNoData() {
             // 실제 운영 코드(getRecentQuarterlyFinancials)는 날짜로 고른 분기부터 시작해
             // 3분기→반기→1분기 순서(QUARTERLY_REPORT_CODES_NEWEST_FIRST)를 끝까지 마저 시도한 뒤에야
-            // 작년 연간으로 대체한다. 테스트 실행 시점(LocalDate.now())에 따라 시작 분기가
+            // 작년 연간으로 대체한다. 테스트 실행 시점(LocalDate.now(KST))에 따라 시작 분기가
             // 반기·1분기 등으로 달라지므로, 시작 분기부터 1분기까지 남은 모든 분기를 동적으로
             // mock해야 실행 날짜와 무관하게 항상 통과한다.
             List<String> quarterlyReportCodesNewestFirst = List.of("11014", "11012", "11013");
             DartApiClient.ReportPeriod expected =
-                    dartApiClient.mostRecentLikelyAvailableQuarter(LocalDate.now());
+                    dartApiClient.mostRecentLikelyAvailableQuarter(LocalDate.now(KST));
             String emptyJson = """
                     {"status":"013","message":"조회된 데이타가 없습니다."}""";
 
@@ -607,7 +613,7 @@ class DartApiClientTest {
             }
 
             // 작년 연간(11011) 사업보고서 대체 - CFS 성공
-            int lastYear = LocalDate.now().getYear() - 1;
+            int lastYear = LocalDate.now(KST).getYear() - 1;
             mockServer.expect(requestTo(Matchers.startsWith(API_URL)))
                     .andExpect(queryParam("bsns_year", String.valueOf(lastYear)))
                     .andExpect(queryParam("reprt_code", "11011"))
@@ -630,7 +636,7 @@ class DartApiClientTest {
         @Test
         @DisplayName("유상증자를 요청하면 piicDecsn.json 엔드포인트로 최근 2년 범위를 조회한다")
         void success_paidIncrease_callsCorrectEndpointWithLookbackRange() {
-            LocalDate today = LocalDate.now();
+            LocalDate today = LocalDate.now(KST);
             mockServer.expect(requestTo(Matchers.startsWith("http://test-dart/piicDecsn.json")))
                     .andExpect(queryParam("corp_code", CORP_CODE))
                     .andExpect(queryParam("bgn_de", today.minusYears(2).toString().replace("-", "")))
@@ -698,7 +704,7 @@ class DartApiClientTest {
         @Test
         @DisplayName("현황(hyslrSttus.json)에 실질 데이터가 있으면 그대로 반환하고 연간으로 대체하지 않는다")
         void success_status_usesQuarterlyWhenHasRealData() {
-            DartApiClient.ReportPeriod expected = dartApiClient.mostRecentLikelyAvailableQuarter(LocalDate.now());
+            DartApiClient.ReportPeriod expected = dartApiClient.mostRecentLikelyAvailableQuarter(LocalDate.now(KST));
             mockServer.expect(requestTo(Matchers.startsWith("http://test-dart/hyslrSttus.json")))
                     .andExpect(queryParam("bsns_year", String.valueOf(expected.year())))
                     .andExpect(queryParam("reprt_code", expected.reportCode()))
@@ -717,7 +723,7 @@ class DartApiClientTest {
         @Test
         @DisplayName("변동(hyslrChgSttus.json)이 분기 기준으로 빈 값뿐이면 작년 연간 사업보고서로 대체한다")
         void success_change_fallsBackToAnnual_whenQuarterlyIsBlank() {
-            DartApiClient.ReportPeriod expected = dartApiClient.mostRecentLikelyAvailableQuarter(LocalDate.now());
+            DartApiClient.ReportPeriod expected = dartApiClient.mostRecentLikelyAvailableQuarter(LocalDate.now(KST));
             // 행은 오지만 식별용 필드(boilerplate)만 채워진 "실질 데이터 없음" 응답
             mockServer.expect(requestTo(Matchers.startsWith("http://test-dart/hyslrChgSttus.json")))
                     .andExpect(queryParam("bsns_year", String.valueOf(expected.year())))
@@ -727,7 +733,7 @@ class DartApiClientTest {
                               {"rcept_no":"20260101000001","corp_code":"%s","corp_name":"삼성전자","stlm_dt":"2026-06-30"}
                             ]}""".formatted(CORP_CODE), MediaType.APPLICATION_JSON));
 
-            int lastYear = LocalDate.now().getYear() - 1;
+            int lastYear = LocalDate.now(KST).getYear() - 1;
             mockServer.expect(requestTo(Matchers.startsWith("http://test-dart/hyslrChgSttus.json")))
                     .andExpect(queryParam("bsns_year", String.valueOf(lastYear)))
                     .andExpect(queryParam("reprt_code", "11011"))
@@ -760,14 +766,14 @@ class DartApiClientTest {
         @Test
         @DisplayName("YEAR_REPORT 방식 항목(배당사항)은 분기→연간 폴백 로직을 그대로 탄다")
         void yearReportType_fallsBackToAnnualWhenQuarterlyBlank() {
-            DartApiClient.ReportPeriod expected = dartApiClient.mostRecentLikelyAvailableQuarter(LocalDate.now());
+            DartApiClient.ReportPeriod expected = dartApiClient.mostRecentLikelyAvailableQuarter(LocalDate.now(KST));
             mockServer.expect(requestTo(Matchers.startsWith("http://test-dart/alotMatter.json")))
                     .andExpect(queryParam("bsns_year", String.valueOf(expected.year())))
                     .andExpect(queryParam("reprt_code", expected.reportCode()))
                     .andRespond(withSuccess("""
                             {"status":"013","message":"조회된 데이타가 없습니다."}""", MediaType.APPLICATION_JSON));
 
-            int lastYear = LocalDate.now().getYear() - 1;
+            int lastYear = LocalDate.now(KST).getYear() - 1;
             mockServer.expect(requestTo(Matchers.startsWith("http://test-dart/alotMatter.json")))
                     .andExpect(queryParam("bsns_year", String.valueOf(lastYear)))
                     .andExpect(queryParam("reprt_code", "11011"))
@@ -785,7 +791,7 @@ class DartApiClientTest {
         @Test
         @DisplayName("DATE_RANGE 방식 항목(소송제기)은 최근 2년 범위로 조회한다")
         void dateRangeType_success() {
-            LocalDate today = LocalDate.now();
+            LocalDate today = LocalDate.now(KST);
             mockServer.expect(requestTo(Matchers.startsWith("http://test-dart/lwstLg.json")))
                     .andExpect(queryParam("corp_code", CORP_CODE))
                     .andExpect(queryParam("bgn_de", today.minusYears(2).toString().replace("-", "")))
@@ -806,7 +812,7 @@ class DartApiClientTest {
         void financialIndex_sendsIdxClCodeAndMergesTwoCategories() {
             // 실제 라이브 테스트(2026-08-05)로 확인된 사실 — 이 엔드포인트는 idx_cl_code 없이
             // 부르면 DART가 status "100"(필수값 누락)으로 거부하고, 한 번에 한 카테고리만 준다.
-            DartApiClient.ReportPeriod expected = dartApiClient.mostRecentLikelyAvailableQuarter(LocalDate.now());
+            DartApiClient.ReportPeriod expected = dartApiClient.mostRecentLikelyAvailableQuarter(LocalDate.now(KST));
             mockServer.expect(requestTo(Matchers.startsWith("http://test-dart/fnlttSinglIndx.json")))
                     .andExpect(queryParam("idx_cl_code", "M210000"))
                     .andExpect(queryParam("bsns_year", String.valueOf(expected.year())))
